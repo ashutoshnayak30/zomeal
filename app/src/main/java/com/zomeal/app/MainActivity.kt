@@ -5,6 +5,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -26,8 +27,11 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
@@ -49,7 +53,207 @@ private val Border = Color(0xFFDCE8E0)
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { ZomealTheme { ProviderListScreen() } }
+        setContent { ZomealTheme { ZomealApp() } }
+    }
+}
+
+@Composable
+private fun ZomealApp() {
+    var showSplash by remember { mutableStateOf(true) }
+
+    LaunchedEffect(Unit) {
+        delay(2200)
+        showSplash = false
+    }
+
+    if (showSplash) SplashScreen() else ProviderListScreen()
+}
+
+@Composable
+private fun SplashScreen() {
+    BoxWithConstraints(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFFFCFEFA))
+            .statusBarsPadding()
+            .navigationBarsPadding()
+    ) {
+        val compact = maxHeight < 700.dp
+        val logoHeight = if (compact) 178.dp else 220.dp
+        val plateSize = if (compact) 235.dp else 315.dp
+
+        SplashBackground(Modifier.matchParentSize())
+
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = if (compact) 18.dp else 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Spacer(Modifier.weight(if (compact) 0.32f else 0.42f))
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(if (compact) 0.78f else 0.86f)
+                    .height(logoHeight)
+                    .clip(RoundedCornerShape(28.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Image(
+                    painter = painterResource(R.drawable.zomeal_logo),
+                    contentDescription = "Zomeal — Monthly meals, made simple",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize().scale(1.18f)
+                )
+            }
+
+            Spacer(Modifier.height(if (compact) 8.dp else 18.dp))
+            SplashBenefits(compact)
+            Spacer(Modifier.weight(if (compact) 0.22f else 0.32f))
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(plateSize * 0.82f),
+                contentAlignment = Alignment.BottomCenter
+            ) {
+                Canvas(Modifier.fillMaxSize()) {
+                    drawOval(
+                        brush = Brush.radialGradient(
+                            listOf(Color(0x334FAE35), Color.Transparent),
+                            center = center,
+                            radius = size.minDimension * 0.62f
+                        ),
+                        topLeft = Offset(size.width * 0.08f, size.height * 0.08f),
+                        size = androidx.compose.ui.geometry.Size(size.width * 0.84f, size.height * 0.92f)
+                    )
+                }
+                Image(
+                    painter = painterResource(R.drawable.lunch_thali),
+                    contentDescription = "Indian home-style lunch thali",
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.size(plateSize)
+                )
+            }
+
+            Row(
+                modifier = Modifier.padding(top = if (compact) 5.dp else 10.dp, bottom = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
+            ) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(if (compact) 16.dp else 19.dp),
+                    color = Brand,
+                    trackColor = Color(0xFFDCECCB),
+                    strokeWidth = 2.5.dp
+                )
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    "Preparing your best meal experience…",
+                    color = Ink,
+                    fontSize = if (compact) 12.sp else 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SplashBackground(modifier: Modifier = Modifier) {
+    Canvas(modifier) {
+        drawCircle(Color(0x0FAAD84F), radius = size.width * 0.42f, center = Offset(size.width, 0f))
+        drawCircle(Color(0x0D078A45), radius = size.width * 0.30f, center = Offset(0f, size.height * 0.30f))
+
+        val rearWave = Path().apply {
+            moveTo(0f, size.height * 0.77f)
+            cubicTo(size.width * 0.25f, size.height * 0.87f, size.width * 0.55f, size.height * 0.66f, size.width, size.height * 0.73f)
+            lineTo(size.width, size.height)
+            lineTo(0f, size.height)
+            close()
+        }
+        drawPath(rearWave, Color(0x1FB7DA45))
+
+        val frontWave = Path().apply {
+            moveTo(0f, size.height * 0.88f)
+            cubicTo(size.width * 0.25f, size.height * 0.76f, size.width * 0.70f, size.height * 0.98f, size.width, size.height * 0.83f)
+            lineTo(size.width, size.height)
+            lineTo(0f, size.height)
+            close()
+        }
+        drawPath(frontWave, Color(0x29A8D94B))
+
+        listOf(
+            Offset(size.width * 0.12f, size.height * 0.17f),
+            Offset(size.width * 0.88f, size.height * 0.23f),
+            Offset(size.width * 0.18f, size.height * 0.61f),
+            Offset(size.width * 0.80f, size.height * 0.58f)
+        ).forEachIndexed { index, point ->
+            drawOval(
+                color = if (index % 2 == 0) Color(0x2F76B82A) else Color(0x257BBF35),
+                topLeft = point,
+                size = androidx.compose.ui.geometry.Size(size.width * 0.045f, size.width * 0.018f)
+            )
+        }
+    }
+}
+
+@Composable
+private fun SplashBenefits(compact: Boolean) {
+    val benefits = listOf(
+        Triple(Icons.Outlined.RamenDining, "Homely", "Meals"),
+        Triple(Icons.Outlined.CalendarMonth, "Monthly", "Plans"),
+        Triple(Icons.Outlined.DeliveryDining, "On-time", "Delivery"),
+        Triple(Icons.Outlined.VerifiedUser, "Safe &", "Hygienic")
+    )
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceEvenly,
+        verticalAlignment = Alignment.Top
+    ) {
+        benefits.forEachIndexed { index, benefit ->
+            Column(
+                modifier = Modifier.weight(1f),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(if (compact) 43.dp else 52.dp)
+                        .background(Color(0xFFF0F8E9), CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        benefit.first,
+                        contentDescription = null,
+                        tint = Color(0xFF4AA51F),
+                        modifier = Modifier.size(if (compact) 23.dp else 28.dp)
+                    )
+                }
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    benefit.second,
+                    color = Ink,
+                    fontSize = if (compact) 10.sp else 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1
+                )
+                Text(
+                    benefit.third,
+                    color = Ink,
+                    fontSize = if (compact) 10.sp else 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1
+                )
+            }
+            if (index < benefits.lastIndex) {
+                VerticalDivider(
+                    modifier = Modifier.height(if (compact) 58.dp else 70.dp).padding(top = 4.dp),
+                    color = Border
+                )
+            }
+        }
     }
 }
 
@@ -2054,93 +2258,117 @@ private fun SubscriberQuickActions() {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SignupScreen(onContinue: (String) -> Unit) {
+    var fullName by rememberSaveable { mutableStateOf("") }
     var mobile by rememberSaveable { mutableStateOf("") }
     var pincode by rememberSaveable { mutableStateOf("") }
-    var locality by rememberSaveable { mutableStateOf("") }
-    val valid = mobile.length == 10 && pincode.length == 6
+    var useCurrentLocation by rememberSaveable { mutableStateOf(true) }
+    val valid = fullName.trim().length >= 2 && mobile.length == 10 && pincode.length == 6
 
-    Box(Modifier.fillMaxSize().background(Color(0xFFFBFDF9))) {
-        SignupBackgroundArt(Modifier.fillMaxSize())
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().imePadding(),
-            contentPadding = PaddingValues(bottom = 28.dp),
-            verticalArrangement = Arrangement.spacedBy(18.dp)
-        ) {
-            item { SignupHero() }
-            item {
-                Surface(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp),
-                    color = Color.White,
-                    shape = RoundedCornerShape(24.dp),
-                    shadowElevation = 5.dp
+    BoxWithConstraints(
+        Modifier
+            .fillMaxSize()
+            .background(Color(0xFFFBFDF9))
+            .statusBarsPadding()
+            .navigationBarsPadding()
+    ) {
+        val compact = maxHeight < 760.dp
+        SignupBackgroundArt(Modifier.matchParentSize())
+        Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
+            SignupHero(compact)
+            Surface(
+                modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = if (compact) 12.dp else 18.dp),
+                color = Color.White.copy(alpha = .98f),
+                shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+                shadowElevation = 8.dp
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxSize().padding(horizontal = if (compact) 15.dp else 18.dp, vertical = if (compact) 10.dp else 14.dp),
+                    verticalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(15.dp)) {
-                        SignupSectionHeading(Icons.Outlined.PhoneAndroid, "Enter your details", "We'll personalize your experience")
-                        SignupLabel("Mobile Number")
+                    Column(verticalArrangement = Arrangement.spacedBy(if (compact) 6.dp else 9.dp)) {
+                        RegistrationFieldHeader(Icons.Outlined.Person, "Full Name", "Enter your full name", compact)
+                        TextField(
+                            value = fullName,
+                            onValueChange = { fullName = it.take(40) },
+                            modifier = Modifier.fillMaxWidth().height(if (compact) 48.dp else 54.dp),
+                            placeholder = { Text("Enter your full name", fontSize = if (compact) 11.sp else 12.sp) },
+                            leadingIcon = { Icon(Icons.Outlined.Person, null, tint = Muted, modifier = Modifier.size(18.dp)) },
+                            singleLine = true,
+                            shape = RoundedCornerShape(13.dp),
+                            colors = signupFieldColors()
+                        )
+
+                        RegistrationFieldHeader(Icons.Outlined.PhoneAndroid, "Mobile Number", "We'll send you an OTP to verify", compact)
                         TextField(
                             value = mobile,
                             onValueChange = { mobile = it.filter(Char::isDigit).take(10) },
-                            modifier = Modifier.fillMaxWidth(),
-                            placeholder = { Text("Enter your mobile number", fontSize = 12.sp) },
-                            leadingIcon = { Text("IN  +91", color = Ink, fontSize = 11.sp, fontWeight = FontWeight.Bold) },
+                            modifier = Modifier.fillMaxWidth().height(if (compact) 48.dp else 54.dp),
+                            placeholder = { Text("Enter your mobile number", fontSize = if (compact) 11.sp else 12.sp) },
+                            leadingIcon = { Text("🇮🇳  +91", color = Ink, fontSize = 11.sp, fontWeight = FontWeight.Bold) },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
                             singleLine = true,
-                            shape = RoundedCornerShape(14.dp),
+                            shape = RoundedCornerShape(13.dp),
                             colors = signupFieldColors()
                         )
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Outlined.Lock, null, tint = Muted, modifier = Modifier.size(13.dp))
+                            Icon(Icons.Outlined.Lock, null, tint = Muted, modifier = Modifier.size(12.dp))
                             Spacer(Modifier.width(5.dp))
-                            Text("We'll send an OTP to verify your number", color = Muted, fontSize = 9.sp)
+                            Text("Your number is safe with us", color = Muted, fontSize = 8.sp)
                         }
-                        HorizontalDivider(color = Border)
-                        SignupSectionHeading(Icons.Outlined.LocationOn, "Where do we deliver?", "This helps us show meals near you")
-                        SignupLabel("Pincode")
-                        TextField(
-                            value = pincode,
-                            onValueChange = { pincode = it.filter(Char::isDigit).take(6) },
-                            modifier = Modifier.fillMaxWidth(),
-                            placeholder = { Text("Enter your pincode", fontSize = 12.sp) },
-                            leadingIcon = { Icon(Icons.Outlined.LocationOn, null, tint = Brand, modifier = Modifier.size(17.dp)) },
-                            trailingIcon = {
-                                TextButton(onClick = { pincode = "751030"; locality = "Khandagiri, Bhubaneswar" }) {
-                                    Icon(Icons.Outlined.MyLocation, null, tint = Brand, modifier = Modifier.size(15.dp))
-                                    Spacer(Modifier.width(4.dp))
-                                    Text("Detect location", color = BrandDark, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                                }
-                            },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            singleLine = true,
-                            shape = RoundedCornerShape(14.dp),
-                            colors = signupFieldColors()
-                        )
-                        Text("We'll show providers delivering to this area", color = Muted, fontSize = 9.sp)
-                        SignupLabel("Locality / Area  (Optional)")
-                        TextField(
-                            value = locality,
-                            onValueChange = { locality = it.take(50) },
-                            modifier = Modifier.fillMaxWidth(),
-                            placeholder = { Text("Enter your locality or area", fontSize = 12.sp) },
-                            leadingIcon = { Icon(Icons.Outlined.Apartment, null, tint = Brand, modifier = Modifier.size(17.dp)) },
-                            singleLine = true,
-                            shape = RoundedCornerShape(14.dp),
-                            colors = signupFieldColors()
-                        )
-                        Text("Helps us refine your meal recommendations", color = Muted, fontSize = 9.sp)
-                        SignupBenefits()
+
+                        RegistrationFieldHeader(Icons.Outlined.LocationOn, "Delivery Pincode", "Enter a valid 6-digit pincode", compact)
+                        PincodeInput(pincode, compact) { pincode = it }
+                        Row(verticalAlignment = Alignment.Top) {
+                            Icon(Icons.Outlined.Info, null, tint = Muted, modifier = Modifier.size(14.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                "We'll verify service availability after OTP verification.",
+                                color = Muted,
+                                fontSize = if (compact) 8.sp else 9.sp,
+                                lineHeight = 12.sp
+                            )
+                        }
+
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Surface(color = Mist, shape = CircleShape) {
+                                Icon(Icons.Outlined.MyLocation, null, tint = Brand, modifier = Modifier.padding(8.dp).size(18.dp))
+                            }
+                            Spacer(Modifier.width(9.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text("Use my current location", color = Ink, fontSize = if (compact) 11.sp else 12.sp, fontWeight = FontWeight.Bold)
+                                Text("Detect only your pincode", color = Muted, fontSize = 8.sp)
+                            }
+                            Switch(
+                                checked = useCurrentLocation,
+                                onCheckedChange = { useCurrentLocation = it },
+                                modifier = Modifier.scale(.78f),
+                                colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = Color(0xFF42A62A))
+                            )
+                        }
+                    }
+
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Button(
                             onClick = { onContinue(mobile) },
                             enabled = valid,
-                            modifier = Modifier.fillMaxWidth().height(54.dp),
-                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier.fillMaxWidth().height(if (compact) 54.dp else 60.dp),
+                            shape = RoundedCornerShape(17.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = Brand, disabledContainerColor = Border)
                         ) {
-                            Text("Continue", fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.weight(1f))
-                            Icon(Icons.Filled.ArrowForward, null, modifier = Modifier.size(18.dp))
+                            Text("Create Account", fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.weight(1f))
+                            Icon(Icons.Filled.ArrowForward, null, modifier = Modifier.size(17.dp))
                         }
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-                            Text("Already have an account? ", color = Muted, fontSize = 10.sp)
-                            Text("Login", color = BrandDark, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { onContinue(if (mobile.length == 10) mobile else "9876543242") })
+                        Spacer(Modifier.height(7.dp))
+                        Row(horizontalArrangement = Arrangement.Center) {
+                            Text("Already have an account? ", color = Muted, fontSize = 9.sp)
+                            Text("Login", color = BrandDark, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { onContinue(if (mobile.length == 10) mobile else "9876543242") })
+                        }
+                        Spacer(Modifier.height(5.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
+                            Icon(Icons.Outlined.GppGood, null, tint = Brand, modifier = Modifier.size(14.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("By continuing, you agree to our ", color = Muted, fontSize = 7.sp)
+                            Text("Terms & Privacy Policy", color = BrandDark, fontSize = 7.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -2150,20 +2378,64 @@ private fun SignupScreen(onContinue: (String) -> Unit) {
 }
 
 @Composable
-private fun SignupHero() {
-    Box(Modifier.fillMaxWidth().height(360.dp)) {
-        IconButton(onClick = { }, modifier = Modifier.padding(start = 18.dp, top = 20.dp).size(42.dp).clip(CircleShape).background(Color.White).align(Alignment.TopStart)) {
-            Icon(Icons.Filled.ArrowBack, "Back", tint = BrandDark, modifier = Modifier.size(19.dp))
+private fun SignupHero(compact: Boolean) {
+    Box(Modifier.fillMaxWidth().height(if (compact) 122.dp else 148.dp), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(Modifier.width(if (compact) 158.dp else 184.dp).height(if (compact) 88.dp else 104.dp)) {
+                Image(
+                    painter = painterResource(R.drawable.zomeal_logo),
+                    contentDescription = "Zomeal",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+            Text("Create your account", color = Ink, fontSize = if (compact) 18.sp else 21.sp, fontWeight = FontWeight.ExtraBold)
         }
-        Column(Modifier.padding(start = 24.dp, top = 98.dp).width(220.dp)) {
-            Text("zomeal", color = Brand, fontSize = 43.sp, fontWeight = FontWeight.Black)
-            Spacer(Modifier.height(18.dp))
-            Text("Let's get you started!", color = Ink, fontSize = 23.sp, fontWeight = FontWeight.ExtraBold)
-            Spacer(Modifier.height(8.dp))
-            Text("Create your account to discover monthly meals in your area.", color = Muted, fontSize = 12.sp, lineHeight = 18.sp)
-        }
-        SignupThaliArt(Modifier.size(230.dp).align(Alignment.CenterEnd).offset(x = 62.dp, y = 8.dp))
     }
+}
+
+@Composable
+private fun RegistrationFieldHeader(icon: ImageVector, title: String, subtitle: String, compact: Boolean) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Surface(color = Mist, shape = CircleShape) {
+            Icon(icon, null, tint = Color(0xFF51A72F), modifier = Modifier.padding(if (compact) 7.dp else 8.dp).size(if (compact) 16.dp else 18.dp))
+        }
+        Spacer(Modifier.width(9.dp))
+        Column {
+            Text(title, color = Ink, fontSize = if (compact) 11.sp else 13.sp, fontWeight = FontWeight.ExtraBold)
+            Text(subtitle, color = Muted, fontSize = if (compact) 8.sp else 9.sp)
+        }
+    }
+}
+
+@Composable
+private fun PincodeInput(value: String, compact: Boolean, onValueChange: (String) -> Unit) {
+    BasicTextField(
+        value = value,
+        onValueChange = { onValueChange(it.filter(Char::isDigit).take(6)) },
+        modifier = Modifier.fillMaxWidth(),
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+        cursorBrush = androidx.compose.ui.graphics.SolidColor(Color.Transparent),
+        decorationBox = { innerTextField ->
+            Box {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(if (compact) 7.dp else 10.dp)) {
+                    repeat(6) { index ->
+                        Surface(
+                            modifier = Modifier.weight(1f).height(if (compact) 42.dp else 48.dp),
+                            color = Color.White,
+                            shape = RoundedCornerShape(11.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, if (index == value.length) Brand.copy(alpha = .55f) else Border)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text(value.getOrNull(index)?.toString() ?: "—", color = if (index < value.length) BrandDark else Border, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+                Box(Modifier.size(1.dp)) { innerTextField() }
+            }
+        }
+    )
 }
 
 @Composable
@@ -2258,39 +2530,73 @@ private fun OtpVerificationScreen(mobile: String, onVerified: () -> Unit, onBack
         }
     }
 
-    Box(Modifier.fillMaxSize().background(Color(0xFFFBFDF9))) {
-        SignupBackgroundArt(Modifier.fillMaxSize())
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().imePadding(),
-            contentPadding = PaddingValues(bottom = 30.dp),
+    BoxWithConstraints(
+        Modifier
+            .fillMaxSize()
+            .background(Color(0xFFFBFDF9))
+            .statusBarsPadding()
+            .navigationBarsPadding()
+    ) {
+        val compact = maxHeight < 760.dp
+        SignupBackgroundArt(Modifier.matchParentSize())
+
+        IconButton(
+            onClick = onBack,
+            modifier = Modifier
+                .padding(start = 12.dp, top = 6.dp)
+                .size(40.dp)
+                .clip(CircleShape)
+                .background(Color.White)
+                .align(Alignment.TopStart)
+        ) {
+            Icon(Icons.Filled.ArrowBack, "Back", tint = BrandDark, modifier = Modifier.size(18.dp))
+        }
+
+        Column(
+            modifier = Modifier.fillMaxSize().padding(horizontal = if (compact) 12.dp else 18.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            item {
-                Box(Modifier.fillMaxWidth().height(430.dp)) {
-                    IconButton(onClick = onBack, modifier = Modifier.padding(start = 18.dp, top = 20.dp).size(42.dp).clip(CircleShape).background(Color.White).align(Alignment.TopStart)) {
-                        Icon(Icons.Filled.ArrowBack, "Change phone number", tint = BrandDark, modifier = Modifier.size(19.dp))
-                    }
-                    Text("zomeal", color = Brand, fontSize = 42.sp, fontWeight = FontWeight.Black, modifier = Modifier.align(Alignment.TopCenter).padding(top = 72.dp))
-                    SignupThaliArt(Modifier.size(255.dp).align(Alignment.BottomCenter).offset(y = 25.dp))
-                }
+            Box(
+                modifier = Modifier
+                    .width(if (compact) 158.dp else 184.dp)
+                    .height(if (compact) 94.dp else 112.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Image(
+                    painter = painterResource(R.drawable.zomeal_logo),
+                    contentDescription = "Zomeal",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
             }
-            item {
-                Surface(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp),
-                    color = Color.White,
-                    shape = RoundedCornerShape(28.dp),
-                    shadowElevation = 5.dp
+
+            Surface(
+                modifier = Modifier.fillMaxWidth().weight(1f),
+                color = Color.White.copy(alpha = .98f),
+                shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+                shadowElevation = 8.dp
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxSize().padding(horizontal = if (compact) 18.dp else 22.dp, vertical = if (compact) 14.dp else 20.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Column(Modifier.padding(horizontal = 22.dp, vertical = 26.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Surface(color = Mist, shape = CircleShape) {
-                            Icon(Icons.Filled.VerifiedUser, null, tint = Brand, modifier = Modifier.padding(16.dp).size(28.dp))
+                            Icon(
+                                Icons.Filled.VerifiedUser,
+                                null,
+                                tint = Brand,
+                                modifier = Modifier.padding(if (compact) 11.dp else 13.dp).size(if (compact) 23.dp else 27.dp)
+                            )
                         }
-                        Spacer(Modifier.height(18.dp))
-                        Text("Verify your number", color = Ink, fontSize = 24.sp, fontWeight = FontWeight.ExtraBold)
-                        Spacer(Modifier.height(9.dp))
-                        Text("We've sent a 6-digit OTP to", color = Muted, fontSize = 12.sp)
-                        Text("+91  $maskedNumber", color = BrandDark, fontSize = 17.sp, fontWeight = FontWeight.ExtraBold)
-                        Spacer(Modifier.height(22.dp))
+                        Spacer(Modifier.height(if (compact) 9.dp else 13.dp))
+                        Text("Verify your number", color = Ink, fontSize = if (compact) 20.sp else 23.sp, fontWeight = FontWeight.ExtraBold)
+                        Spacer(Modifier.height(5.dp))
+                        Text("We've sent a 6-digit OTP to", color = Muted, fontSize = if (compact) 10.sp else 11.sp)
+                        Text("+91  $maskedNumber", color = BrandDark, fontSize = if (compact) 14.sp else 16.sp, fontWeight = FontWeight.ExtraBold)
+                        Spacer(Modifier.height(if (compact) 15.dp else 20.dp))
+
                         BasicTextField(
                             value = otp,
                             onValueChange = { otp = it.filter(Char::isDigit).take(6) },
@@ -2298,52 +2604,57 @@ private fun OtpVerificationScreen(mobile: String, onVerified: () -> Unit, onBack
                             cursorBrush = androidx.compose.ui.graphics.SolidColor(Color.Transparent),
                             decorationBox = { innerTextField ->
                                 Box {
-                                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                                        repeat(6) { index -> OtpCell(otp.getOrNull(index), index == otp.length) }
+                                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(if (compact) 6.dp else 8.dp)) {
+                                        repeat(6) { index -> OtpCell(otp.getOrNull(index), index == otp.length, compact) }
                                     }
                                     Box(Modifier.size(1.dp)) { innerTextField() }
                                 }
                             }
                         )
-                        Spacer(Modifier.height(18.dp))
+                        Spacer(Modifier.height(if (compact) 12.dp else 16.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Outlined.Schedule, null, tint = Brand, modifier = Modifier.size(15.dp))
-                            Spacer(Modifier.width(6.dp))
-                            Text("00:${secondsRemaining.toString().padStart(2, '0')}", color = BrandDark, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            Text(" remaining", color = Muted, fontSize = 11.sp)
+                            Icon(Icons.Outlined.Schedule, null, tint = Brand, modifier = Modifier.size(14.dp))
+                            Spacer(Modifier.width(5.dp))
+                            Text("00:${secondsRemaining.toString().padStart(2, '0')}", color = BrandDark, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            Text(" remaining", color = Muted, fontSize = 10.sp)
                         }
-                        Spacer(Modifier.height(20.dp))
+                        Spacer(Modifier.height(if (compact) 13.dp else 17.dp))
                         Surface(color = Mist, shape = RoundedCornerShape(14.dp)) {
-                            Row(Modifier.fillMaxWidth().padding(13.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Row(Modifier.fillMaxWidth().padding(if (compact) 11.dp else 13.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Icon(Icons.Outlined.GppGood, null, tint = Brand, modifier = Modifier.size(20.dp))
                                 Spacer(Modifier.width(9.dp))
                                 Column {
-                                    Text("Your verification code is 100% secure.", color = BrandDark, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                                    Text("Zomeal will never share it with anyone.", color = Muted, fontSize = 9.sp)
+                                    Text("Your verification code is secure", color = BrandDark, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                    Text("Zomeal will never share it with anyone.", color = Muted, fontSize = 8.sp)
                                 }
                             }
                         }
-                        Spacer(Modifier.height(20.dp))
-                        Text("Didn't receive OTP?", color = Muted, fontSize = 11.sp)
+                    }
+
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("Didn't receive the OTP?", color = Muted, fontSize = 10.sp)
                         TextButton(
                             onClick = { secondsRemaining = 30; otp = "" },
-                            enabled = secondsRemaining == 0
-                        ) { Text("Resend OTP", color = if (secondsRemaining == 0) BrandDark else Muted, fontSize = 12.sp, fontWeight = FontWeight.Bold) }
-                        Spacer(Modifier.height(10.dp))
+                            enabled = secondsRemaining == 0,
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+                        ) {
+                            Text("Resend OTP", color = if (secondsRemaining == 0) BrandDark else Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Spacer(Modifier.height(if (compact) 6.dp else 9.dp))
                         Button(
                             onClick = onVerified,
                             enabled = otp.length == 6,
-                            modifier = Modifier.fillMaxWidth().height(54.dp),
-                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier.fillMaxWidth().height(if (compact) 54.dp else 60.dp),
+                            shape = RoundedCornerShape(17.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = Brand, disabledContainerColor = Border)
                         ) {
-                            Text("Verify & Continue", fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.weight(1f))
+                            Text("Verify & Continue", fontSize = 14.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.weight(1f))
                             Icon(Icons.Filled.ArrowForward, null, modifier = Modifier.size(18.dp))
                         }
-                        TextButton(onClick = onBack) {
-                            Icon(Icons.Outlined.Edit, null, tint = Brand, modifier = Modifier.size(15.dp))
+                        TextButton(onClick = onBack, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)) {
+                            Icon(Icons.Outlined.Edit, null, tint = Brand, modifier = Modifier.size(14.dp))
                             Spacer(Modifier.width(6.dp))
-                            Text("Change phone number", color = BrandDark, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text("Change phone number", color = BrandDark, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -2353,9 +2664,9 @@ private fun OtpVerificationScreen(mobile: String, onVerified: () -> Unit, onBack
 }
 
 @Composable
-private fun RowScope.OtpCell(digit: Char?, focused: Boolean) {
+private fun RowScope.OtpCell(digit: Char?, focused: Boolean, compact: Boolean = false) {
     Surface(
-        modifier = Modifier.weight(1f).aspectRatio(.72f),
+        modifier = Modifier.weight(1f).height(if (compact) 48.dp else 56.dp),
         color = Color.White,
         shape = RoundedCornerShape(12.dp),
         border = androidx.compose.foundation.BorderStroke(if (focused || digit != null) 1.5.dp else 1.dp, if (focused || digit != null) Brand.copy(alpha = .55f) else Border)
