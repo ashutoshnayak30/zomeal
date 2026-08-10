@@ -41,6 +41,9 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.BasicTextField
 import kotlinx.coroutines.delay
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Locale
 
 private val Brand = Color(0xFF078A45)
 private val BrandDark = Color(0xFF006B38)
@@ -298,6 +301,9 @@ private fun ProviderListScreen() {
     var signupComplete by rememberSaveable { mutableStateOf(false) }
     var awaitingOtp by rememberSaveable { mutableStateOf(false) }
     var pendingMobile by rememberSaveable { mutableStateOf("") }
+    var pendingPincode by rememberSaveable { mutableStateOf("") }
+    var serviceUnavailable by rememberSaveable { mutableStateOf(false) }
+    var browseMode by rememberSaveable { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
     var filter by remember { mutableStateOf(DietFilter.ALL) }
     var sortByRating by remember { mutableStateOf(false) }
@@ -306,14 +312,37 @@ private fun ProviderListScreen() {
     var activeProvider by remember { mutableStateOf<Provider?>(null) }
 
     if (!signupComplete) {
-        if (awaitingOtp) {
+        if (serviceUnavailable) {
+            ServiceUnavailableScreen(
+                pincode = pendingPincode,
+                onExplore = {
+                    browseMode = true
+                    signupComplete = true
+                },
+                onTryAnotherPincode = {
+                    serviceUnavailable = false
+                    awaitingOtp = false
+                }
+            )
+        } else if (awaitingOtp) {
             OtpVerificationScreen(
                 mobile = pendingMobile,
-                onVerified = { signupComplete = true },
+                onVerified = {
+                    if (pendingPincode in setOf("751030", "751019", "751003")) {
+                        browseMode = false
+                        signupComplete = true
+                    } else {
+                        serviceUnavailable = true
+                    }
+                },
                 onBack = { awaitingOtp = false }
             )
         } else {
-            SignupScreen(onContinue = { mobile -> pendingMobile = mobile; awaitingOtp = true })
+            SignupScreen(onContinue = { mobile, pincode ->
+                pendingMobile = mobile
+                pendingPincode = pincode
+                awaitingOtp = true
+            })
         }
         return
     }
@@ -353,24 +382,25 @@ private fun ProviderListScreen() {
             contentPadding = PaddingValues(bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
-            item { DiscoveryHeader(query, onQueryChange = { query = it }) }
-            item { PromoBanner() }
+            item {
+                ServiceProviderHeader(
+                    query = query,
+                    pincode = pendingPincode.ifBlank { "751030" },
+                    providerCount = providers.size,
+                    browseMode = browseMode,
+                    onQueryChange = { query = it }
+                )
+            }
+            item { AvailabilityBanner(pendingPincode.ifBlank { "751030" }, providers.size, browseMode) }
             item {
                 ProviderSectionHeader(
                     count = visibleProviders.size,
-                    sortByRating = sortByRating,
-                    onSort = { sortByRating = !sortByRating }
+                    pincode = pendingPincode.ifBlank { "751030" },
+                    browseMode = browseMode
                 )
             }
             item {
-                LazyRow(
-                    contentPadding = PaddingValues(horizontal = 20.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    items(DietFilter.entries) { option ->
-                        DietChip(option, option == filter) { filter = option }
-                    }
-                }
+                ProviderFilterPanel(filter, sortByRating, onFilter = { filter = it }, onSort = { sortByRating = !sortByRating })
             }
             if (visibleProviders.isEmpty()) {
                 item { EmptyProviders(onClear = { query = ""; filter = DietFilter.ALL }) }
@@ -432,6 +462,105 @@ private fun DiscoveryHeader(query: String, onQueryChange: (String) -> Unit) {
 }
 
 @Composable
+private fun ServiceProviderHeader(
+    query: String,
+    pincode: String,
+    providerCount: Int,
+    browseMode: Boolean,
+    onQueryChange: (String) -> Unit
+) {
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .background(
+                Brush.linearGradient(listOf(BrandDark, Brand, Lime), start = Offset.Zero, end = Offset(1000f, 650f)),
+                RoundedCornerShape(bottomStart = 30.dp, bottomEnd = 30.dp)
+            )
+            .padding(horizontal = 18.dp, vertical = 18.dp)
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(13.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("zomeal", color = Color.White, fontSize = 29.sp, fontWeight = FontWeight.Black)
+                    Text("Service Provider List", color = Color.White.copy(alpha = .84f), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                }
+                Surface(color = Color.White.copy(alpha = .14f), shape = CircleShape) {
+                    Icon(Icons.Outlined.Notifications, "Notifications", tint = Color.White, modifier = Modifier.padding(10.dp).size(19.dp))
+                }
+            }
+            Surface(color = Color.White.copy(alpha = .13f), shape = RoundedCornerShape(15.dp)) {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(if (browseMode) Icons.Outlined.TravelExplore else Icons.Filled.LocationOn, null, tint = Color.White, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(7.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(if (browseMode) "Browsing providers" else "Delivering to", color = Color.White.copy(alpha = .76f), fontSize = 8.sp)
+                        Text(if (browseMode) "Popular kitchens near Bhubaneswar" else "$pincode · Khandagiri, Bhubaneswar", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                    }
+                    Text("Change", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                    Icon(Icons.Filled.KeyboardArrowDown, null, tint = Color.White, modifier = Modifier.size(17.dp))
+                }
+            }
+            TextField(
+                value = query,
+                onValueChange = onQueryChange,
+                modifier = Modifier.fillMaxWidth().height(54.dp),
+                placeholder = { Text("Search kitchens, dishes or locality", color = Muted, fontSize = 11.sp) },
+                leadingIcon = { Icon(Icons.Outlined.Search, null, tint = Muted, modifier = Modifier.size(19.dp)) },
+                trailingIcon = {
+                    Surface(color = Mist, shape = CircleShape) {
+                        Icon(Icons.Filled.Tune, "Filters", tint = Brand, modifier = Modifier.padding(8.dp).size(17.dp))
+                    }
+                },
+                singleLine = true,
+                shape = RoundedCornerShape(18.dp),
+                colors = TextFieldDefaults.colors(
+                    focusedContainerColor = Color.White,
+                    unfocusedContainerColor = Color.White,
+                    focusedIndicatorColor = Color.Transparent,
+                    unfocusedIndicatorColor = Color.Transparent
+                )
+            )
+        }
+    }
+}
+
+@Composable
+private fun AvailabilityBanner(pincode: String, providerCount: Int, browseMode: Boolean) {
+    Surface(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp),
+        color = if (browseMode) Color(0xFFFFF8E7) else Color(0xFFEDF8E8),
+        shape = RoundedCornerShape(17.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, if (browseMode) Color(0xFFF0DCA6) else Color(0xFFCDE7C3))
+    ) {
+        Row(Modifier.padding(13.dp), verticalAlignment = Alignment.CenterVertically) {
+            Surface(color = Color.White, shape = CircleShape) {
+                Icon(
+                    if (browseMode) Icons.Outlined.Visibility else Icons.Outlined.CheckCircle,
+                    null,
+                    tint = if (browseMode) Color(0xFFB67600) else Brand,
+                    modifier = Modifier.padding(8.dp).size(20.dp)
+                )
+            }
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    if (browseMode) "You're exploring Zomeal" else "Great news! $providerCount providers deliver here",
+                    color = if (browseMode) Color(0xFF735318) else BrandDark,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.ExtraBold
+                )
+                Text(
+                    if (browseMode) "Browse and save menus. Add a serviceable address to subscribe." else "Verified meal providers are available for pincode $pincode.",
+                    color = Muted,
+                    fontSize = 8.sp,
+                    lineHeight = 11.sp
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun PromoBanner() {
     Surface(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp).height(148.dp),
@@ -476,38 +605,73 @@ private fun FoodPlateArt(modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun ProviderSectionHeader(count: Int, sortByRating: Boolean, onSort: () -> Unit) {
+private fun ProviderSectionHeader(count: Int, pincode: String, browseMode: Boolean) {
     Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
-            Text("Providers in your area", color = Ink, fontWeight = FontWeight.ExtraBold, fontSize = 21.sp)
-            Text(if (count == 0) "No matching providers" else "Showing providers delivering to 751030", color = Muted, fontSize = 13.sp)
+            Text("Service providers", color = Ink, fontWeight = FontWeight.ExtraBold, fontSize = 19.sp)
+            Text(
+                if (count == 0) "No providers match your filters" else if (browseMode) "$count kitchens available to explore" else "$count providers deliver to $pincode",
+                color = Muted,
+                fontSize = 10.sp
+            )
         }
-        Surface(
-            modifier = Modifier.clickable(onClick = onSort), color = Mist, shape = RoundedCornerShape(18.dp)
-        ) {
-            Row(Modifier.padding(horizontal = 14.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Filled.SwapVert, null, tint = Brand, modifier = Modifier.size(19.dp))
-                Spacer(Modifier.width(5.dp))
-                Text(if (sortByRating) "Top first" else "Sort", color = Brand, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+    }
+}
+
+@Composable
+private fun ProviderFilterPanel(
+    selected: DietFilter,
+    sortByRating: Boolean,
+    onFilter: (DietFilter) -> Unit,
+    onSort: () -> Unit
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp),
+        color = Color.White,
+        shape = RoundedCornerShape(18.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Border)
+    ) {
+        Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                DietFilter.entries.take(3).forEach { option ->
+                    DietChip(option, option == selected, Modifier.weight(1f)) { onFilter(option) }
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                DietFilter.entries.drop(3).forEach { option ->
+                    DietChip(option, option == selected, Modifier.weight(1f)) { onFilter(option) }
+                }
+                Surface(
+                    modifier = Modifier.weight(1f).clickable(onClick = onSort),
+                    color = if (sortByRating) Color(0xFFE5F5E7) else Mist,
+                    shape = RoundedCornerShape(13.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, if (sortByRating) Brand.copy(alpha = .45f) else Border)
+                ) {
+                    Row(Modifier.padding(horizontal = 8.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
+                        Icon(Icons.Filled.SwapVert, null, tint = Brand, modifier = Modifier.size(15.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text(if (sortByRating) "Top first" else "Sort", color = BrandDark, fontSize = 9.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                    }
+                }
             }
         }
     }
 }
 
 @Composable
-private fun DietChip(option: DietFilter, selected: Boolean, onClick: () -> Unit) {
+private fun DietChip(option: DietFilter, selected: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Surface(
-        modifier = Modifier.clickable(onClick = onClick),
-        shape = RoundedCornerShape(50),
+        modifier = modifier.clickable(onClick = onClick),
+        shape = RoundedCornerShape(13.dp),
         color = if (selected) Brand else Mist,
         border = if (selected) null else androidx.compose.foundation.BorderStroke(1.dp, Border)
     ) {
-        Row(Modifier.padding(horizontal = 17.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.padding(horizontal = 7.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
             if (option.emoji.isNotEmpty()) {
                 Text(option.emoji, color = if (option == DietFilter.NON_VEG) Color(0xFFC94C2D) else if (option == DietFilter.TOP) Color(0xFFFFB400) else Color(0xFF55B627), fontSize = 13.sp)
-                Spacer(Modifier.width(7.dp))
+                Spacer(Modifier.width(4.dp))
             }
-            Text(option.label, color = if (selected) Color.White else Ink, fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium, fontSize = 14.sp)
+            Text(option.label, color = if (selected) Color.White else Ink, fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium, fontSize = 9.sp, maxLines = 1)
         }
     }
 }
@@ -630,7 +794,11 @@ private fun ZomealBottomBar(selected: Int, onSelect: (Int) -> Unit) {
         Triple("Orders", Icons.Filled.ReceiptLong, Icons.Outlined.ReceiptLong),
         Triple("Profile", Icons.Filled.Person, Icons.Outlined.Person)
     )
-    NavigationBar(containerColor = Color.White, tonalElevation = 8.dp) {
+    NavigationBar(
+        containerColor = Color.White,
+        tonalElevation = 8.dp,
+        windowInsets = NavigationBarDefaults.windowInsets
+    ) {
         items.forEachIndexed { index, item ->
             NavigationBarItem(
                 selected = selected == index,
@@ -675,7 +843,7 @@ private fun ProviderDetailsScreen(provider: Provider, onBack: () -> Unit, onActi
     Scaffold(
         containerColor = Color.White,
         bottomBar = {
-            Surface(color = Color.White, shadowElevation = 10.dp) {
+            Surface(modifier = Modifier.navigationBarsPadding(), color = Color.White, shadowElevation = 10.dp) {
                 Button(
                     onClick = { menuPackage = packages[selectedPackage] },
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 10.dp).height(58.dp),
@@ -703,15 +871,16 @@ private fun ProviderDetailsScreen(provider: Provider, onBack: () -> Unit, onActi
             item { TrustSummary() }
             item { PackageHeader() }
             item {
-                LazyRow(
-                    contentPadding = PaddingValues(horizontal = 18.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp),
+                    horizontalArrangement = Arrangement.spacedBy(7.dp)
                 ) {
-                    items(packages.size) { index ->
+                    packages.forEachIndexed { index, mealPackage ->
                         PackageCard(
-                            mealPackage = packages[index],
+                            mealPackage = mealPackage,
                             selected = selectedPackage == index,
-                            onSelect = { selectedPackage = index }
+                            onSelect = { selectedPackage = index },
+                            modifier = Modifier.weight(1f)
                         )
                     }
                 }
@@ -727,16 +896,16 @@ private fun ProviderDetailsScreen(provider: Provider, onBack: () -> Unit, onActi
 @Composable
 private fun ProviderDetailsTopBar(onBack: () -> Unit) {
     Box(
-        Modifier.fillMaxWidth().height(104.dp).background(
+        Modifier.fillMaxWidth().height(74.dp).background(
             Brush.linearGradient(listOf(BrandDark, Brand, Lime), start = Offset.Zero, end = Offset(950f, 300f))
         )
     ) {
         IconButton(
             onClick = onBack,
-            modifier = Modifier.padding(start = 12.dp, top = 16.dp).size(42.dp).clip(CircleShape).background(Color.White.copy(alpha = .18f)).align(Alignment.CenterStart)
-        ) { Icon(Icons.Filled.ArrowBack, "Back", tint = Color.White, modifier = Modifier.size(19.dp)) }
-        Text("zomeal", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Black, modifier = Modifier.align(Alignment.Center))
-        Row(Modifier.padding(end = 12.dp, top = 16.dp).align(Alignment.CenterEnd), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            modifier = Modifier.padding(start = 10.dp).size(38.dp).clip(CircleShape).background(Color.White.copy(alpha = .18f)).align(Alignment.CenterStart)
+        ) { Icon(Icons.Filled.ArrowBack, "Back", tint = Color.White, modifier = Modifier.size(18.dp)) }
+        Text("zomeal", color = Color.White, fontSize = 23.sp, fontWeight = FontWeight.Black, modifier = Modifier.align(Alignment.Center))
+        Row(Modifier.padding(end = 10.dp).align(Alignment.CenterEnd), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             SmallHeaderAction(Icons.Outlined.Share, "Share")
             SmallHeaderAction(Icons.Outlined.FavoriteBorder, "Favorite")
         }
@@ -745,15 +914,21 @@ private fun ProviderDetailsTopBar(onBack: () -> Unit) {
 
 @Composable
 private fun SmallHeaderAction(icon: ImageVector, label: String) {
-    IconButton(onClick = { }, modifier = Modifier.size(42.dp).clip(CircleShape).background(Color.White.copy(alpha = .18f))) {
-        Icon(icon, label, tint = Color.White, modifier = Modifier.size(19.dp))
+    IconButton(onClick = { }, modifier = Modifier.size(36.dp).clip(CircleShape).background(Color.White.copy(alpha = .18f))) {
+        Icon(icon, label, tint = Color.White, modifier = Modifier.size(17.dp))
     }
 }
 
 @Composable
 private fun ProviderIdentity(provider: Provider) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
-        Text(provider.name, color = Ink, fontSize = 30.sp, lineHeight = 34.sp, fontWeight = FontWeight.Black)
+        Row(verticalAlignment = Alignment.Top) {
+            Column(Modifier.weight(1f)) {
+                Text(provider.name, color = Ink, fontSize = 24.sp, lineHeight = 28.sp, fontWeight = FontWeight.Black)
+                Text("Verified home-style meal provider", color = Muted, fontSize = 9.sp)
+            }
+            RatingPill(provider.rating, provider.reviews)
+        }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Surface(color = Mist, shape = RoundedCornerShape(10.dp)) {
                 Row(Modifier.padding(horizontal = 9.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -809,9 +984,9 @@ private fun PackageHeader() {
 }
 
 @Composable
-private fun PackageCard(mealPackage: MealPackage, selected: Boolean, onSelect: () -> Unit) {
+private fun PackageCard(mealPackage: MealPackage, selected: Boolean, onSelect: () -> Unit, modifier: Modifier = Modifier) {
     Surface(
-        modifier = Modifier.width(150.dp).height(220.dp).clickable(onClick = onSelect),
+        modifier = modifier.height(196.dp).clickable(onClick = onSelect),
         color = if (selected) Color(0xFFF6FBF7) else Color.White,
         shape = RoundedCornerShape(18.dp),
         border = androidx.compose.foundation.BorderStroke(if (selected) 1.5.dp else 1.dp, if (selected) Brand else Border),
@@ -823,23 +998,23 @@ private fun PackageCard(mealPackage: MealPackage, selected: Boolean, onSelect: (
                     Text("Most Popular", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp))
                 }
             }
-            Column(Modifier.fillMaxSize().padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Spacer(Modifier.height(if (mealPackage.popular) 24.dp else 12.dp))
-                Icon(mealPackage.icon, null, tint = if (mealPackage.title.contains("Dinner")) Color(0xFF34547A) else Color(0xFFFFB300), modifier = Modifier.size(28.dp))
+            Column(Modifier.fillMaxSize().padding(horizontal = 6.dp, vertical = 9.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Spacer(Modifier.height(if (mealPackage.popular) 20.dp else 7.dp))
+                Icon(mealPackage.icon, null, tint = if (mealPackage.title.contains("Dinner")) Color(0xFF34547A) else Color(0xFFFFB300), modifier = Modifier.size(23.dp))
+                Spacer(Modifier.height(7.dp))
+                Text(mealPackage.title, color = if (selected) BrandDark else Ink, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
+                Text(mealPackage.meals, color = Muted, fontSize = 8.sp)
                 Spacer(Modifier.height(9.dp))
-                Text(mealPackage.title, color = if (selected) BrandDark else Ink, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
-                Text(mealPackage.meals, color = Muted, fontSize = 10.sp)
-                Spacer(Modifier.height(13.dp))
-                Text(mealPackage.price, color = BrandDark, fontSize = 20.sp, fontWeight = FontWeight.Black)
-                Text("/ month", color = Muted, fontSize = 10.sp)
+                Text(mealPackage.price, color = BrandDark, fontSize = 15.sp, fontWeight = FontWeight.Black)
+                Text("/ month", color = Muted, fontSize = 8.sp)
                 Spacer(Modifier.weight(1f))
                 OutlinedButton(
                     onClick = onSelect,
-                    modifier = Modifier.fillMaxWidth().height(36.dp),
+                    modifier = Modifier.fillMaxWidth().height(34.dp),
                     shape = RoundedCornerShape(10.dp),
                     colors = ButtonDefaults.outlinedButtonColors(containerColor = if (selected) Brand else Color.Transparent, contentColor = if (selected) Color.White else BrandDark),
                     border = androidx.compose.foundation.BorderStroke(1.dp, Brand)
-                ) { Text(if (selected) "Selected" else "Select", fontSize = 11.sp, fontWeight = FontWeight.Bold) }
+                ) { Text(if (selected) "Selected" else "Select", fontSize = 9.sp, fontWeight = FontWeight.Bold) }
             }
         }
     }
@@ -899,15 +1074,19 @@ private fun QualityBadges() {
         Triple(Icons.Outlined.Science, "No preservatives", "No ajinomoto"),
         Triple(Icons.Outlined.SoupKitchen, "Daily", "Variety")
     )
-    LazyRow(contentPadding = PaddingValues(horizontal = 18.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        items(badges) { badge ->
-            Surface(color = Mist, shape = RoundedCornerShape(15.dp)) {
-                Row(Modifier.width(138.dp).padding(11.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(badge.first, null, tint = Brand, modifier = Modifier.size(20.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Column {
-                        Text(badge.second, color = BrandDark, fontSize = 10.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-                        Text(badge.third, color = Ink, fontSize = 9.sp, maxLines = 1)
+    Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        badges.chunked(2).forEach { rowBadges ->
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                rowBadges.forEach { badge ->
+                    Surface(modifier = Modifier.weight(1f), color = Mist, shape = RoundedCornerShape(15.dp)) {
+                        Row(Modifier.padding(11.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(badge.first, null, tint = Brand, modifier = Modifier.size(20.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Column {
+                                Text(badge.second, color = BrandDark, fontSize = 10.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                                Text(badge.third, color = Ink, fontSize = 9.sp, maxLines = 1)
+                            }
+                        }
                     }
                 }
             }
@@ -947,12 +1126,16 @@ private data class MenuChoice(val name: String, val base: Color, val garnish: Co
 
 private val lunchChoices = listOf(
     MenuChoice("Paneer Butter Masala", Color(0xFFD96A2B), Color(0xFFF4D184)),
-    MenuChoice("Dal Tadka", Color(0xFFE4AD2E), Color(0xFF7A9B3A))
+    MenuChoice("Dal Tadka", Color(0xFFE4AD2E), Color(0xFF7A9B3A)),
+    MenuChoice("Chicken Curry", Color(0xFFB94C32), Color(0xFFF0A34E)),
+    MenuChoice("Fish Masala", Color(0xFFC85B35), Color(0xFFF3C36A))
 )
 
 private val dinnerChoices = listOf(
     MenuChoice("Seasonal Mix Veg", Color(0xFFB75B35), Color(0xFF4E9B51)),
-    MenuChoice("Egg Tadka", Color(0xFFC94E2F), Color(0xFFFFD56A))
+    MenuChoice("Chana Masala", Color(0xFFA84B2E), Color(0xFFE8B94D)),
+    MenuChoice("Egg Tadka", Color(0xFFC94E2F), Color(0xFFFFD56A)),
+    MenuChoice("Chicken Masala", Color(0xFF9F3F2D), Color(0xFFF09A44))
 )
 
 @Composable
@@ -964,6 +1147,8 @@ private fun WeeklyMenuScreen(provider: Provider, plan: MealPackage, onBack: () -
     val dinnerSelections = remember { mutableStateMapOf<Int, String>().apply { days.indices.forEach { put(it, dinnerChoices.first().name) } } }
     val lunchCarbs = remember { mutableStateMapOf<Int, String>().apply { days.indices.forEach { put(it, "Rice") } } }
     val dinnerCarbs = remember { mutableStateMapOf<Int, String>().apply { days.indices.forEach { put(it, "Roti") } } }
+    val submittedDays = remember { mutableStateMapOf<Int, Boolean>().apply { days.indices.forEach { put(it, false) } } }
+    var quickPreference by remember { mutableStateOf<String?>(null) }
     val showLunch = plan.title != "Dinner Only"
     val showDinner = plan.title != "Lunch Only"
     var showReview by remember { mutableStateOf(false) }
@@ -984,16 +1169,25 @@ private fun WeeklyMenuScreen(provider: Provider, plan: MealPackage, onBack: () -
     Scaffold(
         containerColor = Color.White,
         bottomBar = {
-            Surface(color = Color.White, shadowElevation = 10.dp) {
+            Surface(modifier = Modifier.navigationBarsPadding(), color = Color.White, shadowElevation = 10.dp) {
                 Button(
                     onClick = { showReview = true },
+                    enabled = days.indices.all { submittedDays[it] == true },
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 10.dp).height(54.dp),
                     shape = RoundedCornerShape(16.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF56843E))
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = BrandDark,
+                        disabledContainerColor = Color(0xFFDDE7DD),
+                        disabledContentColor = Color(0xFF789078)
+                    )
                 ) {
                     Icon(Icons.Outlined.Save, null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(9.dp))
-                    Text("Review Weekly Plan", fontSize = 15.sp, fontWeight = FontWeight.ExtraBold)
+                    Text(
+                        if (days.indices.all { submittedDays[it] == true }) "Review 7-Day Menu" else "Submit all 7 days to continue",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.ExtraBold
+                    )
                 }
             }
         }
@@ -1003,13 +1197,34 @@ private fun WeeklyMenuScreen(provider: Provider, plan: MealPackage, onBack: () -
             contentPadding = PaddingValues(bottom = 20.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
-            item { WeeklyMenuHeader(onBack) }
+            item { WeeklyMenuHeader(onBack, submittedDays.values.count { it }) }
             item {
-                LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-                    items(days.size) { index ->
-                        DayCard(days[index], dates[index], selectedDay == index) { selectedDay = index }
+                QuickMenuSetup(
+                    selected = quickPreference,
+                    onVeg = {
+                        quickPreference = "Veg"
+                        days.indices.forEach { index ->
+                            lunchSelections[index] = lunchChoices[index % 2].name
+                            dinnerSelections[index] = dinnerChoices[index % 2].name
+                            lunchCarbs[index] = if (index % 2 == 0) "Rice" else "Roti"
+                            dinnerCarbs[index] = if (index % 2 == 0) "Roti" else "Paratha"
+                            submittedDays[index] = true
+                        }
+                    },
+                    onNonVeg = {
+                        quickPreference = "Non-Veg"
+                        days.indices.forEach { index ->
+                            lunchSelections[index] = lunchChoices[2 + (index % 2)].name
+                            dinnerSelections[index] = dinnerChoices[2 + (index % 2)].name
+                            lunchCarbs[index] = if (index % 2 == 0) "Rice" else "Roti"
+                            dinnerCarbs[index] = if (index % 2 == 0) "Roti" else "Paratha"
+                            submittedDays[index] = true
+                        }
                     }
-                }
+                )
+            }
+            item {
+                DaySelectorGrid(days, dates, selectedDay, submittedDays) { selectedDay = it }
             }
             if (showLunch) {
                 item {
@@ -1043,12 +1258,36 @@ private fun WeeklyMenuScreen(provider: Provider, plan: MealPackage, onBack: () -
                     )
                 }
             }
+            item {
+                Button(
+                    onClick = {
+                        submittedDays[selectedDay] = true
+                        quickPreference = null
+                        if (selectedDay < days.lastIndex) selectedDay += 1
+                    },
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).height(52.dp),
+                    shape = RoundedCornerShape(15.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = BrandDark)
+                ) {
+                    Icon(
+                        if (submittedDays[selectedDay] == true) Icons.Filled.CheckCircle else Icons.Outlined.Save,
+                        null,
+                        modifier = Modifier.size(17.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        if (submittedDays[selectedDay] == true) "Update ${days[selectedDay]}'s Menu" else "Submit ${days[selectedDay]}'s Menu",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.ExtraBold
+                    )
+                }
+            }
         }
     }
 }
 
 @Composable
-private fun WeeklyMenuHeader(onBack: () -> Unit) {
+private fun WeeklyMenuHeader(onBack: () -> Unit, submittedCount: Int) {
     Row(
         Modifier.fillMaxWidth().padding(start = 8.dp, end = 14.dp, top = 16.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -1057,17 +1296,17 @@ private fun WeeklyMenuHeader(onBack: () -> Unit) {
             Icon(Icons.Filled.ArrowBack, "Back", tint = Ink, modifier = Modifier.size(19.dp))
         }
         Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("Weekly Menu Set", color = Ink, fontSize = 23.sp, fontWeight = FontWeight.ExtraBold)
-            Text("Set your menu for the week", color = Muted, fontSize = 12.sp)
+            Text("Set Your Weekly Menu", color = Ink, fontSize = 19.sp, fontWeight = FontWeight.ExtraBold)
+            Text("$submittedCount of 7 days submitted", color = Muted, fontSize = 11.sp)
         }
         Icon(Icons.Outlined.CalendarMonth, null, tint = BrandDark, modifier = Modifier.size(22.dp))
     }
 }
 
 @Composable
-private fun DayCard(day: String, date: String, selected: Boolean, onClick: () -> Unit) {
+private fun DayCard(day: String, date: String, selected: Boolean, submitted: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Surface(
-        modifier = Modifier.width(58.dp).height(72.dp).clickable(onClick = onClick),
+        modifier = modifier.height(58.dp).clickable(onClick = onClick),
         color = if (selected) Color(0xFF668F48) else Color.White,
         contentColor = if (selected) Color.White else Muted,
         shape = RoundedCornerShape(16.dp),
@@ -1075,9 +1314,81 @@ private fun DayCard(day: String, date: String, selected: Boolean, onClick: () ->
         shadowElevation = if (selected) 3.dp else 0.dp
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-            Text(day, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold)
-            Spacer(Modifier.height(4.dp))
-            Text(date, fontSize = 12.sp)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(day, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold)
+                if (submitted) {
+                    Spacer(Modifier.width(3.dp))
+                    Icon(Icons.Filled.CheckCircle, null, modifier = Modifier.size(10.dp))
+                }
+            }
+            Spacer(Modifier.height(2.dp))
+            Text(date, fontSize = 10.sp)
+        }
+    }
+}
+
+@Composable
+private fun QuickMenuSetup(selected: String?, onVeg: () -> Unit, onNonVeg: () -> Unit) {
+    Surface(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+        color = Color(0xFFF4F8F2),
+        shape = RoundedCornerShape(18.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFDCE8D8))
+    ) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("Set all 7 days instantly", color = Ink, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold)
+            Text("Choose a preference and Zomeal will create a balanced weekly menu. You can edit any day later.", color = Muted, fontSize = 11.sp, lineHeight = 16.sp)
+            Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                OutlinedButton(
+                    onClick = onVeg,
+                    modifier = Modifier.weight(1f).height(44.dp),
+                    shape = RoundedCornerShape(13.dp),
+                    border = androidx.compose.foundation.BorderStroke(if (selected == "Veg") 2.dp else 1.dp, BrandDark),
+                    colors = ButtonDefaults.outlinedButtonColors(containerColor = if (selected == "Veg") BrandDark else Color.White, contentColor = if (selected == "Veg") Color.White else BrandDark)
+                ) {
+                    Icon(Icons.Outlined.Eco, null, modifier = Modifier.size(15.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Set All Veg", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+                OutlinedButton(
+                    onClick = onNonVeg,
+                    modifier = Modifier.weight(1f).height(44.dp),
+                    shape = RoundedCornerShape(13.dp),
+                    border = androidx.compose.foundation.BorderStroke(if (selected == "Non-Veg") 2.dp else 1.dp, Color(0xFFB85A38)),
+                    colors = ButtonDefaults.outlinedButtonColors(containerColor = if (selected == "Non-Veg") Color(0xFFB85A38) else Color.White, contentColor = if (selected == "Non-Veg") Color.White else Color(0xFF9A472E))
+                ) {
+                    Icon(Icons.Outlined.Restaurant, null, modifier = Modifier.size(15.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Set All Non-Veg", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+            if (selected != null) {
+                Text("All seven days are set to $selected. Review or customize below.", color = BrandDark, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
+
+@Composable
+private fun DaySelectorGrid(
+    days: List<String>,
+    dates: List<String>,
+    selectedDay: Int,
+    submittedDays: Map<Int, Boolean>,
+    onSelect: (Int) -> Unit
+) {
+    Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("Choose a day", color = Ink, fontSize = 14.sp, fontWeight = FontWeight.ExtraBold)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            (0..3).forEach { index ->
+                DayCard(days[index], dates[index], selectedDay == index, submittedDays[index] == true, Modifier.weight(1f)) { onSelect(index) }
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            (4..6).forEach { index ->
+                DayCard(days[index], dates[index], selectedDay == index, submittedDays[index] == true, Modifier.weight(1f)) { onSelect(index) }
+            }
+            Spacer(Modifier.weight(1f))
         }
     }
 }
@@ -1118,15 +1429,18 @@ private fun MealSlotEditor(
             }
             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(13.dp)) {
                 Text("Main course  ·  Choose 1", color = Ink, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    choices.forEach { choice ->
-                        MenuChoiceCard(
-                            choice = choice,
-                            selected = selectedChoice == choice.name,
-                            accent = accent,
-                            onClick = { onChoice(choice.name) },
-                            modifier = Modifier.weight(1f)
-                        )
+                choices.chunked(2).forEach { rowChoices ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        rowChoices.forEach { choice ->
+                            MenuChoiceCard(
+                                choice = choice,
+                                selected = selectedChoice == choice.name,
+                                accent = accent,
+                                onClick = { onChoice(choice.name) },
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                        if (rowChoices.size == 1) Spacer(Modifier.weight(1f))
                     }
                 }
                 Text("Carb  ·  Choose 1", color = Ink, fontSize = 14.sp, fontWeight = FontWeight.Bold)
@@ -1143,8 +1457,11 @@ private fun MealSlotEditor(
                     }
                 }
                 Text("Included · Non-changeable", color = accent, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold)
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                    items(included) { item -> IncludedSide(item, accent) }
+                included.chunked(2).forEach { rowItems ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                        rowItems.forEach { item -> IncludedSide(item, accent, Modifier.weight(1f)) }
+                        if (rowItems.size == 1) Spacer(Modifier.weight(1f))
+                    }
                 }
             }
         }
@@ -1190,9 +1507,9 @@ private fun DishArt(choice: MenuChoice, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun IncludedSide(label: String, accent: Color) {
-    Surface(color = Color.White, shape = RoundedCornerShape(12.dp), border = androidx.compose.foundation.BorderStroke(1.dp, Border)) {
-        Row(Modifier.widthIn(min = 92.dp).padding(horizontal = 9.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+private fun IncludedSide(label: String, accent: Color, modifier: Modifier = Modifier) {
+    Surface(modifier = modifier, color = Color.White, shape = RoundedCornerShape(12.dp), border = androidx.compose.foundation.BorderStroke(1.dp, Border)) {
+        Row(Modifier.padding(horizontal = 9.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Surface(color = accent.copy(alpha = .12f), shape = CircleShape) {
                 Icon(Icons.Outlined.Restaurant, null, tint = accent, modifier = Modifier.padding(5.dp).size(13.dp))
             }
@@ -1217,7 +1534,6 @@ private fun ReviewPlanScreen(
     val total = basePrice + platformFee - discount
     val showLunch = plan.title != "Dinner Only"
     val showDinner = plan.title != "Lunch Only"
-    var showAllDays by remember { mutableStateOf(false) }
     var showPayment by remember { mutableStateOf(false) }
 
     BackHandler(enabled = showPayment) { showPayment = false }
@@ -1225,6 +1541,8 @@ private fun ReviewPlanScreen(
         PaymentScreen(
             provider = provider,
             plan = plan,
+            lunchSelections = lunchSelections,
+            dinnerSelections = dinnerSelections,
             basePrice = basePrice,
             platformFee = platformFee,
             discount = discount,
@@ -1238,7 +1556,7 @@ private fun ReviewPlanScreen(
     Scaffold(
         containerColor = Color(0xFFFAFCFA),
         bottomBar = {
-            Surface(color = Color.White, shadowElevation = 10.dp) {
+            Surface(modifier = Modifier.navigationBarsPadding(), color = Color.White, shadowElevation = 10.dp) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.width(112.dp)) {
                         Text("Total amount", color = Muted, fontSize = 10.sp)
@@ -1272,9 +1590,7 @@ private fun ReviewPlanScreen(
                     showLunch = showLunch,
                     showDinner = showDinner,
                     lunchSelections = lunchSelections,
-                    dinnerSelections = dinnerSelections,
-                    expanded = showAllDays,
-                    onToggle = { showAllDays = !showAllDays }
+                    dinnerSelections = dinnerSelections
                 )
             }
             item { AddressReviewCard() }
@@ -1287,21 +1603,31 @@ private fun ReviewPlanScreen(
 
 private fun formatRupees(value: Int) = "₹${"%,d".format(value)}"
 
+private fun subscriptionDateRange(startOffsetDays: Int = 0): Pair<String, String> {
+    val formatter = SimpleDateFormat("dd MMM yyyy", Locale.ENGLISH)
+    val calendar = Calendar.getInstance()
+    calendar.add(Calendar.DAY_OF_YEAR, startOffsetDays)
+    val start = formatter.format(calendar.time)
+    calendar.add(Calendar.DAY_OF_YEAR, 29)
+    return start to formatter.format(calendar.time)
+}
+
 @Composable
 private fun ReviewHeader(onBack: () -> Unit) {
     Box(
-        Modifier.fillMaxWidth().height(148.dp).background(
+        Modifier.fillMaxWidth().height(116.dp).background(
             Brush.linearGradient(listOf(BrandDark, Brand, Lime), start = Offset.Zero, end = Offset(950f, 380f)),
             RoundedCornerShape(bottomStart = 26.dp, bottomEnd = 26.dp)
         )
     ) {
         IconButton(
             onClick = onBack,
-            modifier = Modifier.padding(start = 12.dp, top = 20.dp).size(42.dp).clip(CircleShape).background(Color.White.copy(alpha = .18f)).align(Alignment.CenterStart)
+            modifier = Modifier.padding(start = 12.dp).size(38.dp).clip(CircleShape).background(Color.White.copy(alpha = .18f)).align(Alignment.CenterStart)
         ) { Icon(Icons.Filled.ArrowBack, "Back", tint = Color.White, modifier = Modifier.size(19.dp)) }
         Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("Review Your Plan", color = Color.White, fontSize = 23.sp, fontWeight = FontWeight.ExtraBold)
-            Text("Everything look good?", color = Color.White.copy(alpha = .9f), fontSize = 12.sp)
+            Text("zomeal", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Black)
+            Text("Review Your Plan", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold)
+            Text("Check everything before payment", color = Color.White.copy(alpha = .88f), fontSize = 10.sp)
         }
         Column(Modifier.padding(end = 18.dp, top = 26.dp).align(Alignment.CenterEnd), horizontalAlignment = Alignment.CenterHorizontally) {
             Icon(Icons.Outlined.AccountBalanceWallet, null, tint = Color.White, modifier = Modifier.size(22.dp))
@@ -1376,44 +1702,63 @@ private fun WeeklyPreviewCard(
     showLunch: Boolean,
     showDinner: Boolean,
     lunchSelections: Map<Int, String>,
-    dinnerSelections: Map<Int, String>,
-    expanded: Boolean,
-    onToggle: () -> Unit
+    dinnerSelections: Map<Int, String>
 ) {
     val days = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
     Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Your Weekly Menu Preview", color = Ink, fontSize = 17.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.weight(1f))
-            TextButton(onClick = onToggle) { Text(if (expanded) "Show less" else "View full menu", color = BrandDark, fontSize = 10.sp) }
+            Surface(color = Mist, shape = RoundedCornerShape(12.dp)) {
+                Text("7 days", color = BrandDark, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp))
+            }
         }
+        Spacer(Modifier.height(9.dp))
         Surface(color = Mist, shape = RoundedCornerShape(18.dp)) {
-            Column {
-                val visibleDays = if (expanded) days.indices.toList() else days.indices.take(5)
-                LazyRow(contentPadding = PaddingValues(horizontal = 6.dp), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                    items(visibleDays) { index ->
-                        Column(Modifier.width(68.dp).padding(vertical = 14.dp, horizontal = 3.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(days[index], color = if (index == 0) BrandDark else Ink, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                if (showLunch) Icon(Icons.Outlined.LightMode, null, tint = Color(0xFFFFB300), modifier = Modifier.size(14.dp))
-                                if (showLunch && showDinner) Text(" + ", color = Muted, fontSize = 9.sp)
-                                if (showDinner) Icon(Icons.Outlined.DarkMode, null, tint = Color(0xFF34547A), modifier = Modifier.size(14.dp))
-                            }
-                            Text(
-                                listOfNotNull(
-                                    lunchSelections[index]?.takeIf { showLunch },
-                                    dinnerSelections[index]?.takeIf { showDinner }
-                                ).joinToString(" + "),
-                                color = Muted,
-                                fontSize = 8.sp,
-                                lineHeight = 11.sp,
-                                maxLines = 3
+            Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                days.indices.chunked(2).forEach { rowDays ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                        rowDays.forEach { index ->
+                            WeeklyPreviewDay(
+                                day = days[index],
+                                lunch = lunchSelections[index],
+                                dinner = dinnerSelections[index],
+                                showLunch = showLunch,
+                                showDinner = showDinner,
+                                modifier = Modifier.weight(1f)
                             )
                         }
+                        if (rowDays.size == 1) Spacer(Modifier.weight(1f))
                     }
                 }
-                TextButton(onClick = onToggle, modifier = Modifier.fillMaxWidth()) {
-                    Text(if (expanded) "Collapse" else "View all days", color = BrandDark, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                    Icon(if (expanded) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown, null, tint = BrandDark, modifier = Modifier.size(16.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun WeeklyPreviewDay(
+    day: String,
+    lunch: String?,
+    dinner: String?,
+    showLunch: Boolean,
+    showDinner: Boolean,
+    modifier: Modifier = Modifier
+) {
+    Surface(modifier = modifier, color = Color.White, shape = RoundedCornerShape(13.dp), border = androidx.compose.foundation.BorderStroke(1.dp, Border)) {
+        Column(Modifier.padding(9.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+            Text(day, color = BrandDark, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold)
+            if (showLunch) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Outlined.LightMode, null, tint = Color(0xFFFFB300), modifier = Modifier.size(13.dp))
+                    Spacer(Modifier.width(5.dp))
+                    Text(lunch.orEmpty(), color = Ink, fontSize = 8.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+            if (showDinner) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Outlined.DarkMode, null, tint = Color(0xFF5E4A9E), modifier = Modifier.size(13.dp))
+                    Spacer(Modifier.width(5.dp))
+                    Text(dinner.orEmpty(), color = Ink, fontSize = 8.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
         }
@@ -1505,10 +1850,15 @@ private fun PoliciesCard() {
     Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
         Text("Important Plans & Policies", color = Ink, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold)
         Spacer(Modifier.height(10.dp))
-        Row {
-            PolicyFact(Icons.Outlined.Edit, "Edit before", "cut-off time", Modifier.weight(1f))
-            PolicyFact(Icons.Outlined.PauseCircle, "Pause eligible", "meals anytime", Modifier.weight(1f))
-            PolicyFact(Icons.Outlined.HealthAndSafety, "Secure & hygienic", "home-style meals", Modifier.weight(1f))
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                PolicyFact(Icons.Outlined.Edit, "Edit before", "cut-off time", Modifier.weight(1f))
+                PolicyFact(Icons.Outlined.PauseCircle, "Pause eligible", "meals anytime", Modifier.weight(1f))
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                PolicyFact(Icons.Outlined.HealthAndSafety, "Secure & hygienic", "home-style meals", Modifier.weight(1f))
+                PolicyFact(Icons.Outlined.SupportAgent, "Support", "we are here to help", Modifier.weight(1f))
+            }
         }
         TextButton(onClick = { }, modifier = Modifier.align(Alignment.CenterHorizontally)) {
             Text("View cancellation & pause policy", color = BrandDark, fontSize = 10.sp)
@@ -1519,12 +1869,14 @@ private fun PoliciesCard() {
 
 @Composable
 private fun PolicyFact(icon: ImageVector, title: String, subtitle: String, modifier: Modifier = Modifier) {
-    Row(modifier.padding(end = 7.dp), verticalAlignment = Alignment.CenterVertically) {
-        IconCircle(icon)
-        Spacer(Modifier.width(6.dp))
-        Column {
-            Text(title, color = Ink, fontSize = 9.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-            Text(subtitle, color = Muted, fontSize = 8.sp, maxLines = 1)
+    Surface(modifier = modifier, color = Mist, shape = RoundedCornerShape(14.dp)) {
+        Row(Modifier.padding(9.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconCircle(icon)
+            Spacer(Modifier.width(6.dp))
+            Column {
+                Text(title, color = Ink, fontSize = 9.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                Text(subtitle, color = Muted, fontSize = 8.sp, maxLines = 1)
+            }
         }
     }
 }
@@ -1541,6 +1893,8 @@ private data class PaymentMethod(
 private fun PaymentScreen(
     provider: Provider,
     plan: MealPackage,
+    lunchSelections: Map<Int, String>,
+    dinnerSelections: Map<Int, String>,
     basePrice: Int,
     platformFee: Int,
     discount: Int,
@@ -1561,14 +1915,22 @@ private fun PaymentScreen(
     var paymentComplete by remember { mutableStateOf(false) }
 
     if (paymentComplete) {
-        PaymentSuccessScreen(provider = provider, plan = plan, total = total, onGoHome = onGoHome)
+        PaymentSuccessScreen(
+            provider = provider,
+            plan = plan,
+            total = total,
+            paymentMethod = methods[selectedMethod].title,
+            lunchSelections = lunchSelections,
+            dinnerSelections = dinnerSelections,
+            onGoHome = onGoHome
+        )
         return
     }
 
     Scaffold(
         containerColor = Color(0xFFFAFCFA),
         bottomBar = {
-            Surface(color = Color.White, shadowElevation = 10.dp) {
+            Surface(modifier = Modifier.navigationBarsPadding(), color = Color.White, shadowElevation = 10.dp) {
                 Column {
                     Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.width(112.dp)) {
@@ -1584,7 +1946,7 @@ private fun PaymentScreen(
                         ) {
                             Icon(Icons.Outlined.Lock, null, modifier = Modifier.size(17.dp))
                             Spacer(Modifier.width(8.dp))
-                            Text("Pay ${formatRupees(total)} Securely", fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.weight(1f))
+                            Text("Pay with ${methods[selectedMethod].title}", fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.weight(1f))
                             Icon(Icons.Filled.ArrowForward, null, modifier = Modifier.size(17.dp))
                         }
                     }
@@ -1601,12 +1963,16 @@ private fun PaymentScreen(
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(padding),
             contentPadding = PaddingValues(bottom = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             item { PaymentHeader(onBack) }
-            item { PaymentPlanSummary(provider, plan) }
-            item { PaymentAmountCard(plan, basePrice, platformFee, discount, total) }
-            item { Text("Choose Payment Method", color = Ink, fontSize = 17.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(horizontal = 20.dp)) }
+            item { CompactPaymentOverview(provider, plan, basePrice, platformFee, discount, total) }
+            item {
+                Column(Modifier.padding(horizontal = 20.dp, vertical = 4.dp)) {
+                    Text("Choose Payment Method", color = Ink, fontSize = 17.sp, fontWeight = FontWeight.ExtraBold)
+                    Text("Select an option to complete your payment", color = Muted, fontSize = 10.sp)
+                }
+            }
             items(methods.size) { index ->
                 PaymentMethodCard(
                     method = methods[index],
@@ -1631,25 +1997,73 @@ private fun PaymentScreen(
 @Composable
 private fun PaymentHeader(onBack: () -> Unit) {
     Box(
-        Modifier.fillMaxWidth().height(138.dp).background(
+        Modifier.fillMaxWidth().height(116.dp).background(
             Brush.linearGradient(listOf(BrandDark, Brand, Lime), start = Offset.Zero, end = Offset(950f, 360f)),
             RoundedCornerShape(bottomStart = 26.dp, bottomEnd = 26.dp)
         )
     ) {
         IconButton(
             onClick = onBack,
-            modifier = Modifier.padding(start = 12.dp, top = 18.dp).size(42.dp).clip(CircleShape).background(Color.White.copy(alpha = .18f)).align(Alignment.CenterStart)
+            modifier = Modifier.padding(start = 12.dp).size(38.dp).clip(CircleShape).background(Color.White.copy(alpha = .18f)).align(Alignment.CenterStart)
         ) { Icon(Icons.Filled.ArrowBack, "Back", tint = Color.White, modifier = Modifier.size(19.dp)) }
         Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("Payment", color = Color.White, fontSize = 23.sp, fontWeight = FontWeight.ExtraBold)
-            Text("Complete your secure payment", color = Color.White.copy(alpha = .9f), fontSize = 12.sp)
+            Text("zomeal", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Black)
+            Text("Payment", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold)
+            Text("Choose how you want to pay", color = Color.White.copy(alpha = .9f), fontSize = 10.sp)
         }
-        Row(Modifier.padding(end = 16.dp, top = 24.dp).align(Alignment.CenterEnd), verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Outlined.GppGood, null, tint = Color.White, modifier = Modifier.size(22.dp))
+        Row(Modifier.padding(end = 14.dp).align(Alignment.CenterEnd), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Outlined.GppGood, null, tint = Color.White, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(5.dp))
             Column {
-                Text("100%", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                Text("Secure", color = Color.White, fontSize = 10.sp)
+                Text("Secure", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
+
+@Composable
+private fun CompactPaymentOverview(
+    provider: Provider,
+    plan: MealPackage,
+    base: Int,
+    fee: Int,
+    discount: Int,
+    total: Int
+) {
+    val startDate = remember { subscriptionDateRange().first }
+    Surface(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+        color = Color.White,
+        shape = RoundedCornerShape(18.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Border),
+        shadowElevation = 2.dp
+    ) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(11.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(52.dp).clip(RoundedCornerShape(13.dp)).background(provider.tint)) {
+                    ProviderFoodArt(provider.accent, Modifier.fillMaxSize())
+                }
+                Spacer(Modifier.width(11.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(provider.name, color = Ink, fontSize = 14.sp, fontWeight = FontWeight.ExtraBold)
+                    Text("${plan.title}  ·  ${plan.meals}  ·  30 days", color = Muted, fontSize = 9.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text("Starts $startDate", color = BrandDark, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                }
+                Surface(color = Mist, shape = RoundedCornerShape(11.dp)) {
+                    Text("Reviewed ✓", color = BrandDark, fontSize = 8.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp))
+                }
+            }
+            HorizontalDivider(color = Border)
+            Row(verticalAlignment = Alignment.Bottom) {
+                Column(Modifier.weight(1f)) {
+                    Text("Amount payable", color = Muted, fontSize = 9.sp)
+                    Text(formatRupees(total), color = BrandDark, fontSize = 23.sp, fontWeight = FontWeight.Black)
+                    Text("Inclusive of all taxes", color = Muted, fontSize = 8.sp)
+                }
+                Column(horizontalAlignment = Alignment.End) {
+                    Text("Plan ${formatRupees(base)}  +  fee ${formatRupees(fee)}", color = Muted, fontSize = 8.sp)
+                    Text("You save ${formatRupees(discount)}", color = BrandDark, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                }
             }
         }
     }
@@ -1767,58 +2181,130 @@ private fun SecurityMiniFact(icon: ImageVector, label: String) {
 }
 
 @Composable
-private fun PaymentSuccessScreen(provider: Provider, plan: MealPackage, total: Int, onGoHome: () -> Unit) {
+private fun PaymentSuccessScreen(
+    provider: Provider,
+    plan: MealPackage,
+    total: Int,
+    paymentMethod: String,
+    lunchSelections: Map<Int, String>,
+    dinnerSelections: Map<Int, String>,
+    onGoHome: () -> Unit
+) {
+    var startOffsetDays by remember { mutableIntStateOf(0) }
+    var showPlanDetails by remember { mutableStateOf(false) }
+    var showDateOptions by remember { mutableStateOf(false) }
     val firstSlot = if (plan.title == "Dinner Only") "Dinner" else "Lunch"
-    val firstMeal = if (firstSlot == "Dinner") "Seasonal Mix Veg" else "Paneer Butter Masala"
+    val firstMeal = if (firstSlot == "Dinner") dinnerSelections[0].orEmpty() else lunchSelections[0].orEmpty()
+    val firstChoice = (lunchChoices + dinnerChoices).firstOrNull { it.name == firstMeal }
+        ?: if (firstSlot == "Dinner") dinnerChoices.first() else lunchChoices.first()
+    val orderId = remember { "ZM${System.currentTimeMillis().toString().takeLast(8)}" }
+    val (startDate, endDate) = remember(startOffsetDays) { subscriptionDateRange(startOffsetDays) }
 
-    LazyColumn(
-        modifier = Modifier.fillMaxSize().background(Color(0xFFFAFCFA)),
-        contentPadding = PaddingValues(bottom = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(18.dp)
-    ) {
-        item { SuccessHero() }
-        item { SuccessProviderCard(provider) }
-        item { SuccessPlanDetails(plan) }
-        item { PaymentConfirmedCard(total) }
-        item { FirstMealCard(firstSlot, firstMeal) }
-        item { WhatsNextSection() }
-        item {
-            Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+    Scaffold(
+        containerColor = Color(0xFFFAFCFA),
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        bottomBar = {
+            Surface(modifier = Modifier.navigationBarsPadding(), color = Color.White, shadowElevation = 10.dp) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                OutlinedButton(
+                    onClick = { showPlanDetails = true },
+                    modifier = Modifier.weight(1f).padding(vertical = 9.dp).height(50.dp),
+                    shape = RoundedCornerShape(15.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Brand)
+                ) { Text("View My Plan", color = BrandDark, fontSize = 11.sp, fontWeight = FontWeight.Bold) }
                 Button(
                     onClick = onGoHome,
-                    modifier = Modifier.fillMaxWidth().height(56.dp),
-                    shape = RoundedCornerShape(18.dp),
+                    modifier = Modifier.weight(1.35f).padding(vertical = 9.dp).height(50.dp),
+                    shape = RoundedCornerShape(15.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Brand)
                 ) {
-                    Icon(Icons.Outlined.Home, null, modifier = Modifier.size(19.dp))
-                    Spacer(Modifier.width(10.dp))
-                    Text("Go to Home", fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.weight(1f))
-                    Icon(Icons.Filled.ArrowForward, null, modifier = Modifier.size(18.dp))
+                    Icon(Icons.Outlined.Home, null, modifier = Modifier.size(17.dp))
+                    Spacer(Modifier.width(7.dp))
+                    Text("Go to Homepage", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold)
                 }
-                TextButton(onClick = { }) { Text("View My Plan", color = BrandDark, fontSize = 12.sp, fontWeight = FontWeight.Bold) }
+            }
             }
         }
+    ) { scaffoldPadding ->
+        BoxWithConstraints(
+            Modifier.fillMaxSize().padding(scaffoldPadding).statusBarsPadding()
+        ) {
+            val compact = maxHeight < 760.dp
+            Column(
+                Modifier.fillMaxSize().padding(bottom = 5.dp),
+                verticalArrangement = Arrangement.spacedBy(if (compact) 4.dp else 7.dp)
+            ) {
+                SuccessHero(compact)
+                PaymentConfirmedCard(total, paymentMethod, orderId)
+                SuccessProviderCard(provider)
+                SuccessPlanDetails(plan, startDate, endDate, onChangeDate = { showDateOptions = true })
+                FirstMealCard(firstSlot, firstMeal, firstChoice, provider.name, startDate, compact)
+            }
+        }
+    }
+
+    if (showPlanDetails) {
+        AlertDialog(
+            onDismissRequest = { showPlanDetails = false },
+            icon = { Icon(Icons.Outlined.CalendarMonth, null, tint = Brand) },
+            title = { Text("Your Active Plan", fontWeight = FontWeight.ExtraBold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                    Text(provider.name, color = Ink, fontWeight = FontWeight.Bold)
+                    Text("${plan.title} · ${plan.meals} · 30 days", color = Muted, fontSize = 12.sp)
+                    Text("$startDate – $endDate", color = BrandDark, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text("First meal: $firstSlot · $firstMeal", color = Muted, fontSize = 11.sp)
+                    Text("Paid ${formatRupees(total)} using $paymentMethod", color = Muted, fontSize = 11.sp)
+                }
+            },
+            confirmButton = { TextButton(onClick = { showPlanDetails = false }) { Text("Done", color = BrandDark) } }
+        )
+    }
+
+    if (showDateOptions) {
+        AlertDialog(
+            onDismissRequest = { showDateOptions = false },
+            icon = { Icon(Icons.Outlined.EventAvailable, null, tint = Brand) },
+            title = { Text("Change Start Date", fontWeight = FontWeight.ExtraBold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Choose when your 30-day plan should begin.", color = Muted, fontSize = 12.sp)
+                    listOf(0, 1, 3, 7).forEach { offset ->
+                        val date = subscriptionDateRange(offset).first
+                        Surface(
+                            modifier = Modifier.fillMaxWidth().clickable { startOffsetDays = offset; showDateOptions = false },
+                            color = if (startOffsetDays == offset) Mist else Color.White,
+                            shape = RoundedCornerShape(12.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, if (startOffsetDays == offset) Brand else Border)
+                        ) {
+                            Text(if (offset == 0) "Today · $date" else "$date", modifier = Modifier.padding(12.dp), color = if (startOffsetDays == offset) BrandDark else Ink, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showDateOptions = false }) { Text("Cancel", color = BrandDark) } }
+        )
     }
 }
 
 @Composable
-private fun SuccessHero() {
+private fun SuccessHero(compact: Boolean) {
     Box(
-        Modifier.fillMaxWidth().height(306.dp).background(
+        Modifier.fillMaxWidth().height(if (compact) 148.dp else 170.dp).background(
             Brush.linearGradient(listOf(BrandDark, Brand, Lime), start = Offset.Zero, end = Offset(950f, 620f)),
             RoundedCornerShape(bottomStart = 30.dp, bottomEnd = 30.dp)
         )
     ) {
         ConfettiArt(Modifier.fillMaxSize())
         Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text("zomeal", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Black)
+            Spacer(Modifier.height(if (compact) 5.dp else 8.dp))
             Surface(color = Color.White, shape = CircleShape, shadowElevation = 10.dp) {
-                Icon(Icons.Filled.Check, null, tint = Brand, modifier = Modifier.padding(22.dp).size(43.dp))
+                Icon(Icons.Filled.Check, null, tint = Brand, modifier = Modifier.padding(if (compact) 10.dp else 13.dp).size(if (compact) 25.dp else 29.dp))
             }
-            Spacer(Modifier.height(18.dp))
-            Text("You're all set!", color = Color.White, fontSize = 29.sp, fontWeight = FontWeight.Black)
-            Text("Your meal plan is now active", color = Color.White.copy(alpha = .92f), fontSize = 15.sp)
-            Spacer(Modifier.height(7.dp))
-            Text("Welcome to the Zomeal family!", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(if (compact) 7.dp else 10.dp))
+            Text("Payment successful!", color = Color.White, fontSize = if (compact) 19.sp else 21.sp, fontWeight = FontWeight.Black)
+            Text("Your meal plan is active · Welcome to the family", color = Color.White.copy(alpha = .92f), fontSize = 10.sp)
         }
     }
 }
@@ -1838,23 +2324,23 @@ private fun ConfettiArt(modifier: Modifier = Modifier) {
 @Composable
 private fun SuccessProviderCard(provider: Provider) {
     Surface(Modifier.fillMaxWidth().padding(horizontal = 20.dp), color = Color.White, shape = RoundedCornerShape(20.dp), shadowElevation = 4.dp) {
-        Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(96.dp).clip(RoundedCornerShape(16.dp)).background(provider.tint)) {
+        Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(66.dp).clip(RoundedCornerShape(14.dp)).background(provider.tint)) {
                 ProviderFoodArt(provider.accent, Modifier.fillMaxSize())
             }
             Spacer(Modifier.width(13.dp))
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(provider.name, color = Ink, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.weight(1f))
+                    Text(provider.name, color = Ink, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.weight(1f))
                     RatingPill(provider.rating, provider.reviews)
                 }
-                Spacer(Modifier.height(7.dp))
+                Spacer(Modifier.height(3.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Outlined.LocationOn, null, tint = Muted, modifier = Modifier.size(14.dp))
                     Spacer(Modifier.width(4.dp))
                     Text(provider.locality, color = Muted, fontSize = 10.sp)
                 }
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(4.dp))
                 Surface(color = Mist, shape = RoundedCornerShape(9.dp)) {
                     Row(Modifier.padding(horizontal = 7.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Outlined.Eco, null, tint = Brand, modifier = Modifier.size(12.dp))
@@ -1868,66 +2354,79 @@ private fun SuccessProviderCard(provider: Provider) {
 }
 
 @Composable
-private fun SuccessPlanDetails(plan: MealPackage) {
+private fun SuccessPlanDetails(plan: MealPackage, startDate: String, endDate: String, onChangeDate: () -> Unit) {
     Surface(Modifier.fillMaxWidth().padding(horizontal = 20.dp), color = Color.White, shape = RoundedCornerShape(18.dp), border = androidx.compose.foundation.BorderStroke(1.dp, Border)) {
         Column(Modifier.padding(top = 15.dp, bottom = 12.dp)) {
-            Text("Your Plan Details", color = BrandDark, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(horizontal = 16.dp))
-            Spacer(Modifier.height(12.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                ReviewPlanFact(Icons.Outlined.CalendarMonth, "Monthly package", "30 days plan", Modifier.weight(1f))
-                ReviewDivider()
-                ReviewPlanFact(plan.icon, plan.title, plan.meals, Modifier.weight(1f))
-                ReviewDivider()
-                ReviewPlanFact(Icons.Outlined.EventAvailable, "Start date", "24 Aug 2026", Modifier.weight(1f))
-                ReviewDivider()
-                ReviewPlanFact(Icons.Outlined.Event, "End date", "22 Sep 2026", Modifier.weight(1f))
+            Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Your Plan Details", color = BrandDark, fontSize = 14.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.weight(1f))
+                TextButton(onClick = onChangeDate, contentPadding = PaddingValues(horizontal = 7.dp, vertical = 0.dp)) {
+                    Icon(Icons.Outlined.EditCalendar, null, modifier = Modifier.size(13.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("Change date", fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+            Spacer(Modifier.height(5.dp))
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    ReviewPlanFact(Icons.Outlined.CalendarMonth, "Monthly package", "30 days plan", Modifier.weight(1f))
+                    ReviewDivider()
+                    ReviewPlanFact(plan.icon, plan.title, plan.meals, Modifier.weight(1f))
+                }
+                HorizontalDivider(color = Border)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    ReviewPlanFact(Icons.Outlined.EventAvailable, "Start date", startDate, Modifier.weight(1f))
+                    ReviewDivider()
+                    ReviewPlanFact(Icons.Outlined.Event, "End date", endDate, Modifier.weight(1f))
+                }
             }
         }
     }
 }
 
 @Composable
-private fun PaymentConfirmedCard(total: Int) {
+private fun PaymentConfirmedCard(total: Int, paymentMethod: String, orderId: String) {
     Surface(Modifier.fillMaxWidth().padding(horizontal = 20.dp), color = Mist, shape = RoundedCornerShape(17.dp)) {
         Row(Modifier.padding(15.dp), verticalAlignment = Alignment.CenterVertically) {
             Surface(color = Brand, shape = CircleShape) { Icon(Icons.Filled.Check, null, tint = Color.White, modifier = Modifier.padding(11.dp).size(20.dp)) }
             Spacer(Modifier.width(12.dp))
-            Column {
+            Column(Modifier.weight(1f)) {
                 Text("Payment Successful!", color = BrandDark, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold)
                 Text("We've received your payment of ${formatRupees(total)}.", color = Muted, fontSize = 10.sp)
-                Text("Your plan is confirmed and ready to begin.", color = Muted, fontSize = 10.sp)
+                Text("Paid using $paymentMethod  ·  Order $orderId", color = Muted, fontSize = 9.sp)
             }
+            Icon(Icons.Outlined.ReceiptLong, null, tint = Brand, modifier = Modifier.size(20.dp))
         }
     }
 }
 
 @Composable
-private fun FirstMealCard(slot: String, meal: String) {
+private fun FirstMealCard(slot: String, meal: String, choice: MenuChoice, providerName: String, startDate: String, compact: Boolean) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
         Text("Your First Meal", color = Ink, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold)
-        Spacer(Modifier.height(9.dp))
+        Spacer(Modifier.height(5.dp))
         Surface(color = Color.White, shape = RoundedCornerShape(19.dp), shadowElevation = 3.dp) {
-            Row(Modifier.height(152.dp)) {
-                Column(Modifier.weight(1.08f).padding(16.dp)) {
+            Row(Modifier.height(if (compact) 106.dp else 118.dp)) {
+                Column(Modifier.weight(1.12f).padding(if (compact) 10.dp else 12.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(if (slot == "Lunch") Icons.Outlined.LightMode else Icons.Outlined.DarkMode, null, tint = if (slot == "Lunch") Color(0xFFFFB300) else Color(0xFF34547A), modifier = Modifier.size(20.dp))
                         Spacer(Modifier.width(7.dp))
                         Text(slot, color = BrandDark, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                     }
-                    Spacer(Modifier.height(12.dp))
-                    Text(meal, color = Ink, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold)
+                    Spacer(Modifier.height(if (compact) 5.dp else 7.dp))
+                    Text(meal, color = Ink, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text("Prepared by $providerName", color = BrandDark, fontSize = 9.sp, fontWeight = FontWeight.Bold)
                     Text("Rice · Dal · Salad", color = Muted, fontSize = 10.sp)
                     Spacer(Modifier.weight(1f))
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Outlined.Event, null, tint = Brand, modifier = Modifier.size(13.dp))
-                        Text(" 24 Aug 2026", color = Muted, fontSize = 9.sp)
+                        Text(" $startDate", color = Muted, fontSize = 9.sp)
                         Spacer(Modifier.width(10.dp))
                         Icon(Icons.Outlined.Schedule, null, tint = Muted, modifier = Modifier.size(13.dp))
                         Text(if (slot == "Lunch") " 12–2 PM" else " 7–9 PM", color = Muted, fontSize = 9.sp)
                     }
                 }
                 Box(Modifier.weight(.92f).fillMaxHeight().background(Color(0xFFFFE2B8))) {
-                    DishArt(lunchChoices.first(), Modifier.fillMaxSize())
+                    DishArt(choice, Modifier.fillMaxSize())
                 }
             }
         }
@@ -2257,7 +2756,7 @@ private fun SubscriberQuickActions() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun SignupScreen(onContinue: (String) -> Unit) {
+private fun SignupScreen(onContinue: (String, String) -> Unit) {
     var fullName by rememberSaveable { mutableStateOf("") }
     var mobile by rememberSaveable { mutableStateOf("") }
     var pincode by rememberSaveable { mutableStateOf("") }
@@ -2349,7 +2848,7 @@ private fun SignupScreen(onContinue: (String) -> Unit) {
 
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Button(
-                            onClick = { onContinue(mobile) },
+                            onClick = { onContinue(mobile, pincode) },
                             enabled = valid,
                             modifier = Modifier.fillMaxWidth().height(if (compact) 54.dp else 60.dp),
                             shape = RoundedCornerShape(17.dp),
@@ -2361,7 +2860,7 @@ private fun SignupScreen(onContinue: (String) -> Unit) {
                         Spacer(Modifier.height(7.dp))
                         Row(horizontalArrangement = Arrangement.Center) {
                             Text("Already have an account? ", color = Muted, fontSize = 9.sp)
-                            Text("Login", color = BrandDark, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { onContinue(if (mobile.length == 10) mobile else "9876543242") })
+                            Text("Login", color = BrandDark, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { onContinue(if (mobile.length == 10) mobile else "9876543242", if (pincode.length == 6) pincode else "751030") })
                         }
                         Spacer(Modifier.height(5.dp))
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
@@ -2513,6 +3012,193 @@ private fun SignupBackgroundArt(modifier: Modifier = Modifier) {
         drawCircle(Color(0xFFEAF4D9), size.width * .45f, Offset(size.width * .93f, size.height * .05f))
         drawOval(Color(0xFFE3F0D4), Offset(-size.width * .15f, size.height * .91f), androidx.compose.ui.geometry.Size(size.width * .8f, size.height * .16f))
         drawOval(Color(0xFFD2E9C1), Offset(size.width * .35f, size.height * .94f), androidx.compose.ui.geometry.Size(size.width * .85f, size.height * .12f))
+    }
+}
+
+@Composable
+private fun ServiceUnavailableScreen(
+    pincode: String,
+    onExplore: () -> Unit,
+    onTryAnotherPincode: () -> Unit
+) {
+    var notificationRequested by rememberSaveable { mutableStateOf(false) }
+
+    BoxWithConstraints(
+        Modifier
+            .fillMaxSize()
+            .background(Color(0xFFFBFDF9))
+            .statusBarsPadding()
+            .navigationBarsPadding()
+    ) {
+        val compact = maxHeight < 760.dp
+        SignupBackgroundArt(Modifier.matchParentSize())
+
+        Column(
+            modifier = Modifier.fillMaxSize().padding(horizontal = if (compact) 13.dp else 18.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                "zomeal",
+                color = Brand,
+                fontSize = if (compact) 27.sp else 31.sp,
+                fontWeight = FontWeight.Black,
+                modifier = Modifier.padding(top = if (compact) 8.dp else 14.dp, bottom = if (compact) 7.dp else 11.dp)
+            )
+
+            Surface(
+                modifier = Modifier.fillMaxWidth().weight(1f),
+                color = Color.White.copy(alpha = .98f),
+                shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+                shadowElevation = 8.dp
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxSize().padding(horizontal = if (compact) 17.dp else 21.dp, vertical = if (compact) 13.dp else 18.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Box(
+                            modifier = Modifier
+                                .size(if (compact) 72.dp else 88.dp)
+                                .background(
+                                    Brush.radialGradient(listOf(Color(0xFFE6F4D9), Color(0xFFF5FAF0))),
+                                    CircleShape
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                Icons.Outlined.LocationOff,
+                                contentDescription = null,
+                                tint = Brand,
+                                modifier = Modifier.size(if (compact) 35.dp else 42.dp)
+                            )
+                        }
+                        Spacer(Modifier.height(if (compact) 10.dp else 14.dp))
+                        Text(
+                            "We're not in your area yet",
+                            color = Ink,
+                            fontSize = if (compact) 19.sp else 23.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                        Spacer(Modifier.height(5.dp))
+                        Text(
+                            "No active Zomeal provider currently delivers to",
+                            color = Muted,
+                            fontSize = if (compact) 9.sp else 10.sp,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+                        Surface(
+                            modifier = Modifier.padding(top = 8.dp),
+                            color = Mist,
+                            shape = RoundedCornerShape(20.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Border)
+                        ) {
+                            Row(Modifier.padding(horizontal = 13.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Outlined.LocationOn, null, tint = Brand, modifier = Modifier.size(15.dp))
+                                Spacer(Modifier.width(5.dp))
+                                Text(pincode.ifBlank { "Your pincode" }, color = BrandDark, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        Spacer(Modifier.height(if (compact) 11.dp else 15.dp))
+                        Text(
+                            "You can still explore Zomeal",
+                            color = BrandDark,
+                            fontSize = if (compact) 13.sp else 15.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                        Text(
+                            "Browse kitchens, compare packages and prepare a weekly menu. Add a serviceable delivery address when you're ready to subscribe.",
+                            color = Muted,
+                            fontSize = if (compact) 9.sp else 10.sp,
+                            lineHeight = if (compact) 13.sp else 15.sp,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 5.dp)
+                        )
+                        Spacer(Modifier.height(if (compact) 7.dp else 10.dp))
+                        BrowsePossibilities(compact)
+                        Spacer(Modifier.height(if (compact) 9.dp else 13.dp))
+                        Surface(color = Color(0xFFFFF8E7), shape = RoundedCornerShape(13.dp)) {
+                            Row(Modifier.fillMaxWidth().padding(if (compact) 10.dp else 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Outlined.Info, null, tint = Color(0xFFB67600), modifier = Modifier.size(17.dp))
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    "Browsing is open. Subscription and payment unlock after you add an address served by your selected provider.",
+                                    color = Color(0xFF735318),
+                                    fontSize = if (compact) 8.sp else 9.sp,
+                                    lineHeight = 12.sp
+                                )
+                            }
+                        }
+                    }
+
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Button(
+                            onClick = onExplore,
+                            modifier = Modifier.fillMaxWidth().height(if (compact) 54.dp else 60.dp),
+                            shape = RoundedCornerShape(17.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Brand)
+                        ) {
+                            Icon(Icons.Outlined.TravelExplore, null, modifier = Modifier.size(19.dp))
+                            Spacer(Modifier.width(9.dp))
+                            Text("Explore Zomeal", fontSize = 14.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.weight(1f))
+                            Icon(Icons.Filled.ArrowForward, null, modifier = Modifier.size(18.dp))
+                        }
+                        Spacer(Modifier.height(if (compact) 7.dp else 9.dp))
+                        OutlinedButton(
+                            onClick = onTryAnotherPincode,
+                            modifier = Modifier.fillMaxWidth().height(if (compact) 46.dp else 50.dp),
+                            shape = RoundedCornerShape(15.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Brand)
+                        ) {
+                            Icon(Icons.Outlined.EditLocationAlt, null, tint = Brand, modifier = Modifier.size(17.dp))
+                            Spacer(Modifier.width(7.dp))
+                            Text("Try Another Pincode", color = BrandDark, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                        TextButton(
+                            onClick = { notificationRequested = true },
+                            enabled = !notificationRequested,
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Icon(
+                                if (notificationRequested) Icons.Outlined.CheckCircle else Icons.Outlined.NotificationsActive,
+                                null,
+                                tint = Brand,
+                                modifier = Modifier.size(15.dp)
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                if (notificationRequested) "We'll notify you when Zomeal arrives" else "Notify Me When Available",
+                                color = BrandDark,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BrowsePossibilities(compact: Boolean) {
+    val items = listOf(
+        Triple(Icons.Outlined.Storefront, "Browse", "Kitchens"),
+        Triple(Icons.Outlined.RestaurantMenu, "Compare", "Packages"),
+        Triple(Icons.Outlined.DateRange, "Create", "Weekly Menu"),
+        Triple(Icons.Outlined.BookmarkBorder, "Save", "For Later")
+    )
+    Surface(color = Mist, shape = RoundedCornerShape(16.dp)) {
+        Row(Modifier.fillMaxWidth().padding(vertical = if (compact) 10.dp else 13.dp)) {
+            items.forEach { item ->
+                Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(item.first, null, tint = Brand, modifier = Modifier.size(if (compact) 19.dp else 22.dp))
+                    Spacer(Modifier.height(4.dp))
+                    Text(item.second, color = Ink, fontSize = if (compact) 8.sp else 9.sp, fontWeight = FontWeight.Bold)
+                    Text(item.third, color = Muted, fontSize = if (compact) 7.sp else 8.sp, maxLines = 1)
+                }
+            }
+        }
     }
 }
 
