@@ -316,6 +316,9 @@ private fun ProviderListScreen() {
     var pendingMobile by rememberSaveable { mutableStateOf("") }
     var pendingPincode by rememberSaveable { mutableStateOf("") }
     var serviceUnavailable by rememberSaveable { mutableStateOf(false) }
+    var showLogin by rememberSaveable { mutableStateOf(false) }
+    var pendingIsLogin by rememberSaveable { mutableStateOf(false) }
+    var showNoSubscriptionHome by rememberSaveable { mutableStateOf(false) }
     var browseMode by rememberSaveable { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
     var filter by remember { mutableStateOf(DietFilter.ALL) }
@@ -341,7 +344,12 @@ private fun ProviderListScreen() {
             OtpVerificationScreen(
                 mobile = pendingMobile,
                 onVerified = {
-                    if (pendingPincode in setOf("751030", "751019", "751003")) {
+                    if (pendingIsLogin) {
+                        browseMode = false
+                        signupComplete = true
+                        activeProvider = if (pendingMobile == "9999999999") providers.first() else null
+                        showNoSubscriptionHome = pendingMobile == "1111111111"
+                    } else if (pendingPincode in setOf("751030", "751019", "751003")) {
                         browseMode = false
                         signupComplete = true
                     } else {
@@ -351,17 +359,42 @@ private fun ProviderListScreen() {
                 onBack = { awaitingOtp = false }
             )
         } else {
-            SignupScreen(onContinue = { mobile, pincode ->
+            if (showLogin) LoginScreen(
+                onContinue = { mobile ->
+                    pendingMobile = mobile
+                    pendingPincode = "751030"
+                    pendingIsLogin = true
+                    awaitingOtp = true
+                },
+                onCreateAccount = { showLogin = false }
+            ) else SignupScreen(onContinue = { mobile, pincode ->
                 pendingMobile = mobile
                 pendingPincode = pincode
+                pendingIsLogin = false
                 awaitingOtp = true
-            })
+            }, onLogin = { showLogin = true })
         }
         return
     }
 
     activeProvider?.let { provider ->
-        ActiveSubscriberHome(provider)
+        ActiveSubscriberHome(provider, onLogout = {
+            activeProvider = null
+            selectedProvider = null
+            signupComplete = false
+            awaitingOtp = false
+            serviceUnavailable = false
+            pendingIsLogin = false
+            showLogin = true
+        })
+        return
+    }
+
+    if (showNoSubscriptionHome) {
+        NoSubscriptionHomeScreen(
+            onFindPlan = { showNoSubscriptionHome = false },
+            onLogout = { showNoSubscriptionHome = false; signupComplete = false; awaitingOtp = false; showLogin = true }
+        )
         return
     }
 
@@ -1822,7 +1855,6 @@ private fun AddressReviewCard() {
                     onClick = {
                         when {
                             house.isBlank() || street.isBlank() || locality.isBlank() || pincode.length != 6 -> error = "Please complete all required address fields."
-                            pincode !in setOf("751030", "751019", "751003", "751012") -> error = "This address is currently outside the provider’s delivery area."
                             else -> {
                                 CustomerProfileStore.house = house.trim(); CustomerProfileStore.street = street.trim()
                                 CustomerProfileStore.locality = locality.trim(); CustomerProfileStore.landmark = landmark.trim()
@@ -1832,8 +1864,8 @@ private fun AddressReviewCard() {
                         }
                     },
                     modifier = Modifier.fillMaxWidth().height(42.dp), shape = RoundedCornerShape(13.dp), colors = ButtonDefaults.buttonColors(containerColor = BrandDark)
-                ) { Icon(Icons.Outlined.VerifiedUser, null, modifier = Modifier.size(15.dp)); Spacer(Modifier.width(6.dp)); Text("Check Availability & Save Address", fontSize = 10.sp, fontWeight = FontWeight.Bold) }
-                Text("We’ll confirm that ${"Swaad Ghar"} delivers to this exact address before saving it.", color = Muted, fontSize = 8.sp)
+                ) { Icon(Icons.Outlined.Save, null, modifier = Modifier.size(15.dp)); Spacer(Modifier.width(6.dp)); Text("Save Delivery Address", fontSize = 10.sp, fontWeight = FontWeight.Bold) }
+                Text("Your pincode was confirmed during registration. This address will be saved securely to your profile.", color = Muted, fontSize = 8.sp)
             }
         }
     }
@@ -1962,6 +1994,131 @@ private data class PaymentMethod(
     val trailing: String = "Instant",
     val recommended: Boolean = false
 )
+
+private enum class PrototypeState { NONE, LOADING, OFFLINE, SERVER_ERROR, SESSION_EXPIRED, NO_PROVIDERS, PAYMENT_PENDING, PAYMENT_FAILED, PROVIDER_UNAVAILABLE, PACKAGE_UNAVAILABLE, MENU_UNAVAILABLE, TERMS, PRIVACY, REFUND_POLICY, PAUSE_POLICY }
+
+@Composable
+private fun NoSubscriptionHomeScreen(onFindPlan: () -> Unit, onLogout: () -> Unit) {
+    var testState by remember { mutableStateOf(PrototypeState.NONE) }
+    BackHandler(enabled = testState != PrototypeState.NONE) { testState = PrototypeState.NONE }
+    if (testState in setOf(PrototypeState.PAYMENT_PENDING, PrototypeState.PAYMENT_FAILED)) {
+        PaymentOutcomeScreen(pending = testState == PrototypeState.PAYMENT_PENDING, onBack = { testState = PrototypeState.NONE }, onRetry = { testState = PrototypeState.PAYMENT_PENDING }, onChangeMethod = { testState = PrototypeState.NONE })
+        return
+    }
+    if (testState in setOf(PrototypeState.PROVIDER_UNAVAILABLE, PrototypeState.PACKAGE_UNAVAILABLE, PrototypeState.MENU_UNAVAILABLE)) {
+        UnavailableRecoveryScreen(testState, onBack = { testState = PrototypeState.NONE }, onBrowse = onFindPlan, onKeepPlan = { testState = PrototypeState.NONE })
+        return
+    }
+    if (testState in setOf(PrototypeState.TERMS, PrototypeState.PRIVACY, PrototypeState.REFUND_POLICY, PrototypeState.PAUSE_POLICY)) {
+        LegalPolicyScreen(testState, onBack = { testState = PrototypeState.NONE })
+        return
+    }
+    if (testState != PrototypeState.NONE) {
+        FriendlyAppStateScreen(testState, onBack = { testState = PrototypeState.NONE }, onRetry = { testState = PrototypeState.LOADING })
+        return
+    }
+    Scaffold(containerColor = Color(0xFFFAFCFA)) { padding ->
+        LazyColumn(Modifier.fillMaxSize().padding(padding).navigationBarsPadding(), contentPadding = PaddingValues(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            item { NoPlanHeader(onLogout) }
+            item { NoPlanHero(onFindPlan) }
+            item { NoPlanBenefits() }
+            item { SectionTitle("Recommended near you") }
+            items(providers.take(2)) { provider -> ProviderCard(provider, onClick = onFindPlan) }
+            item { PrototypeTestPanel { testState = it } }
+            item { NoPlanLegalLinks { testState = it } }
+        }
+    }
+}
+
+@Composable private fun NoPlanHeader(onLogout: () -> Unit) {
+    Box(Modifier.fillMaxWidth().height(175.dp).background(Brush.linearGradient(listOf(BrandDark, Brand, Lime), start = Offset.Zero, end = Offset(900f, 360f)), RoundedCornerShape(bottomStart = 28.dp, bottomEnd = 28.dp))) {
+        Column(Modifier.align(Alignment.CenterStart).padding(start = 20.dp)) { Text("zomeal", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Black); Text("Welcome back!", color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.ExtraBold); Text("Your next homely meal is only a few taps away", color = Color.White.copy(alpha = .88f), fontSize = 9.sp) }
+        IconButton(onClick = onLogout, modifier = Modifier.align(Alignment.TopEnd).padding(14.dp).size(40.dp).clip(CircleShape).background(Color.White.copy(alpha = .16f))) { Icon(Icons.Outlined.Logout, "Log out", tint = Color.White, modifier = Modifier.size(18.dp)) }
+    }
+}
+
+@Composable private fun NoPlanHero(onFindPlan: () -> Unit) {
+    Surface(Modifier.fillMaxWidth().padding(horizontal = 18.dp), color = Color.White, shape = RoundedCornerShape(20.dp), shadowElevation = 3.dp) {
+        Column(Modifier.padding(17.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            FunnyStateIllustration(PrototypeState.NO_PROVIDERS, Modifier.size(128.dp))
+            Text("No active meal plan yet", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
+            Text("Choose a nearby kitchen, personalize your weekly menu and let us handle the daily cooking.", color = Muted, fontSize = 10.sp, lineHeight = 14.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+            Spacer(Modifier.height(13.dp)); Button(onClick = onFindPlan, modifier = Modifier.fillMaxWidth().height(50.dp), shape = RoundedCornerShape(15.dp), colors = ButtonDefaults.buttonColors(containerColor = BrandDark)) { Icon(Icons.Outlined.Search, null, modifier = Modifier.size(17.dp)); Spacer(Modifier.width(7.dp)); Text("Find a Meal Plan", fontSize = 11.sp, fontWeight = FontWeight.ExtraBold) }
+        }
+    }
+}
+
+@Composable private fun NoPlanBenefits() {
+    val items = listOf(Triple(Icons.Outlined.Restaurant, "Homely meals", "Menus you can customize"), Triple(Icons.Outlined.CalendarMonth, "Monthly plans", "Pause or edit anytime"), Triple(Icons.Outlined.LocalShipping, "Daily delivery", "Reliable lunch and dinner"))
+    Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp), horizontalArrangement = Arrangement.spacedBy(7.dp)) { items.forEach { item -> Surface(Modifier.weight(1f), color = Mist, shape = RoundedCornerShape(14.dp)) { Column(Modifier.padding(10.dp), horizontalAlignment = Alignment.CenterHorizontally) { Icon(item.first, null, tint = Brand, modifier = Modifier.size(20.dp)); Text(item.second, color = Ink, fontSize = 8.sp, fontWeight = FontWeight.Bold); Text(item.third, color = Muted, fontSize = 6.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center) } } } }
+}
+
+@Composable private fun PrototypeTestPanel(onOpen: (PrototypeState) -> Unit) {
+    val states = listOf(PrototypeState.LOADING to "Loading", PrototypeState.OFFLINE to "No internet", PrototypeState.SERVER_ERROR to "Server error", PrototypeState.SESSION_EXPIRED to "Session expired", PrototypeState.NO_PROVIDERS to "No providers", PrototypeState.PAYMENT_PENDING to "Payment pending", PrototypeState.PAYMENT_FAILED to "Payment failed", PrototypeState.PROVIDER_UNAVAILABLE to "Provider unavailable", PrototypeState.PACKAGE_UNAVAILABLE to "Package unavailable", PrototypeState.MENU_UNAVAILABLE to "Menu unavailable")
+    Surface(Modifier.fillMaxWidth().padding(horizontal = 18.dp), color = Color(0xFFFFFAED), shape = RoundedCornerShape(18.dp), border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFF0DFC0))) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { Text("Prototype Test Screens", color = Ink, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold); Text("Tap any state to preview it during MVP testing.", color = Muted, fontSize = 8.sp); states.chunked(2).forEach { row -> Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) { row.forEach { state -> OutlinedButton(onClick = { onOpen(state.first) }, modifier = Modifier.weight(1f).height(37.dp), shape = RoundedCornerShape(11.dp), contentPadding = PaddingValues(horizontal = 4.dp)) { Text(state.second, fontSize = 7.sp, fontWeight = FontWeight.Bold) } }; if (row.size == 1) Spacer(Modifier.weight(1f)) } }
+        }
+    }
+}
+
+@Composable private fun FriendlyAppStateScreen(state: PrototypeState, onBack: () -> Unit, onRetry: () -> Unit) {
+    val content = when (state) { PrototypeState.LOADING -> Triple("Warming up your meal world…", "Our tiny chef is arranging fresh providers and menus for you.", "Please wait"); PrototypeState.OFFLINE -> Triple("Oops, the internet took a tea break!", "Check Wi-Fi or mobile data and we’ll get your meals back on the table.", "Try Again"); PrototypeState.SERVER_ERROR -> Triple("Our kitchen server spilled the dal", "Nothing was charged or lost. Give us a moment and try again.", "Retry"); PrototypeState.SESSION_EXPIRED -> Triple("Your session got a little sleepy", "Log in again securely to continue managing your meal plan.", "Login Again"); else -> Triple("No kitchens found nearby", "Try a different pincode or check again soon—we’re adding new kitchens every day.", "Change Location") }
+    Scaffold(containerColor = Color(0xFFFAFCFA), bottomBar = { Surface(modifier = Modifier.navigationBarsPadding(), color = Color.White, shadowElevation = 7.dp) { Button(onClick = onRetry, modifier = Modifier.fillMaxWidth().padding(18.dp).height(50.dp), shape = RoundedCornerShape(15.dp), colors = ButtonDefaults.buttonColors(containerColor = BrandDark)) { Text(content.third, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold) } } }) { padding ->
+        Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = 24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) { FunnyStateIllustration(state, Modifier.size(230.dp)); Text(content.first, color = Ink, fontSize = 21.sp, fontWeight = FontWeight.ExtraBold, textAlign = androidx.compose.ui.text.style.TextAlign.Center); Spacer(Modifier.height(8.dp)); Text(content.second, color = Muted, fontSize = 11.sp, lineHeight = 16.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center); if (state != PrototypeState.LOADING) TextButton(onClick = onBack) { Text("Back to Test Screens", color = BrandDark, fontSize = 9.sp) } }
+    }
+}
+
+@Composable private fun FunnyStateIllustration(state: PrototypeState, modifier: Modifier = Modifier) {
+    Box(modifier, contentAlignment = Alignment.Center) {
+        Canvas(Modifier.fillMaxSize()) { drawCircle(Color(0xFFEAF6E7), radius = size.minDimension * .42f); drawCircle(Color(0xFFD7EDC8), radius = size.minDimension * .32f) }
+        when (state) { PrototypeState.LOADING -> { Column(horizontalAlignment = Alignment.CenterHorizontally) { Text("👨‍🍳", fontSize = 52.sp); CircularProgressIndicator(Modifier.size(24.dp), color = Brand, strokeWidth = 3.dp); Text("stirring…", color = BrandDark, fontSize = 8.sp, fontWeight = FontWeight.Bold) } }; PrototypeState.OFFLINE -> Text("📡☕", fontSize = 52.sp); PrototypeState.SERVER_ERROR -> Text("🥣💥", fontSize = 54.sp); PrototypeState.SESSION_EXPIRED -> Text("😴🔐", fontSize = 52.sp); PrototypeState.NO_PROVIDERS -> Text("🍽️🔍", fontSize = 54.sp); else -> Text("🍲", fontSize = 56.sp) }
+    }
+}
+
+@Composable private fun PaymentOutcomeScreen(pending: Boolean, onBack: () -> Unit, onRetry: () -> Unit, onChangeMethod: () -> Unit) {
+    Scaffold(containerColor = Color(0xFFFAFCFA), bottomBar = { Surface(modifier = Modifier.navigationBarsPadding(), color = Color.White, shadowElevation = 8.dp) { Row(Modifier.padding(14.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) { OutlinedButton(onClick = onChangeMethod, modifier = Modifier.weight(1f).height(48.dp), shape = RoundedCornerShape(14.dp)) { Text("Change Method", fontSize = 9.sp, fontWeight = FontWeight.Bold) }; Button(onClick = onRetry, modifier = Modifier.weight(1f).height(48.dp), shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.buttonColors(containerColor = BrandDark)) { Text(if (pending) "Check Status" else "Retry Payment", fontSize = 9.sp, fontWeight = FontWeight.Bold) } } } }) { padding ->
+        LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(bottom = 20.dp), verticalArrangement = Arrangement.spacedBy(13.dp)) { item { PaymentHeader(onBack) }; item { Column(Modifier.fillMaxWidth().padding(horizontal = 22.dp), horizontalAlignment = Alignment.CenterHorizontally) { PaymentFunnyIllustration(pending); Text(if (pending) "Payment is being confirmed" else "Payment didn’t go through", color = Ink, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, textAlign = androidx.compose.ui.text.style.TextAlign.Center); Text(if (pending) "Please don’t pay again. Your bank may take a few minutes to confirm the transaction." else "No money was charged. You can safely retry or choose another payment method.", color = Muted, fontSize = 10.sp, lineHeight = 15.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center) } }; item { PaymentStatusDetails(pending) }; item { Surface(Modifier.fillMaxWidth().padding(horizontal = 18.dp), color = Mist, shape = RoundedCornerShape(15.dp)) { Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Outlined.SupportAgent, null, tint = Brand, modifier = Modifier.size(19.dp)); Spacer(Modifier.width(8.dp)); Column { Text("Need help?", color = Ink, fontSize = 10.sp, fontWeight = FontWeight.Bold); Text("Keep transaction ID ZM-PAY-1048 ready for support.", color = Muted, fontSize = 8.sp) } } } } }
+    }
+}
+
+@Composable private fun PaymentFunnyIllustration(pending: Boolean) { Box(Modifier.size(190.dp), contentAlignment = Alignment.Center) { Canvas(Modifier.fillMaxSize()) { drawCircle(if (pending) Color(0xFFFFF0C9) else Color(0xFFFFE8E4), radius = size.minDimension * .42f) }; Text(if (pending) "💳⏳" else "💳😵", fontSize = 62.sp) } }
+
+@Composable private fun PaymentStatusDetails(pending: Boolean) { Surface(Modifier.fillMaxWidth().padding(horizontal = 18.dp), color = Color.White, shape = RoundedCornerShape(18.dp), border = androidx.compose.foundation.BorderStroke(1.dp, Border)) { Column(Modifier.padding(15.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) { Text("Payment details", color = Ink, fontSize = 14.sp, fontWeight = FontWeight.ExtraBold); PriceRow("Amount", "₹6,394"); PriceRow("Method", "UPI"); PriceRow("Transaction ID", "ZM-PAY-1048"); HorizontalDivider(color = Border); Row { Text("Status", color = Muted, fontSize = 10.sp, modifier = Modifier.weight(1f)); Surface(color = if (pending) Color(0xFFFFF0C9) else Color(0xFFFFE8E4), shape = RoundedCornerShape(8.dp)) { Text(if (pending) "PENDING" else "FAILED", color = if (pending) Color(0xFFA66A00) else Color(0xFFC83B32), fontSize = 8.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)) } } } } }
+
+@Composable private fun UnavailableRecoveryScreen(state: PrototypeState, onBack: () -> Unit, onBrowse: () -> Unit, onKeepPlan: () -> Unit) {
+    val providerCase = state == PrototypeState.PROVIDER_UNAVAILABLE
+    val packageCase = state == PrototypeState.PACKAGE_UNAVAILABLE
+    val title = when (state) { PrototypeState.PROVIDER_UNAVAILABLE -> "This kitchen is taking a break"; PrototypeState.PACKAGE_UNAVAILABLE -> "This package left the menu"; else -> "One meal option sold out" }
+    val detail = when (state) { PrototypeState.PROVIDER_UNAVAILABLE -> "Swaad Ghar is no longer accepting subscriptions for your area. Your saved menu is safe."; PrototypeState.PACKAGE_UNAVAILABLE -> "Lunch + Dinner is temporarily unavailable. Choose an available package or another kitchen."; else -> "Paneer Butter Masala is unavailable for Thursday lunch. Pick a replacement before the cut-off." }
+    val emoji = when (state) { PrototypeState.PROVIDER_UNAVAILABLE -> "🏠😴"; PrototypeState.PACKAGE_UNAVAILABLE -> "📦👋"; else -> "🍛🏃" }
+    Scaffold(containerColor = Color(0xFFFAFCFA), bottomBar = { Surface(modifier = Modifier.navigationBarsPadding(), color = Color.White, shadowElevation = 8.dp) { Row(Modifier.padding(14.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) { OutlinedButton(onClick = onBack, modifier = Modifier.weight(1f).height(48.dp), shape = RoundedCornerShape(14.dp)) { Text("Not Now", fontSize = 9.sp, fontWeight = FontWeight.Bold) }; Button(onClick = if (providerCase || packageCase) onBrowse else onKeepPlan, modifier = Modifier.weight(1f).height(48.dp), shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.buttonColors(containerColor = BrandDark)) { Text(if (providerCase) "Find Kitchens" else if (packageCase) "View Packages" else "Choose Replacement", fontSize = 8.sp, fontWeight = FontWeight.Bold) } } } }) { padding ->
+        LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(bottom = 18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) { item { AppSectionHeader("Plan Update", "A small change needs your attention", Icons.Outlined.Update) }; item { Column(Modifier.fillMaxWidth().padding(horizontal = 22.dp), horizontalAlignment = Alignment.CenterHorizontally) { Box(Modifier.size(190.dp), contentAlignment = Alignment.Center) { Canvas(Modifier.fillMaxSize()) { drawCircle(Color(0xFFFFF2D7), radius = size.minDimension * .43f) }; Text(emoji, fontSize = 62.sp) }; Text(title, color = Ink, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, textAlign = androidx.compose.ui.text.style.TextAlign.Center); Text(detail, color = Muted, fontSize = 10.sp, lineHeight = 15.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center) } }; item { UnavailableImpactCard(state) }; item { UnavailableSafetyCard(state) } }
+    }
+}
+
+@Composable private fun UnavailableImpactCard(state: PrototypeState) {
+    val facts = when (state) { PrototypeState.PROVIDER_UNAVAILABLE -> listOf("No payment will be collected" to Icons.Outlined.Payments, "Saved address and menu remain available" to Icons.Outlined.Save, "Browse other serviceable kitchens" to Icons.Outlined.Storefront); PrototypeState.PACKAGE_UNAVAILABLE -> listOf("Current price is unchanged until you choose" to Icons.Outlined.CurrencyRupee, "Weekly menu remains saved" to Icons.Outlined.RestaurantMenu, "Compare alternate packages" to Icons.Outlined.CompareArrows); else -> listOf("Only Thursday lunch is affected" to Icons.Outlined.CalendarMonth, "Choose from provider alternatives" to Icons.Outlined.SwapHoriz, "No extra charge for replacement" to Icons.Outlined.Verified) }
+    Surface(Modifier.fillMaxWidth().padding(horizontal = 18.dp), color = Color.White, shape = RoundedCornerShape(18.dp), border = androidx.compose.foundation.BorderStroke(1.dp, Border)) { Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) { Text("What happens now?", color = Ink, fontSize = 14.sp, fontWeight = FontWeight.ExtraBold); facts.forEach { fact -> Row(verticalAlignment = Alignment.CenterVertically) { Surface(color = Mist, shape = CircleShape) { Icon(fact.second, null, tint = Brand, modifier = Modifier.padding(8.dp).size(16.dp)) }; Spacer(Modifier.width(9.dp)); Text(fact.first, color = Ink, fontSize = 9.sp, fontWeight = FontWeight.Medium) } } } }
+}
+
+@Composable private fun UnavailableSafetyCard(state: PrototypeState) { Surface(Modifier.fillMaxWidth().padding(horizontal = 18.dp), color = Mist, shape = RoundedCornerShape(15.dp)) { Row(Modifier.padding(12.dp), verticalAlignment = Alignment.Top) { Icon(Icons.Outlined.Shield, null, tint = Brand, modifier = Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text(if (state == PrototypeState.MENU_UNAVAILABLE) "If you don’t choose before cut-off, the provider’s recommended replacement will be used and clearly shown in your order." else "Zomeal will never move or charge your subscription without your confirmation.", color = Muted, fontSize = 8.sp, lineHeight = 12.sp) } } }
+
+@Composable private fun NoPlanLegalLinks(onOpen: (PrototypeState) -> Unit) {
+    Surface(Modifier.fillMaxWidth().padding(horizontal = 18.dp), color = Color.White, shape = RoundedCornerShape(16.dp)) { Column(Modifier.padding(13.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { Text("Policies & Legal", color = Ink, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold); listOf(PrototypeState.TERMS to "Terms of Service", PrototypeState.PRIVACY to "Privacy Policy", PrototypeState.REFUND_POLICY to "Refund & Cancellation", PrototypeState.PAUSE_POLICY to "Subscription Pause Policy").forEach { item -> Row(Modifier.fillMaxWidth().clickable { onOpen(item.first) }.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Outlined.Description, null, tint = Brand, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(8.dp)); Text(item.second, color = Ink, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)); Icon(Icons.Filled.ChevronRight, null, tint = Muted, modifier = Modifier.size(16.dp)) } } } }
+}
+
+@Composable private fun LegalPolicyScreen(state: PrototypeState, onBack: () -> Unit) {
+    val title = when (state) { PrototypeState.TERMS -> "Terms of Service"; PrototypeState.PRIVACY -> "Privacy Policy"; PrototypeState.REFUND_POLICY -> "Refund & Cancellation"; else -> "Subscription Pause Policy" }
+    val sections = when (state) {
+        PrototypeState.TERMS -> listOf("Using Zomeal" to "Zomeal connects customers with independent meal-service providers. Package details, menus, delivery windows and applicable cut-offs are shown before payment.", "Subscriptions" to "A subscription begins only after successful payment. Customers must provide an accurate serviceable delivery address and follow provider menu-change deadlines.", "Fair use" to "Do not misuse accounts, payments, referrals, reviews or support channels. Zomeal may restrict accounts involved in fraud or abuse.")
+        PrototypeState.PRIVACY -> listOf("Information we collect" to "We collect account details, phone number, delivery address, meal preferences, orders and payment references needed to provide the service.", "How information is used" to "Data is used for authentication, serviceability, meal delivery, support, safety, payments and product improvement.", "Your choices" to "You may update profile details, notification preferences and request account deletion. Payment credentials are handled by approved payment partners.")
+        PrototypeState.REFUND_POLICY -> listOf("Eligible refunds" to "Refunds may apply to failed payments, undelivered meals, verified missing items or eligible service-quality issues.", "How refunds arrive" to "Approved amounts may return to the original payment method or Zomeal Wallet. Banking timelines can vary.", "Cancellations" to "Meal or plan cancellations must follow the provider cut-off shown in the app. Prepared or dispatched meals may not be refundable.")
+        else -> listOf("Pausing meals" to "Customers can pause eligible Lunch, Dinner or both before the provider’s daily cut-off.", "Plan impact" to "Eligible paused meals may extend the plan or receive credit according to the selected provider’s package rules.", "Resuming" to "Paused meals can be resumed before cut-off. The Home and My Plan screens show the latest active pause schedule.")
+    }
+    Scaffold(containerColor = Color(0xFFFAFCFA), bottomBar = { Surface(modifier = Modifier.navigationBarsPadding(), color = Color.White, shadowElevation = 7.dp) { Button(onClick = onBack, modifier = Modifier.fillMaxWidth().padding(14.dp).height(48.dp), shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.buttonColors(containerColor = BrandDark)) { Text("I Understand", fontSize = 10.sp, fontWeight = FontWeight.ExtraBold) } } }) { padding ->
+        LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(bottom = 18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) { item { Box(Modifier.fillMaxWidth().height(130.dp).background(Brush.linearGradient(listOf(BrandDark, Brand, Lime)), RoundedCornerShape(bottomStart = 27.dp, bottomEnd = 27.dp))) { IconButton(onClick = onBack, modifier = Modifier.align(Alignment.CenterStart).padding(12.dp).size(39.dp).clip(CircleShape).background(Color.White.copy(alpha = .16f))) { Icon(Icons.Filled.ArrowBack, "Back", tint = Color.White) }; Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) { Text("zomeal", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Black); Text(title, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold); Text("Effective 12 August 2026", color = Color.White.copy(alpha = .85f), fontSize = 8.sp) } } }; item { Surface(Modifier.fillMaxWidth().padding(horizontal = 18.dp), color = Mist, shape = RoundedCornerShape(14.dp)) { Text("This prototype copy summarizes the MVP policy. Final legal text should be reviewed by a qualified legal professional before launch.", color = Muted, fontSize = 8.sp, lineHeight = 12.sp, modifier = Modifier.padding(12.dp)) } }; items(sections) { section -> Surface(Modifier.fillMaxWidth().padding(horizontal = 18.dp), color = Color.White, shape = RoundedCornerShape(16.dp), border = androidx.compose.foundation.BorderStroke(1.dp, Border)) { Column(Modifier.padding(14.dp)) { Text(section.first, color = Ink, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold); Spacer(Modifier.height(6.dp)); Text(section.second, color = Muted, fontSize = 9.sp, lineHeight = 14.sp) } } }; item { Text("Questions? Contact Zomeal Support from your Profile.", color = BrandDark, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.fillMaxWidth().padding(18.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center) } }
+    }
+}
 
 @Composable
 private fun PaymentScreen(
@@ -2621,7 +2778,7 @@ private fun WhatsNextSection() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ActiveSubscriberHome(provider: Provider) {
+private fun ActiveSubscriberHome(provider: Provider, onLogout: () -> Unit) {
     var selectedNav by remember { mutableIntStateOf(0) }
     var dialog by remember { mutableStateOf<String?>(null) }
     var selectedMeal by remember { mutableStateOf("Lunch") }
@@ -2740,7 +2897,7 @@ private fun ActiveSubscriberHome(provider: Provider) {
     when (selectedNav) {
         1 -> { MyPlanScreen(provider, onNav = { selectedNav = it }, onSupport = { showSupportScreen = true }, onWeeklyMenu = { showFullWeeklyMenu = true }); return }
         2 -> { OrdersScreen(provider, onNav = { selectedNav = it }, onSupport = { showSupportScreen = true }, onTrack = { showTrackingScreen = true }); return }
-        3 -> { ProfileScreen(onNav = { selectedNav = it }, onWallet = { showWalletScreen = true }, onSupport = { showSupportScreen = true }); return }
+        3 -> { ProfileScreen(onNav = { selectedNav = it }, onWallet = { showWalletScreen = true }, onSupport = { showSupportScreen = true }, onLogout = onLogout); return }
     }
 
     Scaffold(
@@ -3735,18 +3892,16 @@ private fun FullWeeklyMenuScreen(
     onEditTomorrow: (String) -> Unit,
     onPauseMeals: () -> Unit
 ) {
-    val dayNames = listOf("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
-    val lunches = listOf("Paneer Butter Masala", "Dal Tadka", "Rajma Masala", "Kadai Paneer", "Chana Masala", "Seasonal Mix Veg", "Paneer Do Pyaza")
-    val dinners = listOf("Seasonal Mix Veg", "Chana Masala", "Egg Tadka", "Mix Veg Curry", "Dal Makhani", "Paneer Masala", "Aloo Gobi")
+    val dayFormatter = remember { SimpleDateFormat("EEEE", Locale.ENGLISH) }
+    val nextSevenDays = remember { (0..6).map { offset -> Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, offset) } } }
+    val dayNames = remember { nextSevenDays.map { dayFormatter.format(it.time) } }
+    val lunches = remember { mutableStateListOf("Paneer Butter Masala", "Dal Tadka", "Rajma Masala", "Kadai Paneer", "Chana Masala", "Seasonal Mix Veg", "Paneer Do Pyaza") }
+    val dinners = remember { mutableStateListOf("Seasonal Mix Veg", "Chana Masala", "Egg Tadka", "Mix Veg Curry", "Dal Makhani", "Paneer Masala", "Aloo Gobi") }
     val lunchCarbs = listOf("Rice", "Roti", "Rice", "Roti", "Rice", "Rice", "Roti")
     val dinnerCarbs = listOf("Roti", "Paratha", "Roti", "Puri", "Roti", "Paratha", "Roti")
-    val today = remember { Calendar.getInstance() }
-    val daysSinceMonday = remember { (today.get(Calendar.DAY_OF_WEEK) - Calendar.MONDAY + 7) % 7 }
-    val monday = remember { Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -daysSinceMonday) } }
-    val tomorrowCalendar = remember { Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, 1) } }
-    val tomorrowIndex = remember { (tomorrowCalendar.get(Calendar.DAY_OF_WEEK) + 5) % 7 }
-    val todayIndex = remember { (Calendar.getInstance().get(Calendar.DAY_OF_WEEK) + 5) % 7 }
     val dateFormatter = remember { SimpleDateFormat("dd MMM", Locale.ENGLISH) }
+    val pausedMeals = remember { mutableStateListOf<String>() }
+    val hour = remember { Calendar.getInstance().get(Calendar.HOUR_OF_DAY) }
     var message by remember { mutableStateOf<String?>(null) }
     BackHandler(onBack = onBack)
 
@@ -3757,19 +3912,25 @@ private fun FullWeeklyMenuScreen(
             item { WeeklyPlanOverviewCard() }
             item { WeeklyMenuLegend() }
             dayNames.indices.forEach { index ->
-                val date = (monday.clone() as Calendar).apply { add(Calendar.DAY_OF_YEAR, index) }
-                val isTomorrow = index == tomorrowIndex
+                val date = nextSevenDays[index]
+                val isTomorrow = index == 1
                 val lunch = if (isTomorrow) tomorrowLunch else lunches[index]
                 val dinner = if (isTomorrow) tomorrowDinner else dinners[index]
                 val lunchCarb = if (isTomorrow) tomorrowLunchCarb else lunchCarbs[index]
                 val dinnerCarb = if (isTomorrow) tomorrowDinnerCarb else dinnerCarbs[index]
+                val lunchEligible = index > 0 || hour < 8
+                val dinnerEligible = index > 0 || hour < 16
                 item(key = dayNames[index]) {
                     FullWeekDayCard(
                         day = dayNames[index], date = dateFormatter.format(date.time),
                         lunch = lunch, lunchCarb = lunchCarb, dinner = dinner, dinnerCarb = dinnerCarb,
-                        isToday = index == todayIndex, isTomorrow = isTomorrow,
-                        onEditLunch = { if (isTomorrow) onEditTomorrow("Lunch") else message = "Only tomorrow’s Lunch can be changed from Home. Future weekly selections remain as saved." },
-                        onEditDinner = { if (isTomorrow) onEditTomorrow("Dinner") else message = "Only tomorrow’s Dinner can be changed from Home. Future weekly selections remain as saved." }
+                        isToday = index == 0, isTomorrow = isTomorrow,
+                        lunchEligible = lunchEligible, dinnerEligible = dinnerEligible,
+                        lunchPaused = "${index}-Lunch" in pausedMeals, dinnerPaused = "${index}-Dinner" in pausedMeals,
+                        onEditLunch = { if (!lunchEligible) message = "Today’s lunch change window closed at 8:00 AM." else if (isTomorrow) onEditTomorrow("Lunch") else { lunches[index] = listOf("Paneer Butter Masala", "Dal Tadka", "Rajma Masala", "Kadai Paneer")[(listOf("Paneer Butter Masala", "Dal Tadka", "Rajma Masala", "Kadai Paneer").indexOf(lunches[index]) + 1).coerceAtLeast(0) % 4]; message = "${dayNames[index]} lunch updated." } },
+                        onEditDinner = { if (!dinnerEligible) message = "Today’s dinner change window closed at 4:00 PM." else if (isTomorrow) onEditTomorrow("Dinner") else { dinners[index] = listOf("Seasonal Mix Veg", "Chana Masala", "Egg Tadka", "Mix Veg Curry")[(listOf("Seasonal Mix Veg", "Chana Masala", "Egg Tadka", "Mix Veg Curry").indexOf(dinners[index]) + 1).coerceAtLeast(0) % 4]; message = "${dayNames[index]} dinner updated." } },
+                        onPauseLunch = { val key = "${index}-Lunch"; if (!lunchEligible) message = "Today’s lunch pause cut-off has passed." else { if (key in pausedMeals) pausedMeals.remove(key) else pausedMeals.add(key); message = "${dayNames[index]} lunch ${if (key in pausedMeals) "paused" else "resumed"}." } },
+                        onPauseDinner = { val key = "${index}-Dinner"; if (!dinnerEligible) message = "Today’s dinner pause cut-off has passed." else { if (key in pausedMeals) pausedMeals.remove(key) else pausedMeals.add(key); message = "${dayNames[index]} dinner ${if (key in pausedMeals) "paused" else "resumed"}." } }
                     )
                 }
             }
@@ -3794,24 +3955,24 @@ private fun FullWeeklyMenuScreen(
 }
 
 @Composable private fun WeeklyMenuLegend() {
-    Surface(Modifier.fillMaxWidth().padding(horizontal = 18.dp), color = Mist, shape = RoundedCornerShape(13.dp)) { Row(Modifier.padding(horizontal = 12.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) { WeeklyLegendDot(Brand, "Tomorrow · editable"); Spacer(Modifier.weight(1f)); WeeklyLegendDot(Color(0xFF88948D), "Saved menu"); Spacer(Modifier.weight(1f)); WeeklyLegendDot(Color(0xFFD17A00), "Cut-off applies") } }
+    Surface(Modifier.fillMaxWidth().padding(horizontal = 18.dp), color = Mist, shape = RoundedCornerShape(13.dp)) { Row(Modifier.padding(horizontal = 12.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) { WeeklyLegendDot(Brand, "Next 7 days editable"); Spacer(Modifier.weight(1f)); WeeklyLegendDot(Color(0xFFD17A00), "Today’s cut-off applies"); Spacer(Modifier.weight(1f)); WeeklyLegendDot(Color(0xFFD64545), "Pause by meal") } }
 }
 
 @Composable private fun WeeklyLegendDot(color: Color, label: String) { Row(verticalAlignment = Alignment.CenterVertically) { Box(Modifier.size(7.dp).clip(CircleShape).background(color)); Spacer(Modifier.width(4.dp)); Text(label, color = Muted, fontSize = 7.sp) } }
 
-@Composable private fun FullWeekDayCard(day: String, date: String, lunch: String, lunchCarb: String, dinner: String, dinnerCarb: String, isToday: Boolean, isTomorrow: Boolean, onEditLunch: () -> Unit, onEditDinner: () -> Unit) {
+@Composable private fun FullWeekDayCard(day: String, date: String, lunch: String, lunchCarb: String, dinner: String, dinnerCarb: String, isToday: Boolean, isTomorrow: Boolean, lunchEligible: Boolean, dinnerEligible: Boolean, lunchPaused: Boolean, dinnerPaused: Boolean, onEditLunch: () -> Unit, onEditDinner: () -> Unit, onPauseLunch: () -> Unit, onPauseDinner: () -> Unit) {
     Surface(Modifier.fillMaxWidth().padding(horizontal = 18.dp), color = Color.White, shape = RoundedCornerShape(18.dp), border = androidx.compose.foundation.BorderStroke(if (isTomorrow) 2.dp else 1.dp, if (isTomorrow) Brand.copy(alpha = .55f) else Border), shadowElevation = if (isTomorrow) 2.dp else 0.dp) {
         Column {
             Row(Modifier.fillMaxWidth().background(if (isTomorrow) Brand.copy(alpha = .075f) else Mist).padding(horizontal = 13.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text(day, color = if (isTomorrow) BrandDark else Ink, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold); Text(date, color = Muted, fontSize = 8.sp) }; Surface(color = when { isToday -> Color(0xFF1674A5).copy(alpha = .1f); isTomorrow -> Brand.copy(alpha = .1f); else -> Border.copy(alpha = .6f) }, shape = RoundedCornerShape(8.dp)) { Text(when { isToday -> "TODAY"; isTomorrow -> "TOMORROW"; else -> "SAVED" }, color = when { isToday -> Color(0xFF1674A5); isTomorrow -> BrandDark; else -> Muted }, fontSize = 7.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(horizontal = 7.dp, vertical = 5.dp)) } }
-            WeeklyMealRow("Lunch", Icons.Outlined.LightMode, Color(0xFFE0A000), lunch, "$lunchCarb · Dal · Salad · Achar", isTomorrow, onEditLunch)
+            WeeklyMealRow("Lunch", Icons.Outlined.LightMode, Color(0xFFE0A000), lunch, "$lunchCarb · Dal · Salad · Achar", lunchEligible, lunchPaused, onEditLunch, onPauseLunch)
             HorizontalDivider(color = Border, modifier = Modifier.padding(horizontal = 12.dp))
-            WeeklyMealRow("Dinner", Icons.Outlined.DarkMode, Color(0xFF6546A8), dinner, "$dinnerCarb · Dal · Seasonal side · Achar", isTomorrow, onEditDinner)
+            WeeklyMealRow("Dinner", Icons.Outlined.DarkMode, Color(0xFF6546A8), dinner, "$dinnerCarb · Dal · Seasonal side · Achar", dinnerEligible, dinnerPaused, onEditDinner, onPauseDinner)
         }
     }
 }
 
-@Composable private fun WeeklyMealRow(slot: String, icon: ImageVector, accent: Color, meal: String, sides: String, editable: Boolean, onEdit: () -> Unit) {
-    Row(Modifier.fillMaxWidth().clickable(onClick = onEdit).padding(12.dp), verticalAlignment = Alignment.CenterVertically) { Surface(color = accent.copy(alpha = .1f), shape = CircleShape) { Icon(icon, null, tint = accent, modifier = Modifier.padding(8.dp).size(16.dp)) }; Spacer(Modifier.width(9.dp)); Column(Modifier.weight(1f)) { Text(slot, color = accent, fontSize = 8.sp, fontWeight = FontWeight.Bold); Text(meal, color = Ink, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold); Text(sides, color = Muted, fontSize = 7.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) }; Icon(if (editable) Icons.Outlined.Edit else Icons.Outlined.Lock, if (editable) "Edit tomorrow's $slot" else "Saved meal", tint = if (editable) Brand else Muted, modifier = Modifier.size(16.dp)) }
+@Composable private fun WeeklyMealRow(slot: String, icon: ImageVector, accent: Color, meal: String, sides: String, editable: Boolean, paused: Boolean, onEdit: () -> Unit, onPause: () -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(11.dp), verticalAlignment = Alignment.CenterVertically) { Surface(color = accent.copy(alpha = .1f), shape = CircleShape) { Icon(icon, null, tint = accent, modifier = Modifier.padding(8.dp).size(16.dp)) }; Spacer(Modifier.width(9.dp)); Column(Modifier.weight(1f)) { Text("$slot${if (paused) " · PAUSED" else ""}", color = if (paused) Color(0xFFD64545) else accent, fontSize = 8.sp, fontWeight = FontWeight.Bold); Text(if (paused) "Meal paused" else meal, color = Ink, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold); Text(if (paused) "Tap resume to restore this meal" else sides, color = Muted, fontSize = 7.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) }; IconButton(onClick = { if (editable && !paused) onEdit() }, modifier = Modifier.size(34.dp).clip(CircleShape).background(if (editable && !paused) Mist else Border.copy(alpha = .45f))) { Icon(Icons.Outlined.Edit, "Edit $slot", tint = if (editable && !paused) Brand else Muted, modifier = Modifier.size(15.dp)) }; Spacer(Modifier.width(4.dp)); IconButton(onClick = onPause, modifier = Modifier.size(34.dp).clip(CircleShape).background(if (paused) Color(0xFFD64545).copy(alpha = .1f) else Mist)) { Icon(if (paused) Icons.Outlined.PlayCircle else Icons.Outlined.PauseCircle, if (paused) "Resume $slot" else "Pause $slot", tint = if (paused) Color(0xFFD64545) else Brand, modifier = Modifier.size(16.dp)) } }
 }
 
 @Composable private fun WeeklyPauseAction(onPause: () -> Unit) {
@@ -3819,7 +3980,7 @@ private fun FullWeeklyMenuScreen(
 }
 
 @Composable private fun WeeklyMenuInformation() {
-    Surface(Modifier.fillMaxWidth().padding(horizontal = 18.dp), color = Color(0xFFFFFAED), shape = RoundedCornerShape(15.dp), border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFF2DFC1))) { Row(Modifier.padding(12.dp), verticalAlignment = Alignment.Top) { Icon(Icons.Outlined.Info, null, tint = Color(0xFFB7791F), modifier = Modifier.size(17.dp)); Spacer(Modifier.width(8.dp)); Column { Text("About daily changes", color = Ink, fontSize = 10.sp, fontWeight = FontWeight.Bold); Text("Tomorrow’s one-day changes appear here but do not overwrite the weekly menu chosen during subscription setup. Provider alternatives and opening times still apply.", color = Muted, fontSize = 8.sp, lineHeight = 12.sp) } } }
+    Surface(Modifier.fillMaxWidth().padding(horizontal = 18.dp), color = Color(0xFFFFFAED), shape = RoundedCornerShape(15.dp), border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFF2DFC1))) { Row(Modifier.padding(12.dp), verticalAlignment = Alignment.Top) { Icon(Icons.Outlined.Info, null, tint = Color(0xFFB7791F), modifier = Modifier.size(17.dp)); Spacer(Modifier.width(8.dp)); Column { Text("About menu changes", color = Ink, fontSize = 10.sp, fontWeight = FontWeight.Bold); Text("You can edit or pause the rolling next seven days. Today’s lunch and dinner follow their provider cut-offs. Changes here affect only the selected delivery day and do not replace your recurring weekly template.", color = Muted, fontSize = 8.sp, lineHeight = 12.sp) } } }
 }
 
 @Composable
@@ -4278,10 +4439,15 @@ private fun SupportCentreScreen(onBack: () -> Unit) {
 @Composable private fun ActiveTicketCard(onClick: () -> Unit) { Surface(Modifier.fillMaxWidth().padding(horizontal = 18.dp).clickable(onClick = onClick), color = Color.White, shape = RoundedCornerShape(16.dp), border = androidx.compose.foundation.BorderStroke(1.dp, Border)) { Row(Modifier.padding(13.dp), verticalAlignment = Alignment.CenterVertically) { IconCircle(Icons.Outlined.ConfirmationNumber); Spacer(Modifier.width(9.dp)); Column(Modifier.weight(1f)) { Text("Active ticket · ZM-1084", color = Ink, fontSize = 11.sp, fontWeight = FontWeight.Bold); Text("Meal quality · In progress", color = Muted, fontSize = 8.sp) }; Text("View", color = BrandDark, fontSize = 9.sp, fontWeight = FontWeight.Bold) } } }
 
 @Composable
-private fun ProfileScreen(onNav: (Int) -> Unit, onWallet: () -> Unit, onSupport: () -> Unit) {
+private fun ProfileScreen(onNav: (Int) -> Unit, onWallet: () -> Unit, onSupport: () -> Unit, onLogout: () -> Unit) {
     var dialog by remember { mutableStateOf<String?>(null) }
     var editAddress by remember { mutableStateOf(false) }
+    var policyScreen by remember { mutableStateOf<PrototypeState?>(null) }
     var mealAlerts by remember { mutableStateOf(true) }; var offers by remember { mutableStateOf(false) }
+    policyScreen?.let { policy ->
+        LegalPolicyScreen(policy, onBack = { policyScreen = null })
+        return
+    }
     Scaffold(containerColor = Color(0xFFFAFCFA), bottomBar = { ZomealBottomBar(3, onNav) }) { padding ->
         LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(bottom = 18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             item { AppSectionHeader("Profile", "Your account, preferences and security", Icons.Outlined.Person) }
@@ -4295,11 +4461,29 @@ private fun ProfileScreen(onNav: (Int) -> Unit, onWallet: () -> Unit, onSupport:
             item { ToggleSettingCard("Offers and rewards", "Wallet bonuses and referral campaigns", offers) { offers = it } }
             item { SectionTitle("Help & settings") }
             item { ProfileMenuCard(listOf(Triple(Icons.Outlined.SupportAgent, "Support Centre", "Chat, call or raise a ticket"), Triple(Icons.Outlined.Language, "Language", "English"), Triple(Icons.Outlined.Shield, "Privacy & security", "Permissions and account data"))) { label -> if (label == "Support Centre") onSupport() else dialog = label } }
+            item { SectionTitle("Legal & Policies") }
+            item {
+                ProfileMenuCard(
+                    listOf(
+                        Triple(Icons.Outlined.Description, "Terms of Service", "Rules for using Zomeal"),
+                        Triple(Icons.Outlined.PrivacyTip, "Privacy Policy", "How we protect and use your data"),
+                        Triple(Icons.Outlined.CurrencyRupee, "Refund & Cancellation", "Refund eligibility and timelines"),
+                        Triple(Icons.Outlined.PauseCircle, "Subscription Pause Policy", "Pause deadlines, credits and extensions")
+                    )
+                ) { label ->
+                    policyScreen = when (label) {
+                        "Terms of Service" -> PrototypeState.TERMS
+                        "Privacy Policy" -> PrototypeState.PRIVACY
+                        "Refund & Cancellation" -> PrototypeState.REFUND_POLICY
+                        else -> PrototypeState.PAUSE_POLICY
+                    }
+                }
+            }
             item { OutlinedButton(onClick = { dialog = "Log out" }, modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp).height(43.dp), colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFD64545))) { Icon(Icons.Outlined.Logout, null, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(6.dp)); Text("Log out", fontSize = 10.sp, fontWeight = FontWeight.Bold) } }
         }
     }
     if (editAddress) ProfileAddressDialog(onDismiss = { editAddress = false })
-    dialog?.let { action -> AlertDialog(onDismissRequest = { dialog = null }, title = { Text(action, fontWeight = FontWeight.Bold) }, text = { Text(when (action) { "Meal preferences" -> "Pure vegetarian preference selected. You can also add allergies and ingredients to avoid."; "Log out" -> "Are you sure you want to log out of Zomeal?"; else -> "$action settings are ready to manage from this screen." }, fontSize = 11.sp) }, confirmButton = { Button(onClick = { dialog = null }) { Text(if (action == "Log out") "Log out" else "Done") } }, dismissButton = { TextButton(onClick = { dialog = null }) { Text("Cancel") } }) }
+    dialog?.let { action -> AlertDialog(onDismissRequest = { dialog = null }, title = { Text(action, fontWeight = FontWeight.Bold) }, text = { Text(when (action) { "Meal preferences" -> "Pure vegetarian preference selected. You can also add allergies and ingredients to avoid."; "Log out" -> "Are you sure you want to log out of Zomeal?"; else -> "$action settings are ready to manage from this screen." }, fontSize = 11.sp) }, confirmButton = { Button(onClick = { if (action == "Log out") onLogout() else dialog = null }) { Text(if (action == "Log out") "Log out" else "Done") } }, dismissButton = { TextButton(onClick = { dialog = null }) { Text("Cancel") } }) }
 }
 
 @Composable
@@ -4398,22 +4582,22 @@ private fun HomeHeaderAction(icon: ImageVector, label: String, onClick: () -> Un
 
 @Composable
 private fun ActivePlanCard(provider: Provider) {
-    Surface(Modifier.fillMaxWidth().padding(horizontal = 18.dp), color = Color.White, shape = RoundedCornerShape(21.dp), shadowElevation = 5.dp) {
-        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Surface(color = Brand, shape = CircleShape) { Icon(Icons.Outlined.CalendarMonth, null, tint = Color.White, modifier = Modifier.padding(13.dp).size(23.dp)) }
-            Spacer(Modifier.width(12.dp))
+    Surface(Modifier.fillMaxWidth().padding(horizontal = 18.dp).height(112.dp), color = Color.White, shape = RoundedCornerShape(21.dp), shadowElevation = 5.dp) {
+        Row(Modifier.fillMaxSize().padding(horizontal = 14.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Surface(color = Brand, shape = CircleShape) { Icon(Icons.Outlined.CalendarMonth, null, tint = Color.White, modifier = Modifier.padding(11.dp).size(21.dp)) }
+            Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
                 Text("Your Plan", color = BrandDark, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Text(provider.name, color = Ink, fontSize = 14.sp, lineHeight = 17.sp, fontWeight = FontWeight.ExtraBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(provider.name, color = Ink, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold)
-                    Spacer(Modifier.width(7.dp))
-                    Surface(color = Mist, shape = RoundedCornerShape(8.dp)) { Text(provider.diet, color = BrandDark, fontSize = 8.sp, modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)) }
+                    Surface(color = Mist, shape = RoundedCornerShape(7.dp)) { Text(provider.diet, color = BrandDark, fontSize = 7.sp, maxLines = 1, modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)) }
+                    Spacer(Modifier.width(5.dp))
+                    Text("Monthly · 30 days", color = Muted, fontSize = 8.sp, maxLines = 1)
                 }
-                Text("Monthly · Lunch + Dinner · 30 days", color = Muted, fontSize = 9.sp)
             }
             Box(Modifier.width(1.dp).height(50.dp).background(Border))
-            Spacer(Modifier.width(14.dp))
-            Column(Modifier.width(94.dp)) {
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.width(88.dp)) {
                 Row(verticalAlignment = Alignment.Bottom) {
                     Text("18", color = BrandDark, fontSize = 24.sp, fontWeight = FontWeight.Black)
                     Text(" days left", color = Muted, fontSize = 9.sp, modifier = Modifier.padding(bottom = 4.dp))
@@ -4626,7 +4810,93 @@ private fun SubscriberQuickActions(onPause: () -> Unit, onPlan: () -> Unit, onOr
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun SignupScreen(onContinue: (String, String) -> Unit) {
+private fun LoginScreen(onContinue: (String) -> Unit, onCreateAccount: () -> Unit) {
+    var mobile by rememberSaveable { mutableStateOf("") }
+    val valid = mobile.length == 10
+    BoxWithConstraints(
+        Modifier.fillMaxSize().background(Color(0xFFFBFDF9)).statusBarsPadding().navigationBarsPadding()
+    ) {
+        val compact = maxHeight < 700.dp
+        SignupBackgroundArt(Modifier.matchParentSize())
+        Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(Modifier.fillMaxWidth().height(if (compact) 205.dp else 265.dp), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Image(
+                        painter = painterResource(R.drawable.zomeal_logo),
+                        contentDescription = "Zomeal",
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier.width(if (compact) 205.dp else 235.dp).height(if (compact) 105.dp else 130.dp)
+                    )
+                    Text("Welcome back!", color = Ink, fontSize = if (compact) 21.sp else 25.sp, fontWeight = FontWeight.ExtraBold)
+                    Text("Login to manage your meals and subscription", color = Muted, fontSize = if (compact) 9.sp else 11.sp)
+                }
+            }
+            Surface(
+                modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = if (compact) 13.dp else 18.dp),
+                color = Color.White.copy(alpha = .98f),
+                shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+                shadowElevation = 8.dp
+            ) {
+                Column(
+                    Modifier.fillMaxSize().padding(horizontal = if (compact) 18.dp else 22.dp, vertical = if (compact) 18.dp else 25.dp),
+                    verticalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(if (compact) 12.dp else 16.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Surface(color = Mist, shape = CircleShape) { Icon(Icons.Outlined.PhoneAndroid, null, tint = Brand, modifier = Modifier.padding(10.dp).size(21.dp)) }
+                            Spacer(Modifier.width(10.dp))
+                            Column { Text("Login with mobile number", color = Ink, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold); Text("We’ll send a secure OTP to verify you", color = Muted, fontSize = 9.sp) }
+                        }
+                        Text("Mobile Number", color = Ink, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        TextField(
+                            value = mobile,
+                            onValueChange = { mobile = it.filter(Char::isDigit).take(10) },
+                            modifier = Modifier.fillMaxWidth().height(56.dp),
+                            placeholder = { Text("Enter your mobile number", fontSize = 11.sp) },
+                            leadingIcon = { Text("🇮🇳  +91", color = Ink, fontSize = 11.sp, fontWeight = FontWeight.Bold) },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                            singleLine = true,
+                            shape = RoundedCornerShape(14.dp),
+                            colors = signupFieldColors()
+                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Outlined.Lock, null, tint = Brand, modifier = Modifier.size(13.dp)); Spacer(Modifier.width(6.dp)); Text("Your account and payment information are protected", color = Muted, fontSize = 8.sp) }
+                        Surface(color = Mist, shape = RoundedCornerShape(15.dp)) {
+                            Row(Modifier.fillMaxWidth().padding(13.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Outlined.RestaurantMenu, null, tint = Brand, modifier = Modifier.size(20.dp)); Spacer(Modifier.width(9.dp)); Column { Text("Everything in one place", color = BrandDark, fontSize = 10.sp, fontWeight = FontWeight.Bold); Text("Daily menus, plan controls, orders and support", color = Muted, fontSize = 8.sp) }
+                            }
+                        }
+                        Surface(color = Color(0xFFFFFAED), shape = RoundedCornerShape(13.dp), border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFF1DFC1))) {
+                            Column(Modifier.fillMaxWidth().padding(11.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                Text("Prototype test accounts", color = Ink, fontSize = 9.sp, fontWeight = FontWeight.ExtraBold)
+                                Text("9999999999  ·  Active subscription → Home", color = BrandDark, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                                Text("1111111111  ·  No subscription → Providers", color = Muted, fontSize = 8.sp)
+                            }
+                        }
+                    }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Button(
+                            onClick = { onContinue(mobile) },
+                            enabled = valid,
+                            modifier = Modifier.fillMaxWidth().height(if (compact) 54.dp else 58.dp),
+                            shape = RoundedCornerShape(17.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Brand, disabledContainerColor = Border)
+                        ) {
+                            Text("Send OTP", fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.weight(1f)); Icon(Icons.Filled.ArrowForward, null, modifier = Modifier.size(17.dp))
+                        }
+                        Spacer(Modifier.height(10.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) { Text("New to Zomeal? ", color = Muted, fontSize = 10.sp); Text("Create an account", color = BrandDark, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clickable(onClick = onCreateAccount).padding(3.dp)) }
+                        Spacer(Modifier.height(7.dp))
+                        Text("By continuing, you agree to Zomeal’s Terms & Privacy Policy", color = Muted, fontSize = 7.sp)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SignupScreen(onContinue: (String, String) -> Unit, onLogin: () -> Unit) {
     var fullName by rememberSaveable { mutableStateOf("") }
     var mobile by rememberSaveable { mutableStateOf("") }
     var pincode by rememberSaveable { mutableStateOf("") }
@@ -4730,7 +5000,7 @@ private fun SignupScreen(onContinue: (String, String) -> Unit) {
                         Spacer(Modifier.height(7.dp))
                         Row(horizontalArrangement = Arrangement.Center) {
                             Text("Already have an account? ", color = Muted, fontSize = 9.sp)
-                            Text("Login", color = BrandDark, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { onContinue(if (mobile.length == 10) mobile else "9876543242", if (pincode.length == 6) pincode else "751030") })
+                            Text("Login", color = BrandDark, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clickable(onClick = onLogin).padding(horizontal = 3.dp, vertical = 2.dp))
                         }
                         Spacer(Modifier.height(5.dp))
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
