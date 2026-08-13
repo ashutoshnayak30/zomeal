@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#08783f" />
+  <title>Zomeal Admin</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="details.css" />
+  <link rel="stylesheet" href="manual.css" />
+  <link rel="stylesheet" href="edit.css" />
+</head>
+<body>
+  <div id="login" class="login-shell">
+    <section class="login-art">
+      <div class="brand brand-light"><span class="brand-dot">●</span> zomeal</div>
+      <div class="login-copy">
+        <p class="eyebrow">OPERATIONS, SIMPLIFIED</p>
+        <h1>Every meal partner.<br>One clear view.</h1>
+        <p>Review providers, prices, delivery areas, menus and photographs before they reach customers.</p>
+      </div>
+      <div class="meal-orbit" aria-hidden="true"><span>🥗</span><i></i><b>🍛</b><em>🥘</em></div>
+      <p class="secure-note">Protected workspace · Actions are audited</p>
+    </section>
+    <section class="login-card-wrap">
+      <form class="login-card" id="loginForm">
+        <div class="mobile-brand brand"><span class="brand-dot">●</span> zomeal</div>
+        <span class="icon-bubble">↗</span>
+        <p class="eyebrow green">ZOMEAL ADMIN</p>
+        <h2>Welcome back</h2>
+        <p class="muted">Sign in to manage marketplace operations.</p>
+        <label>Email address<input id="email" type="email" value="admin@zomeal.in" required /></label>
+        <label>Password<input id="password" type="password" value="zomeal-demo" required /></label>
+        <div class="form-row"><label class="remember"><input type="checkbox" checked /> Keep me signed in</label><button type="button" class="link">Forgot password?</button></div>
+        <button class="primary full" type="submit">Sign in securely <span>→</span></button>
+        <p class="demo-note">Staging preview: use the prefilled credentials.</p>
+      </form>
+    </section>
+  </div>
+
+  <div id="dashboard" class="app-shell hidden">
+    <aside class="sidebar">
+      <div class="brand"><span class="brand-dot">●</span> zomeal <small>admin</small></div>
+      <nav id="nav">
+        <button class="active" data-view="overview"><span>⌂</span> Overview</button>
+        <p>APPROVALS</p>
+        <button data-view="providers"><span>♙</span> Providers <b>4</b></button>
+        <button data-view="prices"><span>₹</span> Prices <b>3</b></button>
+        <button data-view="areas"><span>⌖</span> Service areas <b>2</b></button>
+        <button data-view="menus"><span>▤</span> Menus <b>8</b></button>
+        <button data-view="photos"><span>▧</span> Photos <b>12</b></button>
+        <p>OPERATIONS</p>
+        <button data-view="capacity"><span>◫</span> Capacity</button>
+        <button data-view="audit"><span>✓</span> Audit log</button>
+      </nav>
+      <div class="sidebar-foot"><div class="avatar">AN</div><div><strong>Ashutosh Nayak</strong><small>Administrator</small></div><button id="logout">↪</button></div>
+    </aside>
+
+    <main>
+      <header class="topbar">
+        <button id="menuButton" class="menu-button">☰</button>
+        <div><p class="breadcrumb">Zomeal / <span id="crumb">Overview</span></p><h2 id="pageTitle">Good afternoon, Ashutosh</h2></div>
+        <div class="top-actions"><button class="search">⌕ <span>Search anything</span><kbd>⌘ K</kbd></button><button class="round">?</button><button class="round has-dot">♢</button></div>
+      </header>
+
+      <div class="content" id="content">
+        <section id="overviewView" class="view">
+          <div class="hero-row"><div><p class="muted">Here’s what needs your attention today.</p></div><div class="hero-actions"><button class="manual-provider-button">＋ Add provider manually</button><button class="primary" data-go="providers">Review approvals <span>→</span></button></div></div>
+          <div class="stat-grid">
+            <article><span class="stat-icon yellow">⌛</span><div><p>Pending approvals</p><h3>29</h3><small class="up">↑ 7 since yesterday</small></div></article>
+            <article><span class="stat-icon green">♙</span><div><p>Active providers</p><h3>48</h3><small>Across 16 pincodes</small></div></article>
+            <article><span class="stat-icon blue">▣</span><div><p>Active subscriptions</p><h3>1,284</h3><small class="up">↑ 8.4% this month</small></div></article>
+            <article><span class="stat-icon purple">₹</span><div><p>Today’s GMV</p><h3>₹84,620</h3><small>₹11,847 commission</small></div></article>
+          </div>
+
+          <div class="grid-2">
+            <section class="panel attention-panel">
+              <div class="panel-head"><div><h3>Approval inbox</h3><p>Oldest requests appear first</p></div><button class="link" data-go="providers">View all →</button></div>
+              <div id="approvalInbox"></div>
+            </section>
+            <section class="panel">
+              <div class="panel-head"><div><h3>Provider readiness</h3><p>Activation progress this week</p></div><button class="icon-btn">•••</button></div>
+              <div class="donut-row"><div class="donut"><span>72%</span></div><div class="legend"><p><i class="lg-green"></i> Ready to activate <b>18</b></p><p><i class="lg-yellow"></i> Needs information <b>7</b></p><p><i class="lg-gray"></i> Under review <b>4</b></p></div></div>
+              <div class="mini-alert"><span>✓</span><div><strong>3 providers are ready</strong><p>All mandatory details have been approved.</p></div><button data-go="providers">Review</button></div>
+            </section>
+          </div>
+
+          <section class="panel activity-panel">
+            <div class="panel-head"><div><h3>Recent activity</h3><p>Important changes across the marketplace</p></div><button class="link" data-go="audit">Full audit log →</button></div>
+            <div class="activity-table">
+              <div><span class="activity-icon green">✓</span><p><strong>Swaad Ghar was activated</strong><small>Approved by Ashutosh Nayak</small></p><time>12 min ago</time></div>
+              <div><span class="activity-icon blue">₹</span><p><strong>New price request from Maa Home Kitchen</strong><small>Lunch + Dinner: ₹6,199 → ₹6,499</small></p><time>38 min ago</time></div>
+              <div><span class="activity-icon yellow">▧</span><p><strong>8 new meal photos uploaded</strong><small>Delight Non-Veg Meals · Pending review</small></p><time>1 hr ago</time></div>
+            </div>
+          </section>
+        </section>
+
+        <section id="queueView" class="view hidden">
+          <div class="queue-head"><div><p class="muted" id="queueSubtitle"></p></div><div class="queue-head-actions"><button class="manual-provider-button">＋ Add provider manually</button><div class="filters"><button class="active">Pending</button><button>Approved</button><button>Rejected</button></div></div></div>
+          <section class="panel queue-panel">
+            <div class="queue-toolbar"><div class="input-search">⌕ <input id="queueSearch" placeholder="Search requests" /></div><button class="filter-btn">≡ Filter</button></div>
+            <div id="queueList"></div>
+          </section>
+        </section>
+        <section id="providerDetailView" class="view hidden">
+          <div class="detail-heading"><button id="backToQueue" class="back-button">← Back to providers</button><div class="detail-actions"><button id="editProvider" class="edit-provider-button">✎ Edit provider data</button><button class="reject-button">Request changes</button><button class="primary protected-action">Activate provider</button></div></div>
+          <section class="provider-banner panel"><div class="provider-mark">AT</div><div><div class="title-line"><h2>Annapurna Tiffin</h2><span class="review-chip">Pending approval</span></div><p>Pure vegetarian · Patia, Bhubaneswar</p><div class="tag-row"><span>Owner: Priya Dash</span><span>+91 98765 43210</span><span>Submitted 18 min ago</span></div></div><div class="readiness"><strong>100%</strong><small>Activation ready</small><div><i></i></div></div></section>
+          <div class="detail-grid"><div>
+            <section class="panel detail-card"><div class="detail-card-head"><h3>Business & serviceability</h3><span class="complete-chip">✓ Complete</span></div><div class="info-grid"><div><small>Business address</small><strong>Plot 42, KIIT Square, Patia</strong></div><div><small>Dietary category</small><strong>Pure Vegetarian</strong></div><div><small>Approved pincodes</small><p class="pincode-list"><span>751024</span><span>751016</span><span>751031</span></p></div><div><small>Daily capacity</small><strong>Lunch 80 · Dinner 65</strong></div></div></section>
+            <section class="panel detail-card"><div class="detail-card-head"><div><h3>Packages and prices</h3><p>Provider-submitted prices</p></div><span class="complete-chip">✓ 3 packages</span></div><div class="package-table"><div class="package-row heading"><span>Package</span><span>Meals</span><span>Delivery</span><span>Price</span></div><div class="package-row"><strong>Lunch Only</strong><span>1 meal/day</span><span>12:00–2:00 PM</span><b>₹3,499</b></div><div class="package-row"><strong>Dinner Only</strong><span>1 meal/day</span><span>7:00–9:00 PM</span><b>₹3,299</b></div><div class="package-row"><strong>Lunch + Dinner</strong><span>2 meals/day</span><span>Both slots</span><b>₹6,499</b></div></div></section>
+            <section class="panel detail-card"><div class="detail-card-head"><div><h3>Monday–Sunday menu</h3><p>Fixed items and customer-selectable choices</p></div><div class="meal-tabs"><button class="active" data-meal="lunch">Lunch</button><button data-meal="dinner">Dinner</button></div></div><div id="weeklyMenu" class="weekly-menu"></div></section>
+            <section class="panel detail-card"><div class="detail-card-head"><div><h3>Uploaded photographs</h3><p>Photos remain hidden until Zomeal approves them</p></div><span class="pending-chip">6 pending</span></div><div id="photoGallery" class="photo-gallery"></div></section>
+          </div><aside><section class="panel checklist"><h3>Activation checklist</h3><div><span>✓</span><p><strong>Provider details</strong><small>Name, contact and address</small></p></div><div><span>✓</span><p><strong>Serviceable pincodes</strong><small>3 approved areas</small></p></div><div><span>✓</span><p><strong>Packages and pricing</strong><small>3 approved packages</small></p></div><div><span>✓</span><p><strong>Weekly menus</strong><small>14 complete meal slots</small></p></div><div><span>✓</span><p><strong>Delivery timings</strong><small>Lunch and dinner configured</small></p></div><div class="optional"><span>○</span><p><strong>Optional enhancements</strong><small>Nutrition and allergens can be added later</small></p></div></section><section class="panel disclaimer-card"><strong>Photo policy</strong><p>Review relevance, authenticity and presentation before approval.</p></section></aside></div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <div id="toast" class="toast"></div>
+  <div id="photoModal" class="photo-modal hidden"><button id="closePhoto">×</button><div class="modal-image" id="modalImage"></div><div><p class="eyebrow green">PHOTO REVIEW</p><h3 id="modalTitle">Meal photo</h3><p id="modalMeta" class="muted"></p><label>Admin note<textarea placeholder="Add a reason when requesting changes"></textarea></label><div><button class="reject-button">Request changes</button><button class="primary protected-action">Approve photo</button></div></div></div>
+  <div id="manualProviderModal" class="manual-modal hidden"><div class="manual-dialog"><div class="manual-head"><div><p class="eyebrow green">MANUAL ONBOARDING</p><h2>Add a provider</h2><p>Enter information received by phone, WhatsApp or in person.</p></div><button id="closeManual">×</button></div><form id="manualProviderForm"><section><h3>Provider details</h3><div class="manual-grid"><label>Provider name *<input name="providerName" required placeholder="e.g. Maa Home Kitchen"></label><label>Contact person *<input required placeholder="Owner or manager"></label><label>Mobile number *<input required placeholder="10-digit number"></label><label>Dietary category *<select><option>Pure Veg</option><option>Non-Veg</option><option>Both</option></select></label><label class="wide">Business address *<input required placeholder="House/plot, street and locality"></label><label>City *<input value="Bhubaneswar"></label><label>State *<input value="Odisha"></label></div></section><section><h3>Serviceability & capacity</h3><div class="manual-grid"><label class="wide">Serviceable pincodes *<input required placeholder="751030, 751019"></label><label>Lunch capacity<input type="number" value="50"></label><label>Dinner capacity<input type="number" value="50"></label></div></section><section><h3>Package and pricing</h3><div class="package-entry"><label><input type="checkbox" checked> Lunch only</label><input type="number" value="3499"><input value="12 PM - 2 PM"></div><div class="package-entry"><label><input type="checkbox" checked> Dinner only</label><input type="number" value="3299"><input value="7 PM - 9 PM"></div><div class="package-entry"><label><input type="checkbox" checked> Lunch + Dinner</label><input type="number" value="6499"><input value="30 days"></div></section><section><div class="section-title"><div><h3>Monday–Sunday menu</h3><p>Main-course alternatives and fixed items can be edited later.</p></div><button type="button" id="copyMonday" class="link">Copy Monday to all</button></div><div id="manualWeek"></div></section><div class="manual-footer"><button type="button" id="saveDraft">Save draft</button><button type="submit" class="primary">Save provider & review →</button></div></form></div></div>
+  <script src="config.js"></script><script src="live.js"></script><script src="app.js"></script>
+</body>
+</html>
