@@ -1,0 +1,9 @@
+window.ZomealAPI=(()=>{const c=window.ZOMEAL_CONFIG||{},configured=c.supabaseAnonKey&&!c.supabaseAnonKey.startsWith('YOUR_');let token=null;
+async function request(path,{method='GET',body,auth=true}={}){const headers={apikey:c.supabaseAnonKey,'Content-Type':'application/json'};if(auth&&token)headers.Authorization=`Bearer ${token}`;const r=await fetch(`${c.supabaseUrl}${path}`,{method,headers,body:body?JSON.stringify(body):undefined});if(!r.ok)throw new Error((await r.json().catch(()=>({}))).message||`Request failed (${r.status})`);const text=await r.text();return text?JSON.parse(text):null}
+async function login(email,password){const s=await request('/auth/v1/token?grant_type=password',{method:'POST',body:{email,password},auth:false});token=s.access_token;sessionStorage.setItem('zomeal_admin_session',JSON.stringify(s));const roles=await request('/rest/v1/user_roles?select=role');if(!roles.some(x=>['ADMIN','OPERATIONS'].includes(x.role))){logout();throw new Error('This account is not authorized for Zomeal Admin')}return s}
+function restore(){try{const s=JSON.parse(sessionStorage.getItem('zomeal_admin_session'));token=s?.access_token||null;return!!token}catch{return false}}function logout(){token=null;sessionStorage.removeItem('zomeal_admin_session')}
+async function queue(){return request('/rest/v1/admin_approval_queue?select=*&order=submitted_at.asc')}
+async function createProvider(payload){return request('/rest/v1/rpc/admin_create_provider_draft',{method:'POST',body:{payload}})}
+async function updateProvider(id,payload,reason){return request('/rest/v1/rpc/admin_update_provider',{method:'POST',body:{target_id:id,payload,change_reason:reason}})}
+async function review(type,id,decision,reason=null){return request('/rest/v1/rpc/admin_review_request',{method:'POST',body:{entity_type:type,target_id:id,decision,review_reason:reason}})}
+return{configured,login,restore,logout,queue,createProvider,updateProvider,review}})();
