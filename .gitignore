@@ -6,3 +6,11 @@
 /.idea
 /build
 /app/build
+/node_modules/
+
+# Supabase local state and secrets
+/supabase/.temp/
+/supabase/.branches/
+/.env
+/.env.*
+!/.env.example
