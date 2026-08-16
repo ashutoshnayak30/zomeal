@@ -6,7 +6,10 @@
 /.idea
 /build
 /app/build
+/provider-app/build
 /node_modules/
+/*.apk
+/*.jar
 
 # Supabase local state and secrets
 /supabase/.temp/

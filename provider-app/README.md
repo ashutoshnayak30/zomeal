@@ -1,4 +1,10 @@
-# Zomeal provider app
+# Zomeal Provider Android app
 
-The service-provider application will be created in this directory during a future phase.
+Independent Android application inside the main Zomeal Gradle project.
 
+- Module: `:provider-app`
+- Application ID: `com.zomeal.provider`
+- Build: `gradlew.bat :provider-app:assembleDebug`
+- Customer build remains: `gradlew.bat :app:assembleDebug`
+
+Bank and UPI payout details are intentionally collected only after marketplace activation.
