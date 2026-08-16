@@ -16,3 +16,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "Zomeal"
 include(":app")
+include(":provider-app")
