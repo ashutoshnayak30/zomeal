@@ -2,6 +2,9 @@
 .gradle
 .kotlin/
 .android-build-home/
+.android-home/
+.gradle-home/
+.compile-stubs/
 /local.properties
 /.idea
 /build

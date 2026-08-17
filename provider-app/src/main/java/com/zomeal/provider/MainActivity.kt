@@ -41,7 +41,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private enum class Screen { Login, Otp, Registration, Business, Service, Packages, Menu, Operations, Review, Submitted, SubmissionDetails, Dashboard, DailyOrders, Earnings, Profile, PayoutDetails }
+private enum class Screen { Login, Otp, Registration, Business, Service, Packages, Menu, Operations, Review, Submitted, SubmissionDetails, Dashboard, DailyOrders, Earnings, Profile, PayoutDetails, Notifications }
 
 private fun draftResumeScreen(): Screen = when {
     ProviderDraft.businessName.isBlank() || ProviderDraft.contactName.isBlank() || ProviderDraft.address.isBlank() -> Screen.Business
@@ -138,11 +138,12 @@ private fun ProviderApp() {
             onBack = { screen = Screen.Submitted },
             onEdit = { screen = Screen.Registration }
         )
-        Screen.Dashboard -> ProviderDashboardScreen(repository, onOrders = { screen = Screen.DailyOrders }, onEarnings = { screen = Screen.Earnings }, onProfile = { screen = Screen.Profile }) { repository.signOut(); screen = Screen.Login }
+        Screen.Dashboard -> ProviderDashboardScreen(repository, onOrders = { screen = Screen.DailyOrders }, onEarnings = { screen = Screen.Earnings }, onProfile = { screen = Screen.Profile }, onNotifications = { screen = Screen.Notifications }) { repository.signOut(); screen = Screen.Login }
         Screen.DailyOrders -> ProviderDailyOrdersScreen(repository, onDashboard = { screen = Screen.Dashboard })
         Screen.Earnings -> ProviderEarningsScreen(repository, onDashboard = { screen = Screen.Dashboard }, onOrders = { screen = Screen.DailyOrders }, onProfile = { screen = Screen.Profile })
         Screen.Profile -> ProviderProfileScreen(repository, onBack = { screen = Screen.Dashboard }, onEarnings = { screen = Screen.Earnings }, onPayoutDetails = { screen = Screen.PayoutDetails }) { repository.signOut(); screen = Screen.Login }
         Screen.PayoutDetails -> ProviderPayoutDetailsScreen(repository, onBack = { screen = Screen.Profile })
+        Screen.Notifications -> ProviderNotificationsScreen(repository, onBack = { screen = Screen.Dashboard }) { destination -> screen = when(destination) { "EARNINGS" -> Screen.Earnings; "PAYOUT_DETAILS" -> Screen.PayoutDetails; "PROFILE" -> Screen.Profile; "ORDERS" -> Screen.DailyOrders; else -> Screen.Dashboard } }
     }
 }
 

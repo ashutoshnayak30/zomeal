@@ -28,7 +28,7 @@ private val DMuted = Color(0xFF68736D)
 private val DMist = Color(0xFFF0F7F2)
 
 @Composable
-fun ProviderDashboardScreen(repository: SupabaseProviderRepository, onOrders: () -> Unit, onEarnings: () -> Unit, onProfile: () -> Unit, onSignOut: () -> Unit) {
+fun ProviderDashboardScreen(repository: SupabaseProviderRepository, onOrders: () -> Unit, onEarnings: () -> Unit, onProfile: () -> Unit, onNotifications: () -> Unit, onSignOut: () -> Unit) {
     var slot by remember { mutableStateOf("LUNCH") }
     var data by remember { mutableStateOf<JSONObject?>(null) }
     var loading by remember { mutableStateOf(true) }
@@ -38,11 +38,12 @@ fun ProviderDashboardScreen(repository: SupabaseProviderRepository, onOrders: ()
     var assigningPerson by remember { mutableStateOf<JSONObject?>(null) }
     var assignmentCount by remember { mutableStateOf("100") }
     var assignmentMessage by remember { mutableStateOf<String?>(null) }
+    var unreadNotifications by remember { mutableIntStateOf(0) }
     fun load() {
         loading = true; error = null
         repository.loadDailyDashboard(slot) { result, message -> data = result; error = message; loading = false }
     }
-    LaunchedEffect(slot) { load() }
+    LaunchedEffect(slot) { load(); repository.loadNotifications { result, _ -> unreadNotifications=result?.optInt("unread_count")?:0 } }
     val metrics = data?.optJSONObject("metrics") ?: JSONObject()
     val isFinal = data?.optBoolean("is_final") == true
     val active = metrics.optInt("active")
@@ -154,6 +155,7 @@ fun ProviderDashboardScreen(repository: SupabaseProviderRepository, onOrders: ()
                         IconButton(onClick = { load() }, colors = IconButtonDefaults.iconButtonColors(containerColor = Color.White.copy(alpha = .16f))) {
                             Icon(Icons.Outlined.Refresh, "Refresh", tint = Color.White)
                         }
+                        BadgedBox(badge={if(unreadNotifications>0)Badge(containerColor=Color(0xFFE53935)){Text(if(unreadNotifications>99)"99+" else unreadNotifications.toString())}}){IconButton(onClick=onNotifications,colors=IconButtonDefaults.iconButtonColors(containerColor=Color.White.copy(alpha=.16f))){Icon(Icons.Outlined.Notifications,"Notifications",tint=Color.White)}}
                         IconButton(onClick = onSignOut, colors = IconButtonDefaults.iconButtonColors(containerColor = Color.White.copy(alpha = .16f))) {
                             Icon(Icons.Outlined.Logout, "Sign out", tint = Color.White)
                         }

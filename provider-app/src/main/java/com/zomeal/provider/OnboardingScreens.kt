@@ -71,6 +71,7 @@ private fun isProviderPhotoReadable(context: Context, value: String?): Boolean {
 internal class DishDraft(name: String = "") {
     var name by mutableStateOf(name)
     var description by mutableStateOf("")
+    var foodType by mutableStateOf("Veg")
     var photo by mutableStateOf<String?>(null)
 }
 
@@ -132,7 +133,7 @@ internal object ProviderDraft {
     }
 
     private fun dishesJson(dishes: List<DishDraft>) = JSONArray().apply {
-        dishes.forEach { put(JSONObject().put("name", it.name).put("description", it.description).put("photo", it.photo)) }
+        dishes.forEach { put(JSONObject().put("name", it.name).put("description", it.description).put("foodType", it.foodType).put("photo", it.photo)) }
     }
 
     fun restore(json: JSONObject) {
@@ -176,7 +177,7 @@ internal object ProviderDraft {
         if (array == null) return
         target.clear()
         for (i in 0 until array.length()) array.optJSONObject(i)?.let { source ->
-            target.add(DishDraft(source.optString("name")).also { it.description = source.optString("description"); it.photo = source.optString("photo").ifBlank { null } })
+            target.add(DishDraft(source.optString("name")).also { it.description = source.optString("description"); it.foodType = source.optString("foodType", "Veg"); it.photo = source.optString("photo").ifBlank { null } })
         }
         if (target.isEmpty()) target.add(DishDraft())
     }
@@ -537,6 +538,22 @@ private fun MealMenuEditor(title: String, dishes: SnapshotStateList<DishDraft>, 
                         if (dishes.size > 1) IconButton(onClick = { dishes.remove(dish); onDirty() }) { Icon(Icons.Outlined.Delete, "Remove", tint = Color(0xFFB23A32)) }
                     }
                     Field("Dish name *", dish.name, { dish.name = it; onDirty() }, "e.g. Paneer butter masala")
+                    Text("Food type *", color = PInk, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                        listOf("Veg", "Non-Veg", "Vegan").forEach { option ->
+                            FilterChip(
+                                selected = dish.foodType == option,
+                                onClick = { dish.foodType = option; onDirty() },
+                                label = { Text(option, fontSize = 10.sp) },
+                                leadingIcon = if (dish.foodType == option) ({ Icon(Icons.Outlined.CheckCircle, null, modifier = Modifier.size(14.dp)) }) else null,
+                                modifier = Modifier.weight(1f),
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = if (option == "Non-Veg") Color(0xFFFFECE7) else Color(0xFFE6F4E9),
+                                    selectedLabelColor = if (option == "Non-Veg") Color(0xFF9D3D27) else PBrand
+                                )
+                            )
+                        }
+                    }
                     Field("Description (optional)", dish.description, { dish.description = it; onDirty() }, "Ingredients, nutrition or allergen note", singleLine = false)
                     OutlinedButton(onClick = { onPhoto(dish) }, modifier = Modifier.fillMaxWidth()) {
                         Icon(if (dish.photo == null) Icons.Outlined.AddAPhoto else Icons.Outlined.CheckCircle, null)

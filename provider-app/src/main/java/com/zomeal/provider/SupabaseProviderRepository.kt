@@ -219,6 +219,16 @@ class SupabaseProviderRepository(context: Context) {
             .put("target_note", note.ifBlank { JSONObject.NULL }), authenticated = true
     ) { code, json -> callback(if (code in 200..299) AuthResult(true, "Payout details sent for verification") else AuthResult(false, errorMessage(json, "Payout details could not be saved"))) }
 
+    fun loadNotifications(callback: (JSONObject?, String?) -> Unit) = requestAsync(
+        path = "/rest/v1/rpc/provider_notification_feed",
+        body = JSONObject().put("target_limit", 75), authenticated = true
+    ) { code, json -> if (code in 200..299) callback(json, null) else callback(null, errorMessage(json, "Notifications could not be loaded")) }
+
+    fun markNotificationsRead(notificationId: String? = null, callback: (AuthResult) -> Unit) = requestAsync(
+        path = "/rest/v1/rpc/provider_mark_notifications_read",
+        body = JSONObject().put("target_notification", notificationId ?: JSONObject.NULL), authenticated = true
+    ) { code, json -> callback(if (code in 200..299) AuthResult(true) else AuthResult(false, errorMessage(json, "Notification could not be updated"))) }
+
     fun resumeReturnedApplication(callback: (AuthResult) -> Unit) = requestAsync(
         path = "/rest/v1/rpc/provider_resume_application",
         body = JSONObject(),

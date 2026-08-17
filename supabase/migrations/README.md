@@ -33,3 +33,9 @@ Migration `202608160005_provider_commission_terms.sql` replaces the fixed 14% as
 Migration `202608160006_advance_full_amount.sql` separates requested and negotiated advance amounts, guarantees 0% advance commission, disburses the full approved amount, and recovers only from future net meal earnings.
 
 Migration `202608160007_provider_payout_destinations.sql` adds post-activation UPI/bank payout destinations, masked provider/admin views, finance verification, audit records, and blocks electronic payout requests until a matching destination is verified.
+
+Migration `202608170001_provider_notifications.sql` adds durable provider notifications for account activation, payout details, settlements, advances and negotiated commissions, including unread state and contextual app destinations.
+
+Migration `202608170002_finance_journal_reconciliation.sql` adds an immutable balanced accounting journal, automatic postings for subscriptions/meals/payouts/advances, reversal entries, external transaction capture and reconciliation exceptions.
+
+Migration `202608170003_customer_marketplace.sql` exposes a moderated customer catalogue containing only active providers, approved service pincodes, active packages, approved prices, approved weekly menus and approved media.
