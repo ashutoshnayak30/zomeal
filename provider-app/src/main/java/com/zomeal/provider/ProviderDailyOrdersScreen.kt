@@ -2,6 +2,7 @@ package com.zomeal.provider
 
 import android.content.Intent
 import android.content.Context
+import android.app.DatePickerDialog
 import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -14,6 +15,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -25,6 +27,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.json.JSONArray
 import org.json.JSONObject
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Date
+import java.util.Locale
 
 private val OBrand = Color(0xFF087F43)
 private val OInk = Color(0xFF14221B)
@@ -34,6 +40,9 @@ private val OMist = Color(0xFFF0F7F2)
 @Composable
 fun ProviderDailyOrdersScreen(repository: SupabaseProviderRepository, onDashboard: () -> Unit) {
     val context = LocalContext.current
+    val isoDate = remember { SimpleDateFormat("yyyy-MM-dd", Locale.US).apply { isLenient = false } }
+    val friendlyDate = remember { SimpleDateFormat("EEE, dd MMM yyyy", Locale.ENGLISH) }
+    var selectedDate by rememberSaveable { mutableStateOf(isoDate.format(Date())) }
     var slot by remember { mutableStateOf("LUNCH") }
     var dashboard by remember { mutableStateOf<JSONObject?>(null) }
     var loading by remember { mutableStateOf(true) }
@@ -43,11 +52,21 @@ fun ProviderDailyOrdersScreen(repository: SupabaseProviderRepository, onDashboar
     var routeAssigning by remember { mutableStateOf(false) }
     var routeMessage by remember { mutableStateOf<String?>(null) }
     var pendingShare by remember { mutableStateOf<Pair<JSONObject, List<JSONObject>>?>(null) }
+    fun moveDate(days:Int){
+        val calendar=Calendar.getInstance().apply{time=isoDate.parse(selectedDate)?:Date();add(Calendar.DAY_OF_MONTH,days)}
+        selectedDate=isoDate.format(calendar.time)
+    }
+    fun openCalendar(){
+        val calendar=Calendar.getInstance().apply{time=isoDate.parse(selectedDate)?:Date()}
+        DatePickerDialog(context,{_,year,month,day->
+            selectedDate=isoDate.format(Calendar.getInstance().apply{set(year,month,day,12,0,0);set(Calendar.MILLISECOND,0)}.time)
+        },calendar.get(Calendar.YEAR),calendar.get(Calendar.MONTH),calendar.get(Calendar.DAY_OF_MONTH)).show()
+    }
     fun load() {
         loading = true; error = null
-        repository.loadDailyDashboard(slot) { result, message -> dashboard = result; error = message; loading = false }
+        repository.loadDailyDashboard(slot,selectedDate) { result, message -> dashboard = result; error = message; loading = false }
     }
-    LaunchedEffect(slot) { search = ""; statusFilter = "ALL"; load() }
+    LaunchedEffect(slot,selectedDate) { search = ""; statusFilter = "ALL"; load() }
     val isFinal = dashboard?.optBoolean("is_final") == true
     val preview = dashboard?.optBoolean("preview_mode") == true
     val unlockedForTesting = isFinal || preview
@@ -66,6 +85,10 @@ fun ProviderDailyOrdersScreen(repository: SupabaseProviderRepository, onDashboar
         .groupBy { it.optString("delivery_person_id").ifBlank { it.optString("delivery_person") } }
         .map { (_, customers) -> customers.first() to customers }
     val unassignedCount = manifest.count { it.optString("delivery_person").isBlank() }
+    val metrics=dashboard?.optJSONObject("metrics")?:JSONObject()
+    val commission=dashboard?.optJSONObject("commission")?:JSONObject()
+    val packageBreakdown=jsonObjects(dashboard?.optJSONArray("package_breakdown"))
+    val choices=jsonObjects(dashboard?.optJSONArray("choices"))
 
     pendingShare?.let { (rider, customers) ->
         AlertDialog(
@@ -103,6 +126,18 @@ fun ProviderDailyOrdersScreen(repository: SupabaseProviderRepository, onDashboar
     ) { padding ->
         LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(15.dp), verticalArrangement = Arrangement.spacedBy(11.dp)) {
             item {
+                Surface(color=Color.White,shape=RoundedCornerShape(16.dp),shadowElevation=1.dp){
+                    Row(Modifier.fillMaxWidth().padding(9.dp),verticalAlignment=Alignment.CenterVertically){
+                        IconButton(onClick={moveDate(-1)}){Icon(Icons.Outlined.ChevronLeft,"Previous date",tint=OBrand)}
+                        OutlinedButton(onClick={openCalendar()},modifier=Modifier.weight(1f).height(48.dp),shape=RoundedCornerShape(13.dp)){
+                            Icon(Icons.Outlined.CalendarMonth,null,Modifier.size(18.dp));Spacer(Modifier.width(7.dp))
+                            Text(friendlyDate.format(isoDate.parse(selectedDate)?:Date()),fontWeight=FontWeight.Bold,fontSize=12.sp)
+                        }
+                        IconButton(onClick={moveDate(1)}){Icon(Icons.Outlined.ChevronRight,"Next date",tint=OBrand)}
+                    }
+                }
+            }
+            item {
                 Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
                     SlotOrderButton("Lunch", Icons.Outlined.WbSunny, slot == "LUNCH", Modifier.weight(1f)) { slot = "LUNCH" }
                     SlotOrderButton("Dinner", Icons.Outlined.DarkMode, slot == "DINNER", Modifier.weight(1f)) { slot = "DINNER" }
@@ -110,8 +145,13 @@ fun ProviderDailyOrdersScreen(repository: SupabaseProviderRepository, onDashboar
             }
             if (loading) item { Box(Modifier.fillMaxWidth().height(180.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = OBrand) } }
             error?.let { item { OrderNotice(it, true) } }
-            if (!loading && !isFinal && !preview) item { OrderNotice("Customer details will unlock after ${if (slot == "LUNCH") "7:00 AM" else "4:00 PM"} IST. Until then, choices may still change.", false) }
+            if (!loading && !isFinal && !preview) item { OrderNotice("Customer details for $selectedDate will unlock after ${if (slot == "LUNCH") "7:00 AM" else "4:00 PM"} IST. Until then, choices may still change.", false) }
             if (!loading && preview) item { OrderNotice("Preview mode: sample records stay on this device and do not represent real customers. Preview access does not bypass the real customer-data cutoff.", false) }
+            if(!loading&&dashboard!=null){
+                item{OrderBusinessSummary(slot,metrics,commission)}
+                if(packageBreakdown.isNotEmpty())item{OrderPackageBreakdown(packageBreakdown)}
+                if(choices.isNotEmpty())item{OrderPreparationSummary(choices)}
+            }
             if (!loading && preview && manifest.isEmpty()) item {
                 OutlinedButton(onClick = { manifest = sampleOrders(slot) }, modifier = Modifier.fillMaxWidth().height(48.dp)) { Icon(Icons.Outlined.Science, null); Spacer(Modifier.width(7.dp)); Text("Load sample customer manifest") }
             }
@@ -142,7 +182,7 @@ fun ProviderDailyOrdersScreen(repository: SupabaseProviderRepository, onDashboar
                                 routeMessage = "Sample routes are already assigned by locality and pincode."
                             } else {
                                 routeAssigning = true; routeMessage = null
-                                repository.autoAssignRoutes(slot) { result ->
+                                repository.autoAssignRoutes(slot,selectedDate) { result ->
                                     routeAssigning = false
                                     routeMessage = result.message ?: if (result.success) "Routes assigned successfully" else "Routes could not be assigned"
                                     if (result.success) load()
@@ -202,6 +242,53 @@ fun ProviderDailyOrdersScreen(repository: SupabaseProviderRepository, onDashboar
 }
 
 @Composable
+private fun OrderBusinessSummary(slot:String,metrics:JSONObject,commission:JSONObject){
+    val active=metrics.optInt("active")
+    val gross=metrics.optLong("gross_paise")
+    val net=commission.optLong("provider_net_paise",gross)
+    val rate=commission.optDouble("rate_percent",14.0)
+    Surface(color=Color.White,shape=RoundedCornerShape(17.dp),shadowElevation=1.dp){
+        Column(Modifier.fillMaxWidth().padding(14.dp),verticalArrangement=Arrangement.spacedBy(11.dp)){
+            Row(verticalAlignment=Alignment.CenterVertically){
+                Surface(color=OMist,shape=CircleShape){Icon(if(slot=="LUNCH")Icons.Outlined.WbSunny else Icons.Outlined.DarkMode,null,tint=OBrand,modifier=Modifier.padding(9.dp).size(19.dp))}
+                Spacer(Modifier.width(9.dp));Column(Modifier.weight(1f)){Text("${slot.lowercase().replaceFirstChar(Char::uppercase)} order summary",color=OInk,fontSize=15.sp,fontWeight=FontWeight.Bold);Text("Final preparation and commercial totals",color=OMuted,fontSize=10.sp)}
+            }
+            Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
+                OrderMetric("Orders",active.toString(),Icons.Outlined.Groups,Modifier.weight(1f))
+                OrderMetric("Gross",formatOrderRupees(gross),Icons.Outlined.Payments,Modifier.weight(1f))
+            }
+            Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
+                OrderMetric("Your earnings",formatOrderRupees(net),Icons.Outlined.AccountBalanceWallet,Modifier.weight(1f))
+                OrderMetric("Delivery areas",metrics.optInt("areas").toString(),Icons.Outlined.LocationOn,Modifier.weight(1f))
+            }
+            Text("Zomeal commission: ${formatRate(rate)}% · Earnings become payable according to your configured payout hold period.",color=OMuted,fontSize=9.sp,lineHeight=13.sp)
+        }
+    }
+}
+
+@Composable private fun OrderMetric(label:String,value:String,icon:androidx.compose.ui.graphics.vector.ImageVector,modifier:Modifier){
+    Surface(modifier,color=OMist,shape=RoundedCornerShape(13.dp)){Column(Modifier.padding(11.dp)){Icon(icon,null,tint=OBrand,modifier=Modifier.size(18.dp));Spacer(Modifier.height(5.dp));Text(value,color=OInk,fontSize=15.sp,fontWeight=FontWeight.Bold);Text(label,color=OMuted,fontSize=9.sp)}}
+}
+
+@Composable private fun OrderPackageBreakdown(rows:List<JSONObject>){
+    Surface(color=Color.White,shape=RoundedCornerShape(17.dp),shadowElevation=1.dp){Column(Modifier.fillMaxWidth().padding(14.dp),verticalArrangement=Arrangement.spacedBy(9.dp)){
+        Text("Package-wise orders",color=OInk,fontSize=14.sp,fontWeight=FontWeight.Bold)
+        Text("Lunch-only, dinner-only and combined-plan values are calculated separately.",color=OMuted,fontSize=9.sp)
+        rows.forEachIndexed{index,row->
+            if(index>0)HorizontalDivider(color=Color(0xFFE5ECE7))
+            Row(verticalAlignment=Alignment.CenterVertically){Column(Modifier.weight(1f)){Text(row.optString("label"),color=OInk,fontSize=11.sp,fontWeight=FontWeight.SemiBold);Text("${row.optInt("customers")} customers · ${formatOrderRupees(row.optLong("average_value_paise"))}/meal",color=OMuted,fontSize=9.sp)};Text(formatOrderRupees(row.optLong("gross_paise")),color=OBrand,fontSize=12.sp,fontWeight=FontWeight.Bold)}
+        }
+    }}
+}
+
+@Composable private fun OrderPreparationSummary(rows:List<JSONObject>){
+    Surface(color=Color.White,shape=RoundedCornerShape(17.dp),shadowElevation=1.dp){Column(Modifier.fillMaxWidth().padding(14.dp),verticalArrangement=Arrangement.spacedBy(8.dp)){
+        Text("Main-course preparation",color=OInk,fontSize=14.sp,fontWeight=FontWeight.Bold)
+        rows.forEach{row->Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(11.dp)).background(OMist).padding(10.dp),verticalAlignment=Alignment.CenterVertically){Icon(Icons.Outlined.RestaurantMenu,null,tint=OBrand,modifier=Modifier.size(17.dp));Spacer(Modifier.width(7.dp));Text(row.optString("name"),color=OInk,fontSize=10.sp,fontWeight=FontWeight.SemiBold,modifier=Modifier.weight(1f));Text("${row.optInt("count")} meals",color=OBrand,fontSize=10.sp,fontWeight=FontWeight.Bold)}}
+    }}
+}
+
+@Composable
 private fun CustomerOrderCard(customer: JSONObject) {
     val context = LocalContext.current
     val address = addressText(customer.optJSONObject("address"))
@@ -216,6 +303,7 @@ private fun CustomerOrderCard(customer: JSONObject) {
             }
             Row(verticalAlignment = Alignment.Top) { Icon(Icons.Outlined.LocationOn, null, tint = OBrand, modifier = Modifier.size(17.dp)); Spacer(Modifier.width(6.dp)); Text(address, color = OMuted, fontSize = 11.sp, lineHeight = 15.sp) }
             Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Outlined.RestaurantMenu, null, tint = OBrand, modifier = Modifier.size(17.dp)); Spacer(Modifier.width(6.dp)); Text("${customer.optString("meal_type").lowercase().replaceFirstChar(Char::uppercase)} · ${customer.optString("main_course").ifBlank { "Default main course" }}", color = OInk, fontSize = 11.sp, fontWeight = FontWeight.SemiBold) }
+            Row(verticalAlignment=Alignment.CenterVertically){Icon(Icons.Outlined.Inventory2,null,tint=OBrand,modifier=Modifier.size(17.dp));Spacer(Modifier.width(6.dp));Text("${customer.optString("package_name").ifBlank{"Meal package"}} · ${formatOrderRupees(customer.optLong("meal_value_paise"))}",color=OMuted,fontSize=10.sp)}
             Text("Delivery: ${customer.optString("delivery_person").ifBlank { "Not assigned" }}", color = if (customer.optString("delivery_person").isBlank()) Color(0xFFB35B00) else OBrand, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = { if (phone.isNotBlank()) context.startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:$phone"))) }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 6.dp)) { Icon(Icons.Outlined.Call, null, modifier = Modifier.size(17.dp)); Spacer(Modifier.width(5.dp)); Text("Call", fontSize = 11.sp) }
@@ -224,6 +312,9 @@ private fun CustomerOrderCard(customer: JSONObject) {
         }
     }
 }
+
+private fun formatOrderRupees(paise:Long):String="₹"+java.text.NumberFormat.getIntegerInstance(Locale("en","IN")).format(paise/100)
+private fun formatRate(value:Double):String=if(value%1.0==0.0)value.toInt().toString() else String.format(Locale.US,"%.2f",value)
 
 @Composable private fun StatusBadge(status: String) { Surface(color = OMist, shape = CircleShape) { Text(status.replace('_',' ').lowercase().replaceFirstChar(Char::uppercase), color = OBrand, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)) } }
 

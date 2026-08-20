@@ -1,5 +1,7 @@
 *.iml
 .gradle
+.gradle-agent/
+.gradle-verify/
 .kotlin/
 .android-build-home/
 .android-home/

@@ -11,6 +11,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -25,6 +27,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -203,8 +207,10 @@ private fun FlowScaffold(
     onNext: () -> Unit,
     nextLabel: String = "Save & continue",
     nextEnabled: Boolean = true,
+    listState: LazyListState? = null,
     content: @Composable ColumnScope.() -> Unit
 ) {
+    val resolvedListState = listState ?: rememberLazyListState()
     Scaffold(
         modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing),
         containerColor = Color(0xFFF7FAF7),
@@ -239,6 +245,7 @@ private fun FlowScaffold(
         }
     ) { padding ->
         LazyColumn(
+            state = resolvedListState,
             modifier = Modifier.fillMaxSize().padding(padding),
             contentPadding = PaddingValues(18.dp),
             verticalArrangement = Arrangement.spacedBy(13.dp)
@@ -260,13 +267,13 @@ private fun Section(title: String, subtitle: String? = null, content: @Composabl
 }
 
 @Composable
-private fun Field(label: String, value: String, onChange: (String) -> Unit, hint: String = "", number: Boolean = false, singleLine: Boolean = true, decimal: Boolean = false) {
+private fun Field(label: String, value: String, onChange: (String) -> Unit, hint: String = "", number: Boolean = false, singleLine: Boolean = true, decimal: Boolean = false, modifier: Modifier = Modifier) {
     Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
         Text(label, color = PInk, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
         OutlinedTextField(
             value = value,
             onValueChange = onChange,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = modifier.fillMaxWidth(),
             placeholder = { Text(hint, fontSize = 13.sp) },
             singleLine = singleLine,
             keyboardOptions = KeyboardOptions(keyboardType = if (decimal) KeyboardType.Decimal else if (number) KeyboardType.Number else KeyboardType.Text),
@@ -448,6 +455,9 @@ fun WeeklyMenuScreen(
     onSaveDay: (Int, (AuthResult) -> Unit) -> Unit
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
+    val menuListState = rememberLazyListState()
+    val nextDayMainCourseFocus = remember { FocusRequester() }
+    var advanceRequest by remember { mutableIntStateOf(0) }
     LaunchedEffect(Unit) {
         ProviderDraft.menus.forEach { day ->
             (day.lunch + day.dinner).forEach { dish ->
@@ -473,6 +483,13 @@ fun WeeklyMenuScreen(
     val completedDays = ProviderDraft.savedMenuDays.count { it }
     val currentValid = (!offersLunch || ProviderDraft.menus[selected].lunch.any { it.name.isNotBlank() }) &&
         (!offersDinner || ProviderDraft.menus[selected].dinner.any { it.name.isNotBlank() })
+    LaunchedEffect(advanceRequest) {
+        if (advanceRequest > 0) {
+            menuListState.animateScrollToItem(1, 190)
+            delay(180)
+            nextDayMainCourseFocus.requestFocus()
+        }
+    }
     val saveCurrentDay = {
         if (!currentValid) {
             dayMessage = "Add at least one ${if (offersLunch && offersDinner) "lunch and one dinner" else if (offersLunch) "lunch" else "dinner"} main course before saving ${days[selected]}."
@@ -487,7 +504,10 @@ fun WeeklyMenuScreen(
                     dayMessage = "${days[dayBeingSaved]} menu saved to Zomeal."
                     val nextUnfinished = ((dayBeingSaved + 1) until 7).firstOrNull { !ProviderDraft.savedMenuDays[it] }
                         ?: (0 until dayBeingSaved).firstOrNull { !ProviderDraft.savedMenuDays[it] }
-                    if (nextUnfinished != null) selected = nextUnfinished else onNext()
+                    if (nextUnfinished != null) {
+                        selected = nextUnfinished
+                        advanceRequest++
+                    } else onNext()
                 } else {
                     ProviderDraft.savedMenuDays[dayBeingSaved] = false
                     dayMessage = result.message ?: "Could not save ${days[dayBeingSaved]}. Please try again."
@@ -497,7 +517,8 @@ fun WeeklyMenuScreen(
     }
     FlowScaffold(4, "Monday–Sunday menus", "Complete and submit one day at a time. Every saved day is stored in Zomeal, so you can resume from the next unfinished day later.", onBack, saveCurrentDay,
         nextLabel = if (saving) "Saving ${days[selected]}…" else if (completedDays == 6 && !ProviderDraft.savedMenuDays[selected]) "Save ${days[selected]} & continue" else "Save ${days[selected]} & next",
-        nextEnabled = !saving) {
+        nextEnabled = !saving,
+        listState = menuListState) {
         Section("Choose day") {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 days.chunked(4).forEachIndexed { rowIndex, row ->
@@ -517,10 +538,10 @@ fun WeeklyMenuScreen(
             }
         }
         if (offersLunch) {
-            MealMenuEditor("Lunch", ProviderDraft.menus[selected].lunch, ProviderDraft.menus[selected].lunchFixed, { ProviderDraft.menus[selected].lunchFixed = it; markCurrentDirty() }, markCurrentDirty) { dish -> activeDish = dish; picker.launch("image/*") }
+            MealMenuEditor("Lunch", ProviderDraft.menus[selected].lunch, ProviderDraft.menus[selected].lunchFixed, { ProviderDraft.menus[selected].lunchFixed = it; markCurrentDirty() }, markCurrentDirty, nextDayMainCourseFocus) { dish -> activeDish = dish; picker.launch("image/*") }
         }
         if (offersDinner) {
-            MealMenuEditor("Dinner", ProviderDraft.menus[selected].dinner, ProviderDraft.menus[selected].dinnerFixed, { ProviderDraft.menus[selected].dinnerFixed = it; markCurrentDirty() }, markCurrentDirty) { dish -> activeDish = dish; picker.launch("image/*") }
+            MealMenuEditor("Dinner", ProviderDraft.menus[selected].dinner, ProviderDraft.menus[selected].dinnerFixed, { ProviderDraft.menus[selected].dinnerFixed = it; markCurrentDirty() }, markCurrentDirty, if (offersLunch) null else nextDayMainCourseFocus) { dish -> activeDish = dish; picker.launch("image/*") }
         }
         dayMessage?.let { InfoCard(it) }
         InfoCard("$completedDays of 7 days submitted. Green checkmarks show days safely stored in Zomeal. All seven days are required before account activation, and every photo stays hidden until approved.")
@@ -528,7 +549,7 @@ fun WeeklyMenuScreen(
 }
 
 @Composable
-private fun MealMenuEditor(title: String, dishes: SnapshotStateList<DishDraft>, fixed: String, onFixed: (String) -> Unit, onDirty: () -> Unit, onPhoto: (DishDraft) -> Unit) {
+private fun MealMenuEditor(title: String, dishes: SnapshotStateList<DishDraft>, fixed: String, onFixed: (String) -> Unit, onDirty: () -> Unit, firstDishFocusRequester: FocusRequester? = null, onPhoto: (DishDraft) -> Unit) {
     Section("$title menu") {
         dishes.forEachIndexed { index, dish ->
             Surface(color = PMist, shape = RoundedCornerShape(14.dp)) {
@@ -537,7 +558,7 @@ private fun MealMenuEditor(title: String, dishes: SnapshotStateList<DishDraft>, 
                         Text("Main course ${index + 1}", color = PBrand, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
                         if (dishes.size > 1) IconButton(onClick = { dishes.remove(dish); onDirty() }) { Icon(Icons.Outlined.Delete, "Remove", tint = Color(0xFFB23A32)) }
                     }
-                    Field("Dish name *", dish.name, { dish.name = it; onDirty() }, "e.g. Paneer butter masala")
+                    Field("Dish name *", dish.name, { dish.name = it; onDirty() }, "e.g. Paneer butter masala", modifier = if (index == 0 && firstDishFocusRequester != null) Modifier.focusRequester(firstDishFocusRequester) else Modifier)
                     Text("Food type *", color = PInk, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                         listOf("Veg", "Non-Veg", "Vegan").forEach { option ->

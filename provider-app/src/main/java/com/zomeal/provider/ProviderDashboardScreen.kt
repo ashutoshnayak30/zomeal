@@ -53,6 +53,8 @@ fun ProviderDashboardScreen(repository: SupabaseProviderRepository, onOrders: ()
     val commissionRate = commission.optDouble("rate_percent",14.0)
     val commissionPaise = commission.optLong("commission_paise",(gross*commissionRate/100.0).toLong())
     val previewMode = data?.optBoolean("preview_mode") == true
+    // Kept behind one flag so the post-MVP live tracking workflow can be restored without a rewrite.
+    val liveOrderStatusEnabled = false
     fun loadSamplePreview() {
         val copy = JSONObject(data.toString())
         val sampleMetrics = copy.optJSONObject("metrics") ?: JSONObject().also { copy.put("metrics", it) }
@@ -218,7 +220,7 @@ fun ProviderDashboardScreen(repository: SupabaseProviderRepository, onOrders: ()
                         }
                     }
                 }
-                item {
+                if (liveOrderStatusEnabled) item {
                     DashboardSection("Kitchen & delivery progress", "Update these from the daily orders workspace") {
                         ProgressLine("Preparing", metrics.optInt("preparing"), active, Icons.Outlined.SoupKitchen)
                         ProgressLine("Packing", metrics.optInt("packing"), active, Icons.Outlined.Inventory2)
@@ -230,7 +232,7 @@ fun ProviderDashboardScreen(repository: SupabaseProviderRepository, onOrders: ()
                         }
                     }
                 }
-                item {
+                if (liveOrderStatusEnabled) item {
                     DashboardSection("Update customer tracking", "A single update applies to today's entire ${slot.lowercase()} batch and will appear in the customer app") {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             TrackingButton("Preparing", "PREPARING", Modifier.weight(1f), updating) { updateTracking("PREPARING") }

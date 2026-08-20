@@ -146,31 +146,31 @@ class SupabaseProviderRepository(context: Context) {
         callback(payload)
     }
 
-    fun loadDailyDashboard(slot: String, callback: (JSONObject?, String?) -> Unit) = requestAsync(
+    fun loadDailyDashboard(slot: String, date: String? = null, callback: (JSONObject?, String?) -> Unit) = requestAsync(
         path = "/rest/v1/rpc/provider_daily_dashboard",
-        body = JSONObject().put("target_slot", slot).put("target_date", JSONObject.NULL),
+        body = JSONObject().put("target_slot", slot).put("target_date", date?.takeIf { it.isNotBlank() } ?: JSONObject.NULL),
         authenticated = true
     ) { code, json ->
         if (code in 200..299) callback(json, null)
         else callback(null, errorMessage(json, "Dashboard could not be loaded"))
     }
 
-    fun updateDailyMealStatus(slot: String, status: String, callback: (AuthResult) -> Unit) = requestAsync(
+    fun updateDailyMealStatus(slot: String, status: String, date: String? = null, callback: (AuthResult) -> Unit) = requestAsync(
         path = "/rest/v1/rpc/provider_update_daily_meal_status",
-        body = JSONObject().put("target_slot", slot).put("target_date", JSONObject.NULL).put("new_status", status),
+        body = JSONObject().put("target_slot", slot).put("target_date", date?.takeIf { it.isNotBlank() } ?: JSONObject.NULL).put("new_status", status),
         authenticated = true
     ) { code, json -> callback(if (code in 200..299) AuthResult(true) else AuthResult(false, errorMessage(json, "Meal status could not be updated"))) }
 
-    fun assignDeliveryBatch(personnelId: String, slot: String, count: Int, callback: (AuthResult) -> Unit) = requestAsync(
+    fun assignDeliveryBatch(personnelId: String, slot: String, count: Int, date: String? = null, callback: (AuthResult) -> Unit) = requestAsync(
         path = "/rest/v1/rpc/provider_assign_delivery_batch",
         body = JSONObject().put("target_personnel_id", personnelId).put("target_slot", slot)
-            .put("target_date", JSONObject.NULL).put("maximum_meals", count),
+            .put("target_date", date?.takeIf { it.isNotBlank() } ?: JSONObject.NULL).put("maximum_meals", count),
         authenticated = true
     ) { code, json -> callback(if (code in 200..299) AuthResult(true) else AuthResult(false, errorMessage(json, "Delivery batch could not be assigned"))) }
 
-    fun autoAssignRoutes(slot: String, callback: (AuthResult) -> Unit) = requestAsync(
+    fun autoAssignRoutes(slot: String, date: String? = null, callback: (AuthResult) -> Unit) = requestAsync(
         path = "/rest/v1/rpc/provider_auto_assign_routes",
-        body = JSONObject().put("target_slot", slot).put("target_date", JSONObject.NULL),
+        body = JSONObject().put("target_slot", slot).put("target_date", date?.takeIf { it.isNotBlank() } ?: JSONObject.NULL),
         authenticated = true
     ) { code, json -> callback(if (code in 200..299) AuthResult(true, "${json.optInt("assigned")} meals assigned") else AuthResult(false, errorMessage(json, "Routes could not be assigned"))) }
 

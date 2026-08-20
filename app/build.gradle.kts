@@ -25,6 +25,12 @@ android {
         versionName = "1.0"
         buildConfigField("String", "SUPABASE_URL", "\"$supabaseUrl\"")
         buildConfigField("String", "SUPABASE_ANON_KEY", "\"$supabaseAnonKey\"")
+        buildConfigField("boolean", "DEVELOPMENT_AUTH", "false")
+    }
+
+    buildTypes {
+        debug { buildConfigField("boolean", "DEVELOPMENT_AUTH", "true") }
+        release { buildConfigField("boolean", "DEVELOPMENT_AUTH", "false") }
     }
 
     buildFeatures { compose = true; buildConfig = true }
