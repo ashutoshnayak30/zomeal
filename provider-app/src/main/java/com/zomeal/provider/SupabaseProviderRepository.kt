@@ -1,17 +1,21 @@
 package com.zomeal.provider
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.os.Handler
 import android.os.Looper
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.URLEncoder
 import java.util.UUID
 
 data class AuthResult(val success: Boolean, val message: String? = null)
 
 class SupabaseProviderRepository(context: Context) {
+    private val developmentPhones = setOf("9999999999", "7000000001", "7000000002", "7000000003", "7000000004", "7000000005")
     private val appContext = context.applicationContext
     private val prefs = context.getSharedPreferences("zomeal_provider_session", Context.MODE_PRIVATE)
     private val main = Handler(Looper.getMainLooper())
@@ -30,7 +34,7 @@ class SupabaseProviderRepository(context: Context) {
     ) { code, json -> callback(if (code in 200..299) AuthResult(true) else AuthResult(false, errorMessage(json, "Unable to send OTP"))) }
 
     fun beginAuthentication(phone: String, callback: (AuthResult) -> Unit) {
-        if (developmentAuthEnabled && phone == "9999999999") {
+        if (developmentAuthEnabled && phone in developmentPhones) {
             main.post { callback(AuthResult(true, "Use development OTP 123456")) }
         } else sendOtp(phone, callback)
     }
@@ -51,18 +55,19 @@ class SupabaseProviderRepository(context: Context) {
     }
 
     fun completeAuthentication(phone: String, token: String, callback: (AuthResult) -> Unit) {
-        if (developmentAuthEnabled && phone == "9999999999") {
+        if (developmentAuthEnabled && phone in developmentPhones) {
             if (token != "123456") {
                 main.post { callback(AuthResult(false, "For this development number, enter OTP 123456")) }
                 return
             }
             // Reuse the same anonymous development identity after an in-app
             // sign-out so its draft/provider application remains addressable.
-            if (prefs.getBoolean("development_session", false) && !prefs.getString("refresh_token", null).isNullOrBlank()) {
+            if (prefs.getBoolean("development_session", false) && prefs.getString("development_phone","")==phone && !prefs.getString("refresh_token", null).isNullOrBlank()) {
                 prefs.edit().putBoolean("signed_out", false).apply()
-                main.post { callback(AuthResult(true)) }
+                claimSeededProvider(phone,callback)
                 return
             }
+            if(prefs.getBoolean("development_session",false))prefs.edit().clear().apply()
             createAnonymousDevelopmentSession(phone, callback)
         } else verifyOtp(phone, token, callback)
     }
@@ -80,10 +85,19 @@ class SupabaseProviderRepository(context: Context) {
                 .putString("refresh_token", json.optString("refresh_token"))
                 .putString("user_id", json.optJSONObject("user")?.optString("id"))
                 .putBoolean("development_session", true)
+                .putString("development_phone",phone)
                 .putBoolean("signed_out", false)
                 .apply()
-            callback(AuthResult(true))
+            claimSeededProvider(phone,callback)
         } else callback(AuthResult(false, errorMessage(json, "Anonymous sign-ins must be enabled in Supabase Authentication settings")))
+    }
+
+    private fun claimSeededProvider(phone:String,callback:(AuthResult)->Unit){
+        if(phone=="9999999999"){main.post{callback(AuthResult(true))};return}
+        requestAsync(
+            path="/rest/v1/rpc/provider_claim_seeded_test_account",
+            body=JSONObject().put("target_phone",phone),authenticated=true
+        ){code,json->callback(if(code in 200..299)AuthResult(true) else AuthResult(false,errorMessage(json,"This demo provider account could not be opened")))}
     }
 
     fun saveDraft(payload: JSONObject, callback: ((AuthResult) -> Unit)? = null) = requestAsync(
@@ -94,6 +108,12 @@ class SupabaseProviderRepository(context: Context) {
             .put("draft_payload", payload),
         authenticated = true
     ) { code, json -> callback?.invoke(if (code in 200..299) AuthResult(true) else AuthResult(false, errorMessage(json, "Draft could not be saved"))) }
+
+    fun savePrimaryDeliveryContact(name: String, phone: String, callback: (AuthResult) -> Unit) = requestAsync(
+        path = "/rest/v1/rpc/provider_upsert_primary_delivery_contact",
+        body = JSONObject().put("contact_name", name.trim().ifBlank { JSONObject.NULL }).put("contact_phone", phone),
+        authenticated = true
+    ) { code, json -> callback(if (code in 200..299) AuthResult(true) else AuthResult(false, errorMessage(json, "Delivery contact could not be saved"))) }
 
     fun loadDraft(callback: (JSONObject?) -> Unit) = requestAsync(
         path = "/rest/v1/rpc/get_provider_form_draft",
@@ -124,10 +144,39 @@ class SupabaseProviderRepository(context: Context) {
                 body = JSONObject().put("target_lunch_daily_rupees", ProviderDraft.bothLunchDailyPrice.toDoubleOrNull() ?: 0.0),
                 authenticated = true
             ) { splitCode, splitJson ->
-                if (splitCode in 200..299) uploadAllSelectedMedia(providerId, callback)
+                if (splitCode in 200..299) uploadAllSelectedMedia(providerId, callback = callback)
                 else callback(AuthResult(false, errorMessage(splitJson, "Combined lunch and dinner values could not be saved")))
             }
-        } else uploadAllSelectedMedia(providerId, callback)
+        } else uploadAllSelectedMedia(providerId, callback = callback)
+    }
+
+    /**
+     * Active listings remain customer-visible while this complete replacement
+     * workspace is reviewed. New prices, menus and photographs are staged as
+     * pending rather than overwriting the approved catalogue in-place.
+     */
+    fun submitActiveBusinessUpdate(payload: JSONObject, callback: (AuthResult) -> Unit) = requestAsync(
+        path = "/rest/v1/rpc/provider_submit_business_update",
+        body = JSONObject().put("payload", payload),
+        authenticated = true
+    ) { code, json ->
+        if (code !in 200..299) {
+            callback(AuthResult(false, errorMessage(json, "Business changes could not be submitted")))
+            return@requestAsync
+        }
+        val providerId = json.optString("provider_id")
+        val changeRequestId = json.optString("change_request_id")
+        if (providerId.isBlank()) {
+            callback(AuthResult(false, "Provider record was not returned"))
+            return@requestAsync
+        }
+        uploadAllSelectedMedia(providerId, changeRequestId.ifBlank { null }, onlyChanged = true) { mediaResult ->
+            if (!mediaResult.success) { callback(mediaResult); return@uploadAllSelectedMedia }
+            savePrimaryDeliveryContact(ProviderDraft.deliveryName, ProviderDraft.deliveryPhone) { deliveryResult ->
+                if (deliveryResult.success) ProviderDraft.acceptCurrentAsBaseline()
+                callback(if (deliveryResult.success) AuthResult(true, "Only your changed information was submitted for Zomeal approval. Your current listing remains active.") else deliveryResult)
+            }
+        }
     }
 
     fun loadApplicationStatus(callback: (JSONObject?) -> Unit) = requestAsync(
@@ -136,15 +185,29 @@ class SupabaseProviderRepository(context: Context) {
         authenticated = true
     ) { code, json -> callback(if (code in 200..299) json else null) }
 
-    fun loadSubmittedApplication(callback: (JSONObject?) -> Unit) = requestAsync(
+    fun loadSubmittedApplication(markPhotoBaseline: Boolean = true, callback: (JSONObject?) -> Unit) = requestAsync(
         path = "/rest/v1/rpc/provider_submitted_application",
         body = JSONObject(),
         authenticated = true
     ) { code, json ->
-        val payload = if (code in 200..299) json.optJSONObject("payload") else null
-        if (payload != null) ProviderDraft.restore(payload)
+        val candidate = if (code in 200..299) json.optJSONObject("payload") else null
+        // Never replace the in-memory approved listing with an empty historical
+        // onboarding draft. The database RPC now falls back to the latest full
+        // accepted/requested snapshot; this guard also keeps older deployments
+        // from rendering a completely blank editor.
+        val payload = candidate?.takeIf { it.optString("businessName").isNotBlank() }
+        if (payload != null) {
+            ProviderDraft.restore(payload)
+            if (markPhotoBaseline) ProviderDraft.markEditBaseline(payload)
+        }
         callback(payload)
     }
+
+    fun loadLatestBusinessChange(callback: (JSONObject?) -> Unit) = requestAsync(
+        path = "/rest/v1/rpc/provider_latest_business_change",
+        body = JSONObject(),
+        authenticated = true
+    ) { code, json -> callback(if (code in 200..299) json else null) }
 
     fun loadDailyDashboard(slot: String, date: String? = null, callback: (JSONObject?, String?) -> Unit) = requestAsync(
         path = "/rest/v1/rpc/provider_daily_dashboard",
@@ -206,6 +269,25 @@ class SupabaseProviderRepository(context: Context) {
         path = "/rest/v1/rpc/provider_commission_summary",
         body = JSONObject().put("target_provider", JSONObject.NULL), authenticated = true
     ) { code, json -> if (code in 200..299) callback(json, null) else callback(null, errorMessage(json, "Commission profile could not be loaded")) }
+
+    fun loadProviderProfileHub(callback: (JSONObject?, String?) -> Unit) = requestAsync(
+        path = "/rest/v1/rpc/provider_profile_hub",
+        body = JSONObject(), authenticated = true
+    ) { code, json -> if (code in 200..299) callback(json, null) else callback(null, errorMessage(json, "Provider profile could not be loaded")) }
+
+    fun approvedMedia(path:String,callback:(Bitmap?)->Unit){
+        if(path.isBlank()){callback(null);return}
+        Thread{
+            val bitmap=runCatching{
+                val encoded=path.split('/').joinToString("/"){URLEncoder.encode(it,"UTF-8").replace("+","%20")}
+                val connection=(URL("$baseUrl/storage/v1/object/authenticated/provider-media/$encoded").openConnection() as HttpURLConnection).apply{
+                    connectTimeout=12000;readTimeout=20000;setRequestProperty("apikey",anonKey);setRequestProperty("Authorization","Bearer ${prefs.getString("access_token","")}")
+                }
+                val result=if(connection.responseCode in 200..299)connection.inputStream.use(BitmapFactory::decodeStream) else null
+                connection.disconnect();result
+            }.getOrNull();main.post{callback(bitmap)}
+        }.start()
+    }
 
     fun loadPayoutDestination(callback: (JSONObject?, String?) -> Unit) = requestAsync(
         path = "/rest/v1/rpc/provider_payout_destination", body = JSONObject(), authenticated = true
@@ -311,7 +393,7 @@ class SupabaseProviderRepository(context: Context) {
 
     private data class PendingMedia(val uri: String, val type: String, val dishName: String?, val alt: String)
 
-    private fun uploadAllSelectedMedia(providerId: String, callback: (AuthResult) -> Unit) {
+    private fun uploadAllSelectedMedia(providerId: String, changeRequestId: String? = null, onlyChanged: Boolean = false, callback: (AuthResult) -> Unit) {
         val media = mutableListOf<PendingMedia>()
         ProviderDraft.profilePhoto?.let { media += PendingMedia(it, "OWNER_PROFILE", null, ProviderDraft.businessName + " owner") }
         ProviderDraft.kitchenPhoto?.let { media += PendingMedia(it, "KITCHEN", null, ProviderDraft.businessName + " kitchen") }
@@ -319,11 +401,13 @@ class SupabaseProviderRepository(context: Context) {
         ProviderDraft.menus.forEach { day -> (day.lunch + day.dinner).forEach { dish ->
             dish.photo?.let { if (dish.name.isNotBlank()) media += PendingMedia(it, "MENU_ITEM", dish.name, dish.name) }
         } }
-        if (media.isEmpty()) { callback(AuthResult(true)); return }
-        uploadNext(providerId, media.distinctBy { it.uri + it.type + it.dishName }, 0, callback)
+        val selected = media.distinctBy { it.uri + it.type + it.dishName }
+            .filter { !onlyChanged || ProviderDraft.isNewOrReplacedPhoto(it.uri) }
+        if (selected.isEmpty()) { callback(AuthResult(true)); return }
+        uploadNext(providerId, changeRequestId, selected, 0, callback)
     }
 
-    private fun uploadNext(providerId: String, media: List<PendingMedia>, index: Int, callback: (AuthResult) -> Unit) {
+    private fun uploadNext(providerId: String, changeRequestId: String?, media: List<PendingMedia>, index: Int, callback: (AuthResult) -> Unit) {
         if (index >= media.size) { callback(AuthResult(true)); return }
         val item = media[index]
         val uri = android.net.Uri.parse(item.uri)
@@ -339,12 +423,13 @@ class SupabaseProviderRepository(context: Context) {
                 uploadStorageObject(path, mime, bytes) { uploadResult ->
                     if (!uploadResult.success) { callback(uploadResult); return@uploadStorageObject }
                     requestAsync(
-                        "/rest/v1/rpc/provider_register_uploaded_media",
-                        JSONObject().put("target_provider_id", providerId).put("target_menu_item_name", item.dishName ?: JSONObject.NULL)
+                        if (changeRequestId == null) "/rest/v1/rpc/provider_register_uploaded_media" else "/rest/v1/rpc/provider_register_change_media",
+                        JSONObject().apply { if (changeRequestId != null) put("target_change_request_id", changeRequestId) }
+                            .put("target_provider_id", providerId).put("target_menu_item_name", item.dishName ?: JSONObject.NULL)
                             .put("media_kind", item.type).put("object_path", path).put("mime", mime)
                             .put("bytes", bytes.size).put("alt_text_value", item.alt), true
                     ) { code, json ->
-                        if (code in 200..299) uploadNext(providerId, media, index + 1, callback)
+                        if (code in 200..299) uploadNext(providerId, changeRequestId, media, index + 1, callback)
                         else callback(AuthResult(false, errorMessage(json, "Photo metadata could not be registered")))
                     }
                 }

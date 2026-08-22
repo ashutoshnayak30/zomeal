@@ -28,7 +28,7 @@ private val DMuted = Color(0xFF68736D)
 private val DMist = Color(0xFFF0F7F2)
 
 @Composable
-fun ProviderDashboardScreen(repository: SupabaseProviderRepository, onOrders: () -> Unit, onEarnings: () -> Unit, onProfile: () -> Unit, onNotifications: () -> Unit, onSignOut: () -> Unit) {
+fun ProviderDashboardScreen(repository: SupabaseProviderRepository, bannerMessage: String? = null, onDismissBanner: () -> Unit = {}, onOrders: () -> Unit, onEarnings: () -> Unit, onProfile: () -> Unit, onManageBusiness: () -> Unit, onNotifications: () -> Unit, onSignOut: () -> Unit) {
     var slot by remember { mutableStateOf("LUNCH") }
     var data by remember { mutableStateOf<JSONObject?>(null) }
     var loading by remember { mutableStateOf(true) }
@@ -165,8 +165,23 @@ fun ProviderDashboardScreen(repository: SupabaseProviderRepository, onOrders: ()
                     Spacer(Modifier.height(16.dp))
                     Text("Today's meal operations", color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Bold)
                     Text(data?.optString("date").orEmpty(), color = Color.White.copy(alpha = .82f), fontSize = 12.sp)
+                    Spacer(Modifier.height(12.dp))
+                    Button(
+                        onClick = onManageBusiness,
+                        colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = DBrand),
+                        shape = RoundedCornerShape(13.dp),
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 9.dp)
+                    ) {
+                        Icon(Icons.Outlined.EditNote, null, modifier = Modifier.size(18.dp)); Spacer(Modifier.width(7.dp))
+                        Text("Manage profile, packages & menus", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
                 }
             }
+            bannerMessage?.let { message -> item {
+                Surface(Modifier.fillMaxWidth().padding(horizontal=16.dp),color=Color(0xFFE7F5EA),shape=RoundedCornerShape(14.dp)) {
+                    Row(Modifier.padding(13.dp),verticalAlignment=Alignment.Top){Icon(Icons.Outlined.CheckCircle,null,tint=DBrand,modifier=Modifier.size(20.dp));Spacer(Modifier.width(8.dp));Text(message,color=DBrand,fontSize=10.sp,lineHeight=15.sp,modifier=Modifier.weight(1f));IconButton(onClick=onDismissBanner,modifier=Modifier.size(24.dp)){Icon(Icons.Outlined.Close,"Dismiss",tint=DMuted,modifier=Modifier.size(16.dp))}}
+                }
+            } }
             item {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     MealSlotButton("LUNCH", "Lunch", Icons.Outlined.WbSunny, slot == "LUNCH", Modifier.weight(1f)) { slot = "LUNCH" }

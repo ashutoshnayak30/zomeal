@@ -37,7 +37,7 @@ private val NBrand=Color(0xFF087F43);private val NInk=Color(0xFF14221B);private 
             if(loading)item{Box(Modifier.fillMaxWidth().height(180.dp),contentAlignment=Alignment.Center){CircularProgressIndicator(color=NBrand)}}
             error?.let{item{NoticeCard(it,true)}}
             if(!loading&&notifications.isEmpty())item{Column(Modifier.fillMaxWidth().padding(top=80.dp),horizontalAlignment=Alignment.CenterHorizontally){Box(Modifier.size(76.dp).clip(CircleShape).background(NMist),contentAlignment=Alignment.Center){Icon(Icons.Outlined.NotificationsNone,null,tint=NBrand,modifier=Modifier.size(36.dp))};Spacer(Modifier.height(14.dp));Text("You're all caught up",fontSize=18.sp,fontWeight=FontWeight.Bold,color=NInk);Text("Provider, finance and operations updates will appear here.",fontSize=11.sp,color=NMuted)}}
-            items(notifications,key={it.optString("id")}){item->NotificationCard(item){if(item.isNull("read_at")){repository.markNotificationsRead(item.optString("id")){}};onOpen(item.optString("destination"))}}
+            items(notifications,key={it.optString("id")}){item->NotificationCard(item){if(item.isNull("read_at")){repository.markNotificationsRead(item.optString("id")){}};onOpen(if(item.optString("entity_type")=="PROVIDER_CHANGE_REQUEST") "MANAGE_BUSINESS" else item.optString("destination"))}}
             item{Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars))}
         }
     }

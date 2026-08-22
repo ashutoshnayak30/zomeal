@@ -1,6 +1,7 @@
 package com.zomeal.provider
 
 import android.os.Bundle
+import androidx.activity.compose.BackHandler
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
@@ -11,7 +12,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ArrowForward
+import androidx.compose.material.icons.outlined.AccessTime
 import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Restaurant
 import androidx.compose.material.icons.outlined.Storefront
 import androidx.compose.material3.*
@@ -28,6 +32,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalContext
+import kotlinx.coroutines.delay
 
 private val Brand = Color(0xFF087F43)
 private val Ink = Color(0xFF14221B)
@@ -41,7 +46,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private enum class Screen { Login, Otp, Registration, Business, Service, Packages, Menu, Operations, Review, Submitted, SubmissionDetails, Dashboard, DailyOrders, Earnings, Profile, PayoutDetails, Notifications }
+private enum class Screen { Login, Otp, Registration, Business, Service, Packages, Menu, Operations, Review, Submitted, SubmissionDetails, Dashboard, ManageBusiness, ChangesSubmitted, DailyOrders, Earnings, Profile, UploadedData, PayoutDetails, Notifications }
 
 private fun draftResumeScreen(): Screen = when {
     ProviderDraft.businessName.isBlank() || ProviderDraft.contactName.isBlank() || ProviderDraft.address.isBlank() -> Screen.Business
@@ -64,6 +69,51 @@ private fun ProviderApp() {
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var saveStatus by remember { mutableStateOf("Draft saved") }
+    var managingActiveProvider by rememberSaveable { mutableStateOf(false) }
+    var manageMessage by remember { mutableStateOf<String?>(null) }
+    var dashboardMessage by remember { mutableStateOf<String?>(null) }
+    fun openActiveEditor(destination: Screen) {
+        loading = true; manageMessage = null
+        repository.loadSubmittedApplication(markPhotoBaseline = !managingActiveProvider) { payload ->
+            if (payload == null) {
+                loading = false
+                manageMessage = "Your current business details could not be loaded. Please refresh and try again."
+            } else repository.loadLatestBusinessChange { change ->
+                loading = false
+                if (change?.optString("status") == "REJECTED") {
+                    val reason = change.optString("review_note").ifBlank { "Please review the requested corrections and submit again." }
+                    manageMessage = "Changes need correction: $reason Your approved listing is still live."
+                } else if (change?.optString("status") == "PENDING") {
+                    manageMessage = "Your latest changes are waiting for Zomeal review. Your approved listing remains live."
+                }
+                managingActiveProvider = true
+                screen = destination
+            }
+        }
+    }
+    fun submitActiveChanges(onDone: () -> Unit) {
+        loading = true; manageMessage = null
+        repository.submitActiveBusinessUpdate(ProviderDraft.toJson()) { result ->
+            loading = false
+            if (result.success) { manageMessage = result.message ?: "Changes submitted for Zomeal approval."; onDone() }
+            else {
+                // Always surface the database/photo error. Previously the editor
+                // stayed open without rendering manageMessage, which made the
+                // button look unresponsive even though Supabase returned an error.
+                manageMessage = "Could not submit changes: ${result.message ?: "Please try again."}"
+                screen = Screen.ManageBusiness
+            }
+        }
+    }
+    fun saveActiveDraft(section: String, onDone: () -> Unit = { screen = Screen.ManageBusiness }) {
+        loading = true
+        repository.saveDraft(ProviderDraft.toJson()) { result ->
+            loading = false
+            manageMessage = if (result.success) "$section saved in your change draft. Continue editing other sections, then submit everything together."
+            else "Could not save draft: ${result.message ?: "Please try again."}"
+            if (result.success) onDone() else screen = Screen.ManageBusiness
+        }
+    }
     fun routeAuthenticatedProvider() {
         loading = true
         repository.loadApplicationStatus { status ->
@@ -90,6 +140,25 @@ private fun ProviderApp() {
         enabled = repository.isAuthenticated && screen in setOf(Screen.Business, Screen.Service, Screen.Packages, Screen.Menu, Screen.Operations, Screen.Review),
         onStatus = { saveStatus = it }
     )
+    BackHandler(enabled = screen != Screen.Login) {
+        screen = when(screen) {
+            Screen.Otp -> Screen.Login
+            Screen.Registration -> if(repository.isAuthenticated) Screen.Dashboard else Screen.Login
+            Screen.Business -> if(managingActiveProvider) Screen.ManageBusiness else Screen.Registration
+            Screen.Service -> Screen.Business
+            Screen.Packages -> if(managingActiveProvider) Screen.ManageBusiness else Screen.Service
+            Screen.Menu -> if(managingActiveProvider) Screen.ManageBusiness else Screen.Packages
+            Screen.Operations -> if(managingActiveProvider) Screen.ManageBusiness else Screen.Menu
+            Screen.Review -> Screen.Operations
+            Screen.SubmissionDetails -> Screen.Submitted
+            Screen.ManageBusiness, Screen.ChangesSubmitted, Screen.DailyOrders, Screen.Earnings, Screen.Profile, Screen.Notifications -> Screen.Dashboard
+            Screen.UploadedData -> Screen.Profile
+            Screen.PayoutDetails -> Screen.Profile
+            Screen.Submitted -> Screen.Submitted
+            Screen.Dashboard -> Screen.Dashboard
+            Screen.Login -> Screen.Login
+        }
+    }
     when (screen) {
         Screen.Login -> LoginScreen(phone, { phone = it.filter(Char::isDigit).take(10); error = null }, loading, error) {
             loading = true; error = null
@@ -111,15 +180,41 @@ private fun ProviderApp() {
             }
         }
         Screen.Registration -> RegistrationStart(saveStatus) { screen = Screen.Business }
-        Screen.Business -> BusinessScreen({ screen = Screen.Registration }) { screen = Screen.Service }
+        Screen.Business -> BusinessScreen(
+            { screen = if (managingActiveProvider) Screen.ManageBusiness else Screen.Registration },
+            { if (managingActiveProvider) saveActiveDraft("Profile changes") else screen = Screen.Service },
+            activeEdit = managingActiveProvider,
+            saving = loading
+        )
         Screen.Service -> ServiceAreaScreen({ screen = Screen.Business }) { screen = Screen.Packages }
-        Screen.Packages -> PackageScreen({ screen = Screen.Service }) { screen = Screen.Menu }
+        Screen.Packages -> PackageScreen(
+            { screen = if (managingActiveProvider) Screen.ManageBusiness else Screen.Service },
+            { if (managingActiveProvider) saveActiveDraft("Package changes") else screen = Screen.Menu },
+            activeEdit = managingActiveProvider,
+            saving = loading
+        )
         Screen.Menu -> WeeklyMenuScreen(
-            onBack = { screen = Screen.Packages },
-            onNext = { screen = Screen.Operations },
+            onBack = { screen = if (managingActiveProvider) Screen.ManageBusiness else Screen.Packages },
+            onNext = { if (managingActiveProvider) saveActiveDraft("Seven-day menu changes") else screen = Screen.Operations },
+            activeEdit = managingActiveProvider,
+            submittingUpdate = loading,
             onSaveDay = { _, callback -> repository.saveDraft(ProviderDraft.toJson(), callback) }
         )
-        Screen.Operations -> OperationsScreen({ screen = Screen.Menu }) { screen = Screen.Review }
+        Screen.Operations -> OperationsScreen(
+            { screen = if (managingActiveProvider) Screen.ManageBusiness else Screen.Menu },
+            {
+                if (managingActiveProvider) {
+                    loading = true
+                    repository.savePrimaryDeliveryContact(ProviderDraft.deliveryName, ProviderDraft.deliveryPhone) { contactResult ->
+                        loading = false
+                        if (contactResult.success) saveActiveDraft("Photo and delivery changes")
+                        else { manageMessage = "Could not save delivery contact: ${contactResult.message ?: "Please check the number."}"; screen = Screen.ManageBusiness }
+                    }
+                } else screen = Screen.Review
+            },
+            activeEdit = managingActiveProvider,
+            saving = loading
+        )
         Screen.Review -> ReviewScreen({ screen = Screen.Operations }, loading, error) {
             loading = true; error = null
             repository.submitApplication(ProviderDraft.toJson()) { result ->
@@ -138,12 +233,80 @@ private fun ProviderApp() {
             onBack = { screen = Screen.Submitted },
             onEdit = { screen = Screen.Registration }
         )
-        Screen.Dashboard -> ProviderDashboardScreen(repository, onOrders = { screen = Screen.DailyOrders }, onEarnings = { screen = Screen.Earnings }, onProfile = { screen = Screen.Profile }, onNotifications = { screen = Screen.Notifications }) { repository.signOut(); screen = Screen.Login }
+        Screen.Dashboard -> ProviderDashboardScreen(repository, bannerMessage = dashboardMessage, onDismissBanner = { dashboardMessage = null }, onOrders = { screen = Screen.DailyOrders }, onEarnings = { screen = Screen.Earnings }, onProfile = { screen = Screen.Profile }, onManageBusiness = { openActiveEditor(Screen.ManageBusiness) }, onNotifications = { screen = Screen.Notifications }) { repository.signOut(); screen = Screen.Login }
+        Screen.ManageBusiness -> ManageBusinessScreen(
+            message = manageMessage,
+            loading = loading,
+            onBack = { managingActiveProvider = false; screen = Screen.Dashboard },
+            onEditProfile = { openActiveEditor(Screen.Business) },
+            onEditPackages = { openActiveEditor(Screen.Packages) },
+            onEditMenus = { openActiveEditor(Screen.Menu) },
+            onEditPhotos = { openActiveEditor(Screen.Operations) },
+            onSubmitAll = { submitActiveChanges {
+                managingActiveProvider = false
+                screen = Screen.ChangesSubmitted
+            } }
+        )
+        Screen.ChangesSubmitted -> ChangesSubmittedScreen {
+            dashboardMessage = "All changes were submitted together for Zomeal review. Your approved listing remains live until a decision is made."
+            screen = Screen.Dashboard
+        }
         Screen.DailyOrders -> ProviderDailyOrdersScreen(repository, onDashboard = { screen = Screen.Dashboard })
         Screen.Earnings -> ProviderEarningsScreen(repository, onDashboard = { screen = Screen.Dashboard }, onOrders = { screen = Screen.DailyOrders }, onProfile = { screen = Screen.Profile })
-        Screen.Profile -> ProviderProfileScreen(repository, onBack = { screen = Screen.Dashboard }, onEarnings = { screen = Screen.Earnings }, onPayoutDetails = { screen = Screen.PayoutDetails }) { repository.signOut(); screen = Screen.Login }
+        Screen.Profile -> ProviderProfileScreen(repository, onBack = { screen = Screen.Dashboard }, onUploadedData = { screen = Screen.UploadedData }, onManageBusiness = { openActiveEditor(Screen.ManageBusiness) }, onEarnings = { screen = Screen.Earnings }, onPayoutDetails = { screen = Screen.PayoutDetails }) { repository.signOut(); screen = Screen.Login }
+        Screen.UploadedData -> ProviderUploadedDataScreen(repository, onBack = { screen = Screen.Profile })
         Screen.PayoutDetails -> ProviderPayoutDetailsScreen(repository, onBack = { screen = Screen.Profile })
-        Screen.Notifications -> ProviderNotificationsScreen(repository, onBack = { screen = Screen.Dashboard }) { destination -> screen = when(destination) { "EARNINGS" -> Screen.Earnings; "PAYOUT_DETAILS" -> Screen.PayoutDetails; "PROFILE" -> Screen.Profile; "ORDERS" -> Screen.DailyOrders; else -> Screen.Dashboard } }
+        Screen.Notifications -> ProviderNotificationsScreen(repository, onBack = { screen = Screen.Dashboard }) { destination ->
+            when(destination) {
+                "MANAGE_BUSINESS" -> openActiveEditor(Screen.ManageBusiness)
+                "EARNINGS" -> screen = Screen.Earnings
+                "PAYOUT_DETAILS" -> screen = Screen.PayoutDetails
+                "PROFILE" -> screen = Screen.Profile
+                "ORDERS" -> screen = Screen.DailyOrders
+                else -> screen = Screen.Dashboard
+            }
+        }
+    }
+}
+
+@Composable
+private fun ChangesSubmittedScreen(onDashboard: () -> Unit) {
+    LaunchedEffect(Unit) { delay(3200); onDashboard() }
+    Column(
+        Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0xFFF5FBF6), Color.White, Color(0xFFEAF5DF))))
+            .windowInsetsPadding(WindowInsets.safeDrawing).padding(horizontal = 26.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Spacer(Modifier.weight(.8f))
+        Box(Modifier.size(148.dp), contentAlignment = Alignment.Center) {
+            Box(Modifier.size(138.dp).clip(CircleShape).background(Color(0xFFDFF3E5)))
+            Box(Modifier.size(104.dp).clip(CircleShape).background(Color.White), contentAlignment = Alignment.Center) {
+                Icon(Icons.Outlined.CheckCircle, null, tint = Brand, modifier = Modifier.size(70.dp))
+            }
+            Box(Modifier.align(Alignment.TopEnd).size(38.dp).clip(CircleShape).background(Color(0xFFFFF2CC)), contentAlignment = Alignment.Center) {
+                Icon(Icons.Outlined.AccessTime, null, tint = Color(0xFF9A6A00), modifier = Modifier.size(21.dp))
+            }
+        }
+        Spacer(Modifier.height(28.dp))
+        Text("Changes submitted!", color = Ink, fontSize = 29.sp, fontWeight = FontWeight.ExtraBold, textAlign = TextAlign.Center)
+        Spacer(Modifier.height(10.dp))
+        Text("Your complete request is now waiting for Zomeal review.", color = Brand, fontSize = 15.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+        Spacer(Modifier.height(14.dp))
+        Text("Your currently approved profile, packages and menus will remain live until the new changes are confirmed. We’ll notify you after approval or if anything needs correction.", color = Muted, fontSize = 13.sp, lineHeight = 20.sp, textAlign = TextAlign.Center)
+        Spacer(Modifier.height(25.dp))
+        Surface(color = Mist, shape = RoundedCornerShape(18.dp)) {
+            Row(Modifier.fillMaxWidth().padding(15.dp), verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Outlined.Notifications, null, tint = Brand, modifier = Modifier.size(23.dp))
+                Spacer(Modifier.width(11.dp)); Column { Text("What happens next?", color = Ink, fontSize = 13.sp, fontWeight = FontWeight.Bold); Text("Zomeal reviews one combined request and sends the decision in Notifications.", color = Muted, fontSize = 10.sp, lineHeight = 15.sp) }
+            }
+        }
+        Spacer(Modifier.weight(1f))
+        Button(onDashboard, Modifier.fillMaxWidth().height(54.dp), colors = ButtonDefaults.buttonColors(containerColor = Brand), shape = RoundedCornerShape(15.dp)) {
+            Icon(Icons.Outlined.Home, null); Spacer(Modifier.width(8.dp)); Text("Go to dashboard", fontSize = 15.sp, fontWeight = FontWeight.Bold)
+        }
+        Spacer(Modifier.height(10.dp))
+        Text("Redirecting automatically…", color = Muted, fontSize = 10.sp)
+        Spacer(Modifier.height(18.dp))
     }
 }
 
@@ -251,7 +414,7 @@ private fun OtpScreen(phone: String, loading: Boolean, error: String?, onBack: (
             if (loading) CircularProgressIndicator(Modifier.size(20.dp), color = Color.White, strokeWidth = 2.dp) else Text("Verify & continue", fontWeight = FontWeight.Bold)
         }
         error?.let { Text(it, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center, fontSize = 11.sp, modifier = Modifier.fillMaxWidth().padding(top = 10.dp)) }
-        Text(if (phone == "9999999999" && BuildConfig.DEVELOPMENT_AUTH) "Development testing: use OTP 123456" else "Enter the verification code sent by SMS.", color = Muted, fontSize = 11.sp, modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 13.dp))
+        Text(if (BuildConfig.DEVELOPMENT_AUTH && phone in setOf("9999999999","7000000001","7000000002","7000000003","7000000004","7000000005")) "Development testing: use OTP 123456" else "Enter the verification code sent by SMS.", color = Muted, fontSize = 11.sp, modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 13.dp))
     }
 }
 

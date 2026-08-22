@@ -13,7 +13,8 @@ import java.net.URLEncoder
 
 internal data class MarketplaceProvider(
     val id:String,val name:String,val locality:String,val dietaryType:String,val description:String,
-    val packages:List<MarketplacePackage>,val menu:JSONArray,val primaryPhotoPath:String
+    val packages:List<MarketplacePackage>,val menu:JSONArray,val primaryPhotoPath:String,
+    val kitchenPhotoPath:String,val mealPhotoPath:String
 )
 
 internal data class PendingCheckout(val providerId:String,val packageId:String,val payload:JSONObject,val updatedAt:String)
@@ -96,6 +97,16 @@ internal class SupabaseCustomerRepository(context:Context) {
     }
     private fun bearer():String=customerAccessToken.ifBlank{anonKey}
 
+    private fun refreshSessionBlocking():Boolean{
+        val refresh=prefs.getString("refresh_token",null).orEmpty();if(refresh.isBlank())return false
+        return runCatching{
+            val connection=(URL("$baseUrl/auth/v1/token?grant_type=refresh_token").openConnection() as HttpURLConnection).apply{requestMethod="POST";connectTimeout=12000;readTimeout=20000;doOutput=true;setRequestProperty("apikey",anonKey);setRequestProperty("Content-Type","application/json")}
+            connection.outputStream.use{it.write(JSONObject().put("refresh_token",refresh).toString().toByteArray())}
+            val code=connection.responseCode;val text=(if(code in 200..299)connection.inputStream else connection.errorStream)?.bufferedReader()?.use{it.readText()}.orEmpty();connection.disconnect()
+            val json=runCatching{JSONObject(text)}.getOrNull();if(code in 200..299&&json!=null&&json.optString("access_token").isNotBlank()){saveSession(json);true}else false
+        }.getOrDefault(false)
+    }
+
     private fun authRequest(path:String,body:JSONObject,callback:(JSONObject?,String?)->Unit){
         if(!configured){callback(null,"Supabase is not configured");return}
         Thread{
@@ -117,14 +128,12 @@ internal class SupabaseCustomerRepository(context:Context) {
         if(!configured){callback(emptyList(),"Supabase is not configured");return}
         Thread{
             try{
-                val connection=(URL("$baseUrl/rest/v1/rpc/customer_marketplace").openConnection() as HttpURLConnection).apply{
-                    requestMethod="POST";connectTimeout=12000;readTimeout=18000;doOutput=true
-                    setRequestProperty("apikey",anonKey);setRequestProperty("Authorization","Bearer ${bearer()}");setRequestProperty("Content-Type","application/json")
+                fun execute():Pair<Int,String>{
+                    val connection=(URL("$baseUrl/rest/v1/rpc/customer_marketplace").openConnection() as HttpURLConnection).apply{requestMethod="POST";connectTimeout=12000;readTimeout=18000;doOutput=true;setRequestProperty("apikey",anonKey);setRequestProperty("Authorization","Bearer ${bearer()}");setRequestProperty("Content-Type","application/json")}
+                    connection.outputStream.use{it.write(JSONObject().put("target_pincode",pincode).toString().toByteArray())};val code=connection.responseCode;val text=(if(code in 200..299)connection.inputStream else connection.errorStream)?.bufferedReader()?.use{it.readText()}.orEmpty();connection.disconnect();return code to text
                 }
-                connection.outputStream.use{it.write(JSONObject().put("target_pincode",pincode).toString().toByteArray())}
-                val stream=if(connection.responseCode in 200..299)connection.inputStream else connection.errorStream
-                val text=stream?.bufferedReader()?.use{it.readText()}.orEmpty()
-                if(connection.responseCode !in 200..299)throw IllegalStateException(runCatching{JSONObject(text).optString("message")}.getOrNull().orEmpty().ifBlank{"Marketplace request failed (${connection.responseCode})"})
+                var response=execute();if(response.first==401&&refreshSessionBlocking())response=execute();val(code,text)=response
+                if(code !in 200..299)throw IllegalStateException(runCatching{JSONObject(text).optString("message")}.getOrNull().orEmpty().ifBlank{if(code==401)"Your session expired. Please log in again." else "Marketplace request failed ($code)"})
                 val array=JSONArray(text);val result=buildList{for(index in 0 until array.length()){val item=array.optJSONObject(index)?:continue
                     val packageJson=item.optJSONArray("packages")?:JSONArray()
                     val packages=buildList{for(packageIndex in 0 until packageJson.length()){
@@ -137,7 +146,8 @@ internal class SupabaseCustomerRepository(context:Context) {
                     if(providerId.isBlank()||displayName.isBlank()||packages.isEmpty())continue
                     add(MarketplaceProvider(
                         providerId,displayName,item.optString("locality",item.optString("city","Bhubaneswar")),
-                        item.optString("dietary_type","BOTH"),item.optString("description"),packages,item.optJSONArray("weekly_menu")?:JSONArray(),item.optString("primary_photo_path")
+                        item.optString("dietary_type","BOTH"),item.optString("description").takeUnless{it.equals("null",true)}.orEmpty(),packages,item.optJSONArray("weekly_menu")?:JSONArray(),
+                        item.optString("primary_photo_path"),item.optString("kitchen_photo_path"),item.optString("meal_photo_path")
                     ))}}
                 main.post{callback(result,null)}
             }catch(error:Exception){main.post{callback(emptyList(),error.message?:"Could not load providers")}}
@@ -214,11 +224,17 @@ internal class SupabaseCustomerRepository(context:Context) {
         Thread{
             val bitmap=runCatching{
                 val encoded=path.split('/').joinToString("/"){URLEncoder.encode(it,"UTF-8").replace("+","%20")}
-                val connection=(URL("$baseUrl/storage/v1/object/authenticated/provider-media/$encoded").openConnection() as HttpURLConnection).apply{
-                    requestMethod="GET";connectTimeout=12000;readTimeout=20000
-                    setRequestProperty("apikey",anonKey);setRequestProperty("Authorization","Bearer ${bearer()}")
+                fun download():Pair<Int,ByteArray?>{
+                    val connection=(URL("$baseUrl/storage/v1/object/authenticated/provider-media/$encoded").openConnection() as HttpURLConnection).apply{
+                        requestMethod="GET";connectTimeout=12000;readTimeout=20000
+                        setRequestProperty("apikey",anonKey);setRequestProperty("Authorization","Bearer ${bearer()}")
+                    }
+                    val code=connection.responseCode
+                    val bytes=if(code in 200..299)connection.inputStream.use{it.readBytes()}else null
+                    connection.disconnect();return code to bytes
                 }
-                if(connection.responseCode !in 200..299) null else connection.inputStream.use(BitmapFactory::decodeStream)
+                var response=download();if(response.first==401&&refreshSessionBlocking())response=download()
+                response.second?.let{BitmapFactory.decodeByteArray(it,0,it.size)}
             }.getOrNull()
             main.post{callback(bitmap)}
         }.start()
@@ -259,14 +275,12 @@ internal class SupabaseCustomerRepository(context:Context) {
     private fun rpc(name:String,body:JSONObject,callback:(JSONObject?,String?)->Unit){
         Thread{
             try{
-                val connection=(URL("$baseUrl/rest/v1/rpc/$name").openConnection() as HttpURLConnection).apply{
-                    requestMethod="POST";connectTimeout=12000;readTimeout=20000;doOutput=true
-                    setRequestProperty("apikey",anonKey);setRequestProperty("Authorization","Bearer ${bearer()}");setRequestProperty("Content-Type","application/json")
+                fun execute():Pair<Int,String>{
+                    val connection=(URL("$baseUrl/rest/v1/rpc/$name").openConnection() as HttpURLConnection).apply{requestMethod="POST";connectTimeout=12000;readTimeout=20000;doOutput=true;setRequestProperty("apikey",anonKey);setRequestProperty("Authorization","Bearer ${bearer()}");setRequestProperty("Content-Type","application/json")}
+                    connection.outputStream.use{it.write(body.toString().toByteArray())};val code=connection.responseCode;val text=(if(code in 200..299)connection.inputStream else connection.errorStream)?.bufferedReader()?.use{it.readText()}.orEmpty();connection.disconnect();return code to text
                 }
-                connection.outputStream.use{it.write(body.toString().toByteArray())}
-                val stream=if(connection.responseCode in 200..299)connection.inputStream else connection.errorStream
-                val text=stream?.bufferedReader()?.use{it.readText()}.orEmpty()
-                if(connection.responseCode !in 200..299)throw IllegalStateException(runCatching{JSONObject(text).optString("message")}.getOrNull().orEmpty().ifBlank{"Request failed (${connection.responseCode})"})
+                var response=execute();if(response.first==401&&refreshSessionBlocking())response=execute();val(code,text)=response
+                if(code !in 200..299)throw IllegalStateException(runCatching{JSONObject(text).optString("message")}.getOrNull().orEmpty().ifBlank{if(code==401)"Your session expired. Please log in again." else "Request failed ($code)"})
                 main.post{callback(if(text.isBlank())JSONObject() else JSONObject(text),null)}
             }catch(error:Exception){main.post{callback(null,error.message?:"Customer data is unavailable")}}
         }.start()

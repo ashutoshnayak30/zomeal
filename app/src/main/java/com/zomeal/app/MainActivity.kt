@@ -43,6 +43,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.BasicTextField
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -346,7 +348,9 @@ private data class Provider(
     val weeklyMenu: String = "[]",
     val isLive: Boolean = false,
     val description: String = "",
-    val primaryPhotoPath: String = ""
+    val primaryPhotoPath: String = "",
+    val kitchenPhotoPath: String = "",
+    val mealPhotoPath: String = ""
 )
 
 private val providers = emptyList<Provider>()
@@ -356,7 +360,7 @@ private fun marketplaceProviderToUi(index:Int,record:MarketplaceProvider):Provid
     val category=when(normalizedDiet){"VEG","PURE_VEG","VEGETARIAN","VEGAN"->DietFilter.VEG;"NON_VEG","NON_VEGETARIAN"->DietFilter.NON_VEG;else->DietFilter.BOTH}
     val palette=listOf(Color(0xFFFFE0A7) to Color(0xFFD37B19),Color(0xFFE8D2A4) to Color(0xFFB65D22),Color(0xFFD5E9D1) to Color(0xFF4E944C),Color(0xFFF3C4A5) to Color(0xFFA44021))[index%4]
     val firstPackage=record.packages.minByOrNull{it.pricePaise}
-    return Provider(name=record.name,locality=record.locality,diet=when(category){DietFilter.VEG->"Pure Veg";DietFilter.NON_VEG->"Non-Veg";else->"Veg & Non-Veg"},category=category,rating=0.0,reviews=0,price=((firstPackage?.pricePaise?:0)/100).toInt(),tint=palette.first,accent=palette.second,id=record.id,packageId=firstPackage?.id,packageKind=firstPackage?.kind,packages=record.packages,weeklyMenu=record.menu.toString(),isLive=true,description=record.description,primaryPhotoPath=record.primaryPhotoPath)
+    return Provider(name=record.name,locality=record.locality,diet=when(category){DietFilter.VEG->"Pure Veg";DietFilter.NON_VEG->"Non-Veg";else->"Veg & Non-Veg"},category=category,rating=0.0,reviews=0,price=((firstPackage?.pricePaise?:0)/100).toInt(),tint=palette.first,accent=palette.second,id=record.id,packageId=firstPackage?.id,packageKind=firstPackage?.kind,packages=record.packages,weeklyMenu=record.menu.toString(),isLive=true,description=record.description,primaryPhotoPath=record.primaryPhotoPath,kitchenPhotoPath=record.kitchenPhotoPath,mealPhotoPath=record.mealPhotoPath)
 }
 
 private fun persistedSubscriptionToProvider(subscription:PersistedSubscription):Provider{
@@ -425,8 +429,48 @@ private fun ProviderListScreen() {
     fun refreshMarketplace() {
         marketplaceLoading = true; marketplaceError = null
         marketplaceRepository.marketplace(requestedPincode) { records, error ->
-            marketplaceLoading = false; marketplaceError = error
-            liveProviders = records.mapIndexed(::marketplaceProviderToUi)
+            marketplaceLoading = false
+            if(error?.contains("JWT expired",ignoreCase=true)==true||error?.contains("session expired",ignoreCase=true)==true){
+                marketplaceRepository.signOut();liveProviders=emptyList();marketplaceError=null;signupComplete=false;showLogin=true
+                return@marketplace
+            }
+            marketplaceError = error
+            val refreshedProviders = records.mapIndexed(::marketplaceProviderToUi)
+            liveProviders = refreshedProviders
+
+            // Provider changes become customer-visible immediately after admin
+            // approval. Replace an already-open details model as well; otherwise
+            // that screen would keep rendering the object captured when it opened.
+            selectedProvider?.let { current ->
+                val refreshed = refreshedProviders.firstOrNull { it.id == current.id }
+                if (refreshed == null) {
+                    selectedProvider = null
+                    marketplaceError = "This provider is temporarily unavailable while Zomeal verifies its complete weekly menu."
+                } else {
+                    val selectedPackage = current.packageId?.let { packageId ->
+                        refreshed.packages.firstOrNull { it.id == packageId }
+                    }
+                    selectedProvider = if (selectedPackage == null) refreshed else refreshed.copy(
+                        packageId = selectedPackage.id,
+                        packageKind = selectedPackage.kind,
+                        price = (selectedPackage.pricePaise / 100).toInt()
+                    )
+                }
+            }
+            // A restored subscription contains the provider/package identity and
+            // saved selections, but not the latest approved catalogue media.
+            // Enrich it with the live marketplace row so Home receives approved
+            // menu-item photos, provider profile, kitchen and meal images.
+            activeProvider?.let { current ->
+                refreshedProviders.firstOrNull { it.id == current.id }?.let { refreshed ->
+                    val activePackage = current.packageId?.let { packageId -> refreshed.packages.firstOrNull { it.id == packageId } }
+                    activeProvider = refreshed.copy(
+                        packageId = activePackage?.id ?: current.packageId,
+                        packageKind = activePackage?.kind ?: current.packageKind,
+                        price = ((activePackage?.pricePaise ?: current.price.toLong() * 100L) / 100L).toInt()
+                    )
+                }
+            }
         }
     }
 
@@ -443,6 +487,13 @@ private fun ProviderListScreen() {
         pendingPincode=subscription.address?.optString("pincode",marketplaceRepository.savedPincode)?:marketplaceRepository.savedPincode
         activeProvider=persistedSubscriptionToProvider(subscription)
         browseMode=false;signupComplete=true;showNoSubscriptionHome=false
+        marketplaceRepository.marketplace(pendingPincode.ifBlank{"751030"}){records,_->
+            records.firstOrNull{it.id==subscription.providerId}?.let{record->
+                val refreshed=marketplaceProviderToUi(0,record)
+                val selected=refreshed.packages.firstOrNull{it.id==subscription.packageId}
+                activeProvider=refreshed.copy(packageId=subscription.packageId,packageKind=selected?.kind?:subscription.packageKind,price=((selected?.pricePaise?:0)/100).toInt())
+            }
+        }
     }
 
     LaunchedEffect(Unit){
@@ -463,6 +514,19 @@ private fun ProviderListScreen() {
 
     LaunchedEffect(signupComplete, requestedPincode) {
         if (signupComplete && marketplaceRepository.configured) refreshMarketplace()
+    }
+
+    // Re-query Supabase whenever the customer returns to Zomeal. Admin-approved
+    // provider edits therefore appear without clearing app data or signing in again.
+    val activity = LocalContext.current as? ComponentActivity
+    DisposableEffect(activity, signupComplete, requestedPincode) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME && signupComplete && marketplaceRepository.configured) {
+                refreshMarketplace()
+            }
+        }
+        activity?.lifecycle?.addObserver(observer)
+        onDispose { activity?.lifecycle?.removeObserver(observer) }
     }
 
     if(restoringSession){
@@ -635,18 +699,18 @@ private fun ProviderListScreen() {
             }
             if (marketplaceLoading) item { MarketplaceStatusCard("Finding approved kitchens near you…", false, null) }
             marketplaceError?.let { problem -> item { MarketplaceStatusCard("Providers could not be loaded.", true, problem) { refreshMarketplace() } } }
-            item { AvailabilityBanner(pendingPincode.ifBlank { "751030" }, availableProviders.size, browseMode) }
-            item {
+            if(marketplaceError==null)item { AvailabilityBanner(pendingPincode.ifBlank { "751030" }, availableProviders.size, browseMode) }
+            if(marketplaceError==null)item {
                 ProviderSectionHeader(
                     count = visibleProviders.size,
                     pincode = pendingPincode.ifBlank { "751030" },
                     browseMode = browseMode
                 )
             }
-            item {
+            if(marketplaceError==null)item {
                 ProviderFilterPanel(filter, sortByRating, onFilter = { filter = it }, onSort = { sortByRating = !sortByRating })
             }
-            if (!marketplaceLoading && visibleProviders.isEmpty()) {
+            if (marketplaceError==null && !marketplaceLoading && visibleProviders.isEmpty()) {
                 item { EmptyProviders(onClear = { query = ""; filter = DietFilter.ALL }) }
             } else if (!marketplaceLoading) {
                 items(
@@ -870,13 +934,13 @@ private fun AvailabilityBanner(pincode: String, providerCount: Int, browseMode: 
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
                 Text(
-                    if (browseMode) "You're exploring Zomeal" else "Great news! $providerCount providers deliver here",
+                    if (browseMode) "You're exploring Zomeal" else if(providerCount>0) "Great news! $providerCount providers deliver here" else "Service is not available here yet",
                     color = if (browseMode) Color(0xFF735318) else BrandDark,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.ExtraBold
                 )
                 Text(
-                    if (browseMode) "Browse and save menus. Add a serviceable address to subscribe." else "Verified meal providers are available for pincode $pincode.",
+                    if (browseMode) "Browse and save menus. Add a serviceable address to subscribe." else if(providerCount>0) "Verified meal providers are available for pincode $pincode." else "We’ll notify you when verified providers begin serving pincode $pincode.",
                     color = Muted,
                     fontSize = 8.sp,
                     lineHeight = 11.sp
@@ -1099,13 +1163,20 @@ private fun ProviderFoodArt(accent: Color, modifier: Modifier = Modifier) {
 
 @Composable
 private fun ApprovedProviderImage(provider: Provider, modifier: Modifier = Modifier) {
+    ApprovedMediaImage(provider.primaryPhotoPath, provider.name, modifier) { ProviderFoodArt(provider.accent, Modifier.fillMaxSize()) }
+}
+
+@Composable
+private fun ApprovedMediaImage(path:String,description:String,modifier:Modifier=Modifier,fallback:@Composable BoxScope.()->Unit) {
     val context = LocalContext.current.applicationContext
     val repository = remember(context) { SupabaseCustomerRepository(context) }
-    var bitmap by remember(provider.primaryPhotoPath) { mutableStateOf<android.graphics.Bitmap?>(null) }
-    LaunchedEffect(provider.primaryPhotoPath) { repository.approvedMedia(provider.primaryPhotoPath) { bitmap = it } }
+    var bitmap by remember(path) { mutableStateOf<android.graphics.Bitmap?>(null) }
+    LaunchedEffect(path) { repository.approvedMedia(path) { bitmap = it } }
     val approved = bitmap
-    if (approved != null) Image(approved.asImageBitmap(), provider.name, modifier = modifier, contentScale = ContentScale.Crop)
-    else ProviderFoodArt(provider.accent, modifier)
+    Box(modifier) {
+        if (approved != null) Image(approved.asImageBitmap(), description, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+        else fallback()
+    }
 }
 
 @Composable
@@ -1178,7 +1249,7 @@ private data class MealPackage(
 )
 
 @Composable
-private fun ProviderDetailsScreen(provider: Provider, onBack: () -> Unit, onActivated: () -> Unit) {
+private fun ProviderDetailsScreen(provider: Provider, onBack: () -> Unit, onActivated: () -> Unit, subscriptionView:Boolean=false) {
     val packages = remember(provider) {
         if(provider.isLive) provider.packages.map { packageRecord -> MealPackage(
             packageRecord.id,
@@ -1206,6 +1277,7 @@ private fun ProviderDetailsScreen(provider: Provider, onBack: () -> Unit, onActi
     Scaffold(
         containerColor = Color.White,
         bottomBar = {
+            if(!subscriptionView)
             Surface(modifier = Modifier.navigationBarsPadding(), color = Color.White, shadowElevation = 10.dp) {
                 Button(
                     onClick = { menuPackage = packages[selectedPackage] },
@@ -1232,27 +1304,42 @@ private fun ProviderDetailsScreen(provider: Provider, onBack: () -> Unit, onActi
             item { ProviderDetailsTopBar(onBack) }
             item { ProviderIdentity(provider) }
             item { TrustSummary(provider) }
-            item { PackageHeader() }
-            item {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp),
-                    horizontalArrangement = Arrangement.spacedBy(7.dp)
-                ) {
-                    packages.forEachIndexed { index, mealPackage ->
-                        PackageCard(
-                            mealPackage = mealPackage,
-                            selected = selectedPackage == index,
-                            onSelect = { selectedPackage = index },
-                            modifier = Modifier.weight(1f)
-                        )
+            if(subscriptionView){
+                item { CurrentPlanStaticCard(packages.firstOrNull{it.id==provider.packageId}?:packages.getOrNull(selectedPackage)) }
+            }else{
+                item { PackageHeader() }
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp),
+                        horizontalArrangement = Arrangement.spacedBy(7.dp)
+                    ) {
+                        packages.forEachIndexed { index, mealPackage ->
+                            PackageCard(
+                                mealPackage = mealPackage,
+                                selected = selectedPackage == index,
+                                onSelect = { selectedPackage = index },
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
                     }
                 }
             }
             item { BenefitsStrip() }
-            if(provider.isLive) item { LiveWeeklyMenuPreview(provider.weeklyMenu) }
+            if(provider.isLive) item { LiveWeeklyMenuPreview(provider,if(subscriptionView)provider.packageKind else null) }
             item { AboutProvider(provider) }
+            if(provider.kitchenPhotoPath.isNotBlank()) item { ProviderKitchenCard(provider) }
             item { QualityBadges() }
-            item { DeliveryCard() }
+            item { DeliveryCard(provider) }
+        }
+    }
+}
+
+@Composable private fun CurrentPlanStaticCard(plan:MealPackage?){
+    Surface(Modifier.fillMaxWidth().padding(horizontal=18.dp),color=Mist,shape=RoundedCornerShape(20.dp),border=androidx.compose.foundation.BorderStroke(1.dp,Border)){
+        Row(Modifier.padding(16.dp),verticalAlignment=Alignment.CenterVertically){
+            Box(Modifier.size(46.dp).clip(CircleShape).background(Color.White),contentAlignment=Alignment.Center){Icon(plan?.icon?:Icons.Outlined.Restaurant,null,tint=Brand,modifier=Modifier.size(23.dp))}
+            Spacer(Modifier.width(12.dp));Column(Modifier.weight(1f)){Text("Your current package",color=BrandDark,fontSize=10.sp,fontWeight=FontWeight.Bold);Text(plan?.title?:"Active meal plan",color=Ink,fontSize=16.sp,fontWeight=FontWeight.ExtraBold);Text("${plan?.meals?:"Monthly meals"} · ${plan?.price.orEmpty()} / month",color=Muted,fontSize=10.sp)}
+            Surface(color=Color(0xFFE0F2E4),shape=RoundedCornerShape(12.dp)){Text("Active",Modifier.padding(horizontal=10.dp,vertical=6.dp),color=BrandDark,fontSize=9.sp,fontWeight=FontWeight.Bold)}
         }
     }
 }
@@ -1394,22 +1481,12 @@ private fun PackageCard(mealPackage: MealPackage, selected: Boolean, onSelect: (
 }
 
 @Composable
-private fun LiveWeeklyMenuPreview(rawMenu:String){
-    val rows:List<Triple<Int,String,String>> = remember(rawMenu){
-        runCatching {
-            val source=JSONArray(rawMenu)
-            buildList {
-                for(i in 0 until source.length()){
-                    val row=source.getJSONObject(i)
-                    val items=row.optJSONArray("items")?:JSONArray()
-                    val names=buildList<String>{for(j in 0 until items.length())add(items.getJSONObject(j).optString("name"))}.filter(String::isNotBlank)
-                    add(Triple(row.optInt("day_of_week"),row.optString("meal_slot"),names.joinToString(" · ")))
-                }
-            }
-        }.getOrDefault(emptyList())
+private fun LiveWeeklyMenuPreview(provider:Provider,packageKind:String?){
+    val slots=remember(provider.weeklyMenu,packageKind){
+        buildList<Pair<String,ProviderMealSlot>>{for(day in 0..6){if(packageKind!="DINNER_ONLY")add("${listOf("Mon","Tue","Wed","Thu","Fri","Sat","Sun")[day]} · Lunch" to providerMealSlot(provider.weeklyMenu,day,"LUNCH"));if(packageKind!="LUNCH_ONLY")add("${listOf("Mon","Tue","Wed","Thu","Fri","Sat","Sun")[day]} · Dinner" to providerMealSlot(provider.weeklyMenu,day,"DINNER"))}}.filter{it.second.mainCourses.isNotEmpty()||it.second.carbs.isNotEmpty()||it.second.included.isNotEmpty()}
     }
     Surface(Modifier.fillMaxWidth().padding(horizontal=18.dp),color=Color.White,shape=RoundedCornerShape(18.dp),border=androidx.compose.foundation.BorderStroke(1.dp,Border)){
-        Column(Modifier.padding(15.dp)){Text("Approved weekly menu",color=Ink,fontSize=16.sp,fontWeight=FontWeight.ExtraBold);Text("Live menu submitted by this provider and approved by Zomeal",color=Muted,fontSize=9.sp);Spacer(Modifier.height(10.dp));if(rows.isEmpty())Text("Menu details are being updated.",color=Muted,fontSize=10.sp) else rows.take(14).forEach{row->Row(Modifier.fillMaxWidth().padding(vertical=5.dp),verticalAlignment=Alignment.Top){Text(listOf("Mon","Tue","Wed","Thu","Fri","Sat","Sun").getOrElse(row.first-1){"Day"},color=BrandDark,fontSize=9.sp,fontWeight=FontWeight.ExtraBold,modifier=Modifier.width(34.dp));Text(row.second.lowercase().replaceFirstChar{it.uppercase()},color=Ink,fontSize=9.sp,fontWeight=FontWeight.Bold,modifier=Modifier.width(48.dp));Text(row.third.ifBlank{"Provider selection"},color=Muted,fontSize=9.sp,modifier=Modifier.weight(1f))}}}
+        Column(Modifier.padding(15.dp),verticalArrangement=Arrangement.spacedBy(10.dp)){Text("Seven-day main courses",color=Ink,fontSize=16.sp,fontWeight=FontWeight.ExtraBold);Text("Approved lunch and dinner choices available in this package",color=Muted,fontSize=9.sp);if(slots.isEmpty())Text("Menu details are being updated.",color=Muted,fontSize=10.sp) else slots.forEach{(label,menu)->Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Mist.copy(alpha=.55f)).padding(10.dp)){Text(label,color=BrandDark,fontSize=11.sp,fontWeight=FontWeight.ExtraBold);Spacer(Modifier.height(7.dp));Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){menu.mainCourses.take(2).forEach{course->Column(Modifier.weight(1f)){Box(Modifier.fillMaxWidth().height(82.dp).clip(RoundedCornerShape(11.dp))){ApprovedDishImage(if(course.photoPath.isBlank())course.copy(photoPath=provider.mealPhotoPath) else course,Modifier.fillMaxSize())};Text(course.name,color=Ink,fontSize=10.sp,fontWeight=FontWeight.Bold,maxLines=2,modifier=Modifier.padding(top=5.dp));Text(course.dietaryType.replace('_',' '),color=Muted,fontSize=7.sp)}}};val sides=(menu.carbs+menu.included).joinToString(" · ");if(sides.isNotBlank())Text("Included: $sides",color=Muted,fontSize=8.sp,modifier=Modifier.padding(top=6.dp))}}}
     }
 }
 
@@ -1439,11 +1516,23 @@ private fun AboutProvider(provider: Provider) {
         Column(Modifier.weight(1.25f)) {
             Text("About ${provider.name}", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
             Spacer(Modifier.height(8.dp))
-            Text(provider.description.ifBlank{"This provider has not added a public description yet."}, color = Muted, fontSize = 12.sp, lineHeight = 18.sp)
+            Text(provider.description.takeUnless{it.isBlank()||it.equals("null",true)}?:"This provider has not added a public description yet.", color = Muted, fontSize = 12.sp, lineHeight = 18.sp)
         }
         Spacer(Modifier.width(14.dp))
         Box(Modifier.weight(.75f).height(104.dp).clip(RoundedCornerShape(18.dp)).background(Color(0xFFDCEAD8))) {
-            ProviderPortrait(Modifier.fillMaxSize())
+            ApprovedMediaImage(provider.primaryPhotoPath, provider.name, Modifier.fillMaxSize()) { ProviderPortrait(Modifier.fillMaxSize()) }
+        }
+    }
+}
+
+@Composable
+private fun ProviderKitchenCard(provider:Provider){
+    Surface(Modifier.fillMaxWidth().padding(horizontal=18.dp),color=Mist,shape=RoundedCornerShape(18.dp)){
+        Row(Modifier.height(112.dp),verticalAlignment=Alignment.CenterVertically){
+            ApprovedMediaImage(provider.kitchenPhotoPath,"${provider.name} kitchen",Modifier.width(150.dp).fillMaxHeight().clip(RoundedCornerShape(topStart=18.dp,bottomStart=18.dp))){
+                Box(Modifier.fillMaxSize().background(provider.tint),contentAlignment=Alignment.Center){Icon(Icons.Outlined.SoupKitchen,null,tint=Brand,modifier=Modifier.size(38.dp))}
+            }
+            Column(Modifier.weight(1f).padding(14.dp)){Text("Inside the kitchen",color=Ink,fontSize=15.sp,fontWeight=FontWeight.ExtraBold);Spacer(Modifier.height(5.dp));Text("An approved photo shared by this provider and verified by Zomeal.",color=Muted,fontSize=10.sp,lineHeight=15.sp)}
         }
     }
 }
@@ -1488,7 +1577,7 @@ private fun QualityBadges() {
 }
 
 @Composable
-private fun DeliveryCard() {
+private fun DeliveryCard(provider:Provider) {
     Surface(Modifier.fillMaxWidth().padding(horizontal = 18.dp), color = Mist, shape = RoundedCornerShape(18.dp)) {
         Row(Modifier.height(112.dp).padding(start = 16.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1.2f)) {
@@ -1496,7 +1585,9 @@ private fun DeliveryCard() {
                 Spacer(Modifier.height(7.dp))
                 Text("Meals are delivered daily in stainless-steel tiffins for freshness and hygiene.", color = Muted, fontSize = 11.sp, lineHeight = 17.sp)
             }
-            TiffinArt(Modifier.weight(.8f).fillMaxHeight())
+            Box(Modifier.weight(.8f).fillMaxHeight().clip(RoundedCornerShape(topEnd=18.dp,bottomEnd=18.dp))){
+                ApprovedMediaImage(provider.mealPhotoPath,"${provider.name} complete meal",Modifier.fillMaxSize()){TiffinArt(Modifier.fillMaxSize())}
+            }
         }
     }
 }
@@ -3342,6 +3433,7 @@ private fun ActiveSubscriberHome(provider: Provider, onBrowseProviders: () -> Un
     var showDailyMenuChange by remember { mutableStateOf(false) }
     var showPauseScreen by remember { mutableStateOf(false) }
     var showFullWeeklyMenu by remember { mutableStateOf(false) }
+    var showSubscribedProviderDetails by remember { mutableStateOf(false) }
     val todayIndex = remember { (Calendar.getInstance().get(Calendar.DAY_OF_WEEK) + 5) % 7 }
     val tomorrowIndex = (todayIndex + 1) % 7
     val persistedSubscription = CustomerSubscriptionStore.current
@@ -3350,16 +3442,30 @@ private fun ActiveSubscriberHome(provider: Provider, onBrowseProviders: () -> Un
     fun persistedMeal(date:String,slot:String):SavedCustomerMeal? = persistedSubscription?.dailyMeals
         ?.firstOrNull { it.serviceDate==date && it.mealSlot.equals(slot,true) && it.itemName.isNotBlank() }
         ?.let { SavedCustomerMeal(it.itemName,"") }
+    fun persistedWeeklyMeal(dayIndex:Int,slot:String):SavedCustomerMeal? {
+        val rows=persistedSubscription?.weeklyMenu?:return null
+        for(index in 0 until rows.length()){
+            val row=rows.optJSONObject(index)?:continue
+            if(row.optInt("day_of_week")==dayIndex+1&&row.optString("meal_slot").equals(slot,true)){
+                val name=row.optString("item_name").trim()
+                if(name.isNotBlank())return SavedCustomerMeal(name,"")
+            }
+        }
+        return null
+    }
     val todayLunchMenu = remember(provider.weeklyMenu, todayIndex) { providerMealSlot(provider.weeklyMenu, todayIndex, "LUNCH") }
     val todayDinnerMenu = remember(provider.weeklyMenu, todayIndex) { providerMealSlot(provider.weeklyMenu, todayIndex, "DINNER") }
     val tomorrowLunchMenu = remember(provider.weeklyMenu, tomorrowIndex) { providerMealSlot(provider.weeklyMenu, tomorrowIndex, "LUNCH") }
     val tomorrowDinnerMenu = remember(provider.weeklyMenu, tomorrowIndex) { providerMealSlot(provider.weeklyMenu, tomorrowIndex, "DINNER") }
     fun selectedChoice(menu: ProviderMealSlot, saved: SavedCustomerMeal?): MenuChoice =
-        menu.mainCourses.firstOrNull { it.name == saved?.mainCourse } ?: menu.mainCourses.firstOrNull() ?: MenuChoice("Menu being updated", Color(0xFFD8D7D2), Brand)
-    val savedTodayLunch = persistedMeal(todayIso,"LUNCH") ?: CustomerMenuStore.lunches[todayIndex]
-    val savedTodayDinner = persistedMeal(todayIso,"DINNER") ?: CustomerMenuStore.dinners[todayIndex]
-    val savedTomorrowLunch = persistedMeal(tomorrowIso,"LUNCH") ?: CustomerMenuStore.lunches[tomorrowIndex]
-    val savedTomorrowDinner = persistedMeal(tomorrowIso,"DINNER") ?: CustomerMenuStore.dinners[tomorrowIndex]
+        (menu.mainCourses.firstOrNull { it.name.equals(saved?.mainCourse,true) }
+            ?: menu.mainCourses.firstOrNull()
+            ?: saved?.mainCourse?.takeIf { it.isNotBlank() }?.let { MenuChoice(it,Color(0xFFD8D7D2),Brand) }
+            ?: MenuChoice("Menu being updated", Color(0xFFD8D7D2), Brand)).let{choice->if(choice.photoPath.isBlank()&&provider.mealPhotoPath.isNotBlank())choice.copy(photoPath=provider.mealPhotoPath) else choice}
+    val savedTodayLunch = persistedMeal(todayIso,"LUNCH") ?: persistedWeeklyMeal(todayIndex,"LUNCH") ?: CustomerMenuStore.lunches[todayIndex]
+    val savedTodayDinner = persistedMeal(todayIso,"DINNER") ?: persistedWeeklyMeal(todayIndex,"DINNER") ?: CustomerMenuStore.dinners[todayIndex]
+    val savedTomorrowLunch = persistedMeal(tomorrowIso,"LUNCH") ?: persistedWeeklyMeal(tomorrowIndex,"LUNCH") ?: CustomerMenuStore.lunches[tomorrowIndex]
+    val savedTomorrowDinner = persistedMeal(tomorrowIso,"DINNER") ?: persistedWeeklyMeal(tomorrowIndex,"DINNER") ?: CustomerMenuStore.dinners[tomorrowIndex]
     var homeLunchChoice by remember(provider.id, tomorrowIndex, savedTomorrowLunch) { mutableStateOf(selectedChoice(tomorrowLunchMenu, savedTomorrowLunch)) }
     var homeDinnerChoice by remember(provider.id, tomorrowIndex, savedTomorrowDinner) { mutableStateOf(selectedChoice(tomorrowDinnerMenu, savedTomorrowDinner)) }
     var homeLunchCarb by remember(provider.id, savedTomorrowLunch) { mutableStateOf(savedTomorrowLunch?.carb ?: tomorrowLunchMenu.carbs.firstOrNull().orEmpty()) }
@@ -3373,6 +3479,11 @@ private fun ActiveSubscriberHome(provider: Provider, onBrowseProviders: () -> Un
     val showingTomorrowMenu = homeHour >= 22 || (homeHour == 0 && homeMinute == 0)
     val homeMenuDate = remember(showingTomorrowMenu) { SimpleDateFormat("EEEE, dd MMM yyyy", Locale.ENGLISH).format(Calendar.getInstance().apply { if (showingTomorrowMenu) add(Calendar.DAY_OF_YEAR, 1) }.time) }
 
+    BackHandler(enabled = showSubscribedProviderDetails) { showSubscribedProviderDetails = false }
+    if(showSubscribedProviderDetails){
+        ProviderDetailsScreen(provider,onBack={showSubscribedProviderDetails=false},onActivated={},subscriptionView=true)
+        return
+    }
     BackHandler(enabled = showFullWeeklyMenu) { showFullWeeklyMenu = false }
     if (showFullWeeklyMenu) {
         FullWeeklyMenuScreen(
@@ -3463,7 +3574,7 @@ private fun ActiveSubscriberHome(provider: Provider, onBrowseProviders: () -> Un
         return
     }
     when (selectedNav) {
-        1 -> { MyPlanScreen(provider, onNav = { selectedNav = it }, onSupport = { showSupportScreen = true }, onWeeklyMenu = { showFullWeeklyMenu = true }, onBrowseProviders = onBrowseProviders); return }
+        1 -> { MyPlanScreen(provider, onNav = { selectedNav = it }, onSupport = { showSupportScreen = true }, onWeeklyMenu = { showFullWeeklyMenu = true }, onProviderDetails={showSubscribedProviderDetails=true}, onBrowseProviders = onBrowseProviders); return }
         2 -> { OrdersScreen(provider, onNav = { selectedNav = it }, onSupport = { showSupportScreen = true }); return }
         3 -> {
             ProfileScreen(
@@ -4146,7 +4257,7 @@ private fun AppSectionHeader(title: String, subtitle: String, icon: ImageVector,
 }
 
 @Composable
-private fun MyPlanScreen(provider: Provider, onNav: (Int) -> Unit, onSupport: () -> Unit, onWeeklyMenu: () -> Unit, onBrowseProviders: () -> Unit) {
+private fun MyPlanScreen(provider: Provider, onNav: (Int) -> Unit, onSupport: () -> Unit, onWeeklyMenu: () -> Unit, onProviderDetails:()->Unit, onBrowseProviders: () -> Unit) {
     val context = LocalContext.current.applicationContext
     val repository = remember(context) { SupabaseCustomerRepository(context) }
     var message by remember { mutableStateOf<String?>(null) }
@@ -4155,7 +4266,7 @@ private fun MyPlanScreen(provider: Provider, onNav: (Int) -> Unit, onSupport: ()
         LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(bottom = 18.dp), verticalArrangement = Arrangement.spacedBy(13.dp)) {
             item { AppSectionHeader("My Plan", "Manage your active meal subscription", Icons.Outlined.CalendarMonth) }
             message?.let { item { WalletMessageBanner(it) { message = null } } }
-            item { MyPlanHero(provider) }
+            item { MyPlanHero(provider,onProviderDetails) }
             item { PlanTimelineCard() }
             item { Text("Weekly Menu", color = Ink, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(horizontal = 18.dp)) }
             item { MyPlanWeekPreview(onWeeklyMenu) }
@@ -4181,13 +4292,13 @@ private fun MyPlanScreen(provider: Provider, onNav: (Int) -> Unit, onSupport: ()
 }
 
 @Composable
-private fun MyPlanHero(provider: Provider) {
-    Surface(Modifier.fillMaxWidth().padding(horizontal = 18.dp), color = Color.White, shape = RoundedCornerShape(20.dp), shadowElevation = 3.dp) {
+private fun MyPlanHero(provider: Provider,onProviderDetails:()->Unit) {
+    Surface(Modifier.fillMaxWidth().padding(horizontal = 18.dp).clickable(onClick=onProviderDetails), color = Color.White, shape = RoundedCornerShape(20.dp), shadowElevation = 3.dp) {
         Column(Modifier.padding(15.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(70.dp).clip(RoundedCornerShape(15.dp)).background(provider.tint)) { ApprovedProviderImage(provider, Modifier.fillMaxSize()) }
                 Spacer(Modifier.width(12.dp)); Column(Modifier.weight(1f)) { Text(provider.name, color = Ink, fontSize = 17.sp, fontWeight = FontWeight.ExtraBold); Text("Monthly · Lunch + Dinner", color = Muted, fontSize = 10.sp); Text("Pure Veg · 2 meals/day", color = BrandDark, fontSize = 9.sp, fontWeight = FontWeight.Bold) }
-                RatingPill(provider.rating, provider.reviews)
+                Column(horizontalAlignment=Alignment.End){RatingPill(provider.rating, provider.reviews);Spacer(Modifier.height(5.dp));Row(verticalAlignment=Alignment.CenterVertically){Text("Provider details",color=BrandDark,fontSize=8.sp,fontWeight=FontWeight.Bold);Icon(Icons.Filled.KeyboardArrowRight,null,tint=Brand,modifier=Modifier.size(15.dp))}}
             }
             Row(verticalAlignment = Alignment.Bottom) { Text("18", color = BrandDark, fontSize = 27.sp, fontWeight = FontWeight.Black); Text(" days remaining", color = Muted, fontSize = 10.sp, modifier = Modifier.padding(bottom = 5.dp)); Spacer(Modifier.weight(1f)); Text("60% complete", color = BrandDark, fontSize = 9.sp, fontWeight = FontWeight.Bold) }
             LinearProgressIndicator(progress = { .6f }, modifier = Modifier.fillMaxWidth().height(6.dp).clip(CircleShape), color = Brand, trackColor = Border)
