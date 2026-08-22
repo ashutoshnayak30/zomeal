@@ -28,7 +28,7 @@ private val DMuted = Color(0xFF68736D)
 private val DMist = Color(0xFFF0F7F2)
 
 @Composable
-fun ProviderDashboardScreen(repository: SupabaseProviderRepository, onOrders: () -> Unit, onEarnings: () -> Unit, onProfile: () -> Unit, onSignOut: () -> Unit) {
+fun ProviderDashboardScreen(repository: SupabaseProviderRepository, bannerMessage: String? = null, onDismissBanner: () -> Unit = {}, onOrders: () -> Unit, onEarnings: () -> Unit, onProfile: () -> Unit, onManageBusiness: () -> Unit, onNotifications: () -> Unit, onSignOut: () -> Unit) {
     var slot by remember { mutableStateOf("LUNCH") }
     var data by remember { mutableStateOf<JSONObject?>(null) }
     var loading by remember { mutableStateOf(true) }
@@ -38,11 +38,12 @@ fun ProviderDashboardScreen(repository: SupabaseProviderRepository, onOrders: ()
     var assigningPerson by remember { mutableStateOf<JSONObject?>(null) }
     var assignmentCount by remember { mutableStateOf("100") }
     var assignmentMessage by remember { mutableStateOf<String?>(null) }
+    var unreadNotifications by remember { mutableIntStateOf(0) }
     fun load() {
         loading = true; error = null
         repository.loadDailyDashboard(slot) { result, message -> data = result; error = message; loading = false }
     }
-    LaunchedEffect(slot) { load() }
+    LaunchedEffect(slot) { load(); repository.loadNotifications { result, _ -> unreadNotifications=result?.optInt("unread_count")?:0 } }
     val metrics = data?.optJSONObject("metrics") ?: JSONObject()
     val isFinal = data?.optBoolean("is_final") == true
     val active = metrics.optInt("active")
@@ -52,6 +53,8 @@ fun ProviderDashboardScreen(repository: SupabaseProviderRepository, onOrders: ()
     val commissionRate = commission.optDouble("rate_percent",14.0)
     val commissionPaise = commission.optLong("commission_paise",(gross*commissionRate/100.0).toLong())
     val previewMode = data?.optBoolean("preview_mode") == true
+    // Kept behind one flag so the post-MVP live tracking workflow can be restored without a rewrite.
+    val liveOrderStatusEnabled = false
     fun loadSamplePreview() {
         val copy = JSONObject(data.toString())
         val sampleMetrics = copy.optJSONObject("metrics") ?: JSONObject().also { copy.put("metrics", it) }
@@ -154,6 +157,7 @@ fun ProviderDashboardScreen(repository: SupabaseProviderRepository, onOrders: ()
                         IconButton(onClick = { load() }, colors = IconButtonDefaults.iconButtonColors(containerColor = Color.White.copy(alpha = .16f))) {
                             Icon(Icons.Outlined.Refresh, "Refresh", tint = Color.White)
                         }
+                        BadgedBox(badge={if(unreadNotifications>0)Badge(containerColor=Color(0xFFE53935)){Text(if(unreadNotifications>99)"99+" else unreadNotifications.toString())}}){IconButton(onClick=onNotifications,colors=IconButtonDefaults.iconButtonColors(containerColor=Color.White.copy(alpha=.16f))){Icon(Icons.Outlined.Notifications,"Notifications",tint=Color.White)}}
                         IconButton(onClick = onSignOut, colors = IconButtonDefaults.iconButtonColors(containerColor = Color.White.copy(alpha = .16f))) {
                             Icon(Icons.Outlined.Logout, "Sign out", tint = Color.White)
                         }
@@ -161,8 +165,23 @@ fun ProviderDashboardScreen(repository: SupabaseProviderRepository, onOrders: ()
                     Spacer(Modifier.height(16.dp))
                     Text("Today's meal operations", color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Bold)
                     Text(data?.optString("date").orEmpty(), color = Color.White.copy(alpha = .82f), fontSize = 12.sp)
+                    Spacer(Modifier.height(12.dp))
+                    Button(
+                        onClick = onManageBusiness,
+                        colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = DBrand),
+                        shape = RoundedCornerShape(13.dp),
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 9.dp)
+                    ) {
+                        Icon(Icons.Outlined.EditNote, null, modifier = Modifier.size(18.dp)); Spacer(Modifier.width(7.dp))
+                        Text("Manage profile, packages & menus", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
                 }
             }
+            bannerMessage?.let { message -> item {
+                Surface(Modifier.fillMaxWidth().padding(horizontal=16.dp),color=Color(0xFFE7F5EA),shape=RoundedCornerShape(14.dp)) {
+                    Row(Modifier.padding(13.dp),verticalAlignment=Alignment.Top){Icon(Icons.Outlined.CheckCircle,null,tint=DBrand,modifier=Modifier.size(20.dp));Spacer(Modifier.width(8.dp));Text(message,color=DBrand,fontSize=10.sp,lineHeight=15.sp,modifier=Modifier.weight(1f));IconButton(onClick=onDismissBanner,modifier=Modifier.size(24.dp)){Icon(Icons.Outlined.Close,"Dismiss",tint=DMuted,modifier=Modifier.size(16.dp))}}
+                }
+            } }
             item {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     MealSlotButton("LUNCH", "Lunch", Icons.Outlined.WbSunny, slot == "LUNCH", Modifier.weight(1f)) { slot = "LUNCH" }
@@ -216,7 +235,7 @@ fun ProviderDashboardScreen(repository: SupabaseProviderRepository, onOrders: ()
                         }
                     }
                 }
-                item {
+                if (liveOrderStatusEnabled) item {
                     DashboardSection("Kitchen & delivery progress", "Update these from the daily orders workspace") {
                         ProgressLine("Preparing", metrics.optInt("preparing"), active, Icons.Outlined.SoupKitchen)
                         ProgressLine("Packing", metrics.optInt("packing"), active, Icons.Outlined.Inventory2)
@@ -228,7 +247,7 @@ fun ProviderDashboardScreen(repository: SupabaseProviderRepository, onOrders: ()
                         }
                     }
                 }
-                item {
+                if (liveOrderStatusEnabled) item {
                     DashboardSection("Update customer tracking", "A single update applies to today's entire ${slot.lowercase()} batch and will appear in the customer app") {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             TrackingButton("Preparing", "PREPARING", Modifier.weight(1f), updating) { updateTracking("PREPARING") }

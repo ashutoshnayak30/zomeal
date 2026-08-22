@@ -1,7 +1,12 @@
 *.iml
 .gradle
+.gradle-agent/
+.gradle-verify/
 .kotlin/
 .android-build-home/
+.android-home/
+.gradle-home/
+.compile-stubs/
 /local.properties
 /.idea
 /build

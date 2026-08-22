@@ -11,6 +11,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -25,6 +27,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -71,6 +75,7 @@ private fun isProviderPhotoReadable(context: Context, value: String?): Boolean {
 internal class DishDraft(name: String = "") {
     var name by mutableStateOf(name)
     var description by mutableStateOf("")
+    var foodType by mutableStateOf("Veg")
     var photo by mutableStateOf<String?>(null)
 }
 
@@ -89,6 +94,7 @@ internal class PincodeDraft(value: String = "") {
 }
 
 internal object ProviderDraft {
+    private var baselinePhotoUris: Set<String> = emptySet()
     var ownerPhone by mutableStateOf("")
     var businessName by mutableStateOf("")
     var contactName by mutableStateOf("")
@@ -123,6 +129,7 @@ internal object ProviderDraft {
         put("lunchEnabled", lunchEnabled); put("dinnerEnabled", dinnerEnabled); put("bothEnabled", bothEnabled)
         put("lunchPrice", lunchPrice); put("dinnerPrice", dinnerPrice); put("bothPrice", bothPrice); put("bothLunchDailyPrice", bothLunchDailyPrice)
         put("deliveryName", deliveryName); put("deliveryPhone", deliveryPhone)
+        put("profilePhoto", profilePhoto); put("kitchenPhoto", kitchenPhoto); put("mealPhoto", mealPhoto)
         put("servicePincodes", JSONArray().apply { servicePincodes.forEach { p -> put(JSONObject().put("value", p.value).put("areaName", p.areaName).put("verified", p.verified)) } })
         put("menus", JSONArray().apply { menus.forEachIndexed { index, day ->
             put(JSONObject().put("day", days[index]).put("lunchFixed", day.lunchFixed).put("dinnerFixed", day.dinnerFixed)
@@ -131,8 +138,39 @@ internal object ProviderDraft {
         put("savedMenuDays", JSONArray().apply { savedMenuDays.forEach(::put) })
     }
 
+    /**
+     * Active-provider editing starts from the last saved/approved snapshot. Keep
+     * its photo references so submitting a text or price edit does not upload all
+     * previously selected images again.
+     */
+    fun markEditBaseline(json: JSONObject) {
+        baselinePhotoUris = collectPhotoUris(json)
+    }
+
+    fun isNewOrReplacedPhoto(uri: String): Boolean = uri.isNotBlank() && uri !in baselinePhotoUris
+
+    fun acceptCurrentAsBaseline() {
+        baselinePhotoUris = collectPhotoUris(toJson())
+    }
+
+    private fun collectPhotoUris(json: JSONObject): Set<String> = buildSet {
+        listOf("profilePhoto", "kitchenPhoto", "mealPhoto").forEach { key ->
+            json.optString(key).takeIf { it.isNotBlank() }?.let(::add)
+        }
+        val menuRows = json.optJSONArray("menus") ?: JSONArray()
+        for (dayIndex in 0 until menuRows.length()) {
+            val day = menuRows.optJSONObject(dayIndex) ?: continue
+            listOf("lunch", "dinner").forEach { slot ->
+                val dishes = day.optJSONArray(slot) ?: JSONArray()
+                for (dishIndex in 0 until dishes.length()) {
+                    dishes.optJSONObject(dishIndex)?.optString("photo")?.takeIf { it.isNotBlank() }?.let(::add)
+                }
+            }
+        }
+    }
+
     private fun dishesJson(dishes: List<DishDraft>) = JSONArray().apply {
-        dishes.forEach { put(JSONObject().put("name", it.name).put("description", it.description).put("photo", it.photo)) }
+        dishes.forEach { put(JSONObject().put("name", it.name).put("description", it.description).put("foodType", it.foodType).put("photo", it.photo)) }
     }
 
     fun restore(json: JSONObject) {
@@ -143,6 +181,7 @@ internal object ProviderDraft {
         lunchEnabled = json.optBoolean("lunchEnabled", true); dinnerEnabled = json.optBoolean("dinnerEnabled", true); bothEnabled = json.optBoolean("bothEnabled", true)
         lunchPrice = json.optString("lunchPrice"); dinnerPrice = json.optString("dinnerPrice"); bothPrice = json.optString("bothPrice"); bothLunchDailyPrice = json.optString("bothLunchDailyPrice")
         deliveryName = json.optString("deliveryName"); deliveryPhone = json.optString("deliveryPhone")
+        profilePhoto = json.optString("profilePhoto").ifBlank { null }; kitchenPhoto = json.optString("kitchenPhoto").ifBlank { null }; mealPhoto = json.optString("mealPhoto").ifBlank { null }
         json.optJSONArray("servicePincodes")?.let { array ->
             servicePincodes.clear()
             for (i in 0 until array.length()) array.optJSONObject(i)?.let { item ->
@@ -176,7 +215,7 @@ internal object ProviderDraft {
         if (array == null) return
         target.clear()
         for (i in 0 until array.length()) array.optJSONObject(i)?.let { source ->
-            target.add(DishDraft(source.optString("name")).also { it.description = source.optString("description"); it.photo = source.optString("photo").ifBlank { null } })
+            target.add(DishDraft(source.optString("name")).also { it.description = source.optString("description"); it.foodType = source.optString("foodType", "Veg"); it.photo = source.optString("photo").ifBlank { null } })
         }
         if (target.isEmpty()) target.add(DishDraft())
     }
@@ -202,8 +241,10 @@ private fun FlowScaffold(
     onNext: () -> Unit,
     nextLabel: String = "Save & continue",
     nextEnabled: Boolean = true,
+    listState: LazyListState? = null,
     content: @Composable ColumnScope.() -> Unit
 ) {
+    val resolvedListState = listState ?: rememberLazyListState()
     Scaffold(
         modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing),
         containerColor = Color(0xFFF7FAF7),
@@ -238,6 +279,7 @@ private fun FlowScaffold(
         }
     ) { padding ->
         LazyColumn(
+            state = resolvedListState,
             modifier = Modifier.fillMaxSize().padding(padding),
             contentPadding = PaddingValues(18.dp),
             verticalArrangement = Arrangement.spacedBy(13.dp)
@@ -259,13 +301,13 @@ private fun Section(title: String, subtitle: String? = null, content: @Composabl
 }
 
 @Composable
-private fun Field(label: String, value: String, onChange: (String) -> Unit, hint: String = "", number: Boolean = false, singleLine: Boolean = true, decimal: Boolean = false) {
+private fun Field(label: String, value: String, onChange: (String) -> Unit, hint: String = "", number: Boolean = false, singleLine: Boolean = true, decimal: Boolean = false, modifier: Modifier = Modifier) {
     Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
         Text(label, color = PInk, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
         OutlinedTextField(
             value = value,
             onValueChange = onChange,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = modifier.fillMaxWidth(),
             placeholder = { Text(hint, fontSize = 13.sp) },
             singleLine = singleLine,
             keyboardOptions = KeyboardOptions(keyboardType = if (decimal) KeyboardType.Decimal else if (number) KeyboardType.Number else KeyboardType.Text),
@@ -276,9 +318,10 @@ private fun Field(label: String, value: String, onChange: (String) -> Unit, hint
 }
 
 @Composable
-fun BusinessScreen(onBack: () -> Unit, onNext: () -> Unit) {
-    FlowScaffold(1, "Business details", "Tell us the basic information customers will see. Your draft stays available while you complete setup.", onBack, onNext,
-        nextEnabled = ProviderDraft.businessName.isNotBlank() && ProviderDraft.contactName.isNotBlank() && ProviderDraft.address.isNotBlank()) {
+fun BusinessScreen(onBack: () -> Unit, onNext: () -> Unit, activeEdit: Boolean = false, saving: Boolean = false) {
+    FlowScaffold(1, if (activeEdit) "Edit provider profile" else "Business details", if (activeEdit) "Update the public business information customers see. Your verified login number remains protected." else "Tell us the basic information customers will see. Your draft stays available while you complete setup.", onBack, onNext,
+        nextLabel = if (saving) "Saving draft…" else if (activeEdit) "Save profile to draft" else "Save & continue",
+        nextEnabled = ProviderDraft.businessName.isNotBlank() && ProviderDraft.contactName.isNotBlank() && ProviderDraft.address.isNotBlank() && !saving) {
         Section("Provider identity") {
             Field("Business / kitchen name *", ProviderDraft.businessName, { ProviderDraft.businessName = it }, "e.g. Swaad Ghar")
             Field("Contact person *", ProviderDraft.contactName, { ProviderDraft.contactName = it }, "Authorized representative")
@@ -298,6 +341,7 @@ fun BusinessScreen(onBack: () -> Unit, onNext: () -> Unit) {
             Field("Business pincode", ProviderDraft.pincode, { ProviderDraft.pincode = it.filter(Char::isDigit).take(6) }, "6-digit pincode", true)
         }
         InfoCard("Bank and UPI details are not required now. We will request payout details securely after Zomeal activates your provider account.")
+        if (activeEdit) InfoCard("Your approved profile remains visible while Zomeal reviews these changes.")
     }
 }
 
@@ -391,7 +435,7 @@ private fun PincodeEditor(pincode: PincodeDraft, canRemove: Boolean, onRemove: (
 }
 
 @Composable
-fun PackageScreen(onBack: () -> Unit, onNext: () -> Unit) {
+fun PackageScreen(onBack: () -> Unit, onNext: () -> Unit, activeEdit: Boolean = false, saving: Boolean = false) {
     val combinedTotal = ProviderDraft.bothPrice.toBigDecimalOrNull()
     val combinedLunchDaily = ProviderDraft.bothLunchDailyPrice.toBigDecimalOrNull()
     val validCombinedSplit = !ProviderDraft.bothEnabled || (combinedTotal != null && combinedLunchDaily != null &&
@@ -401,7 +445,8 @@ fun PackageScreen(onBack: () -> Unit, onNext: () -> Unit) {
         (!ProviderDraft.lunchEnabled || ProviderDraft.lunchPrice.isNotBlank()) &&
         (!ProviderDraft.dinnerEnabled || ProviderDraft.dinnerPrice.isNotBlank()) &&
         (!ProviderDraft.bothEnabled || ProviderDraft.bothPrice.isNotBlank()) && validCombinedSplit
-    FlowScaffold(3, "Choose packages", "Lunch, dinner and combined packages are selected by default. Turn off anything you do not want to provide, then enter prices for the selected packages.", onBack, onNext, nextEnabled = valid) {
+    FlowScaffold(3, if (activeEdit) "Packages & prices" else "Choose packages", if (activeEdit) "Review each offering and submit package or price changes for approval." else "Lunch, dinner and combined packages are selected by default. Turn off anything you do not want to provide, then enter prices for the selected packages.", onBack, onNext,
+        nextLabel = if (saving) "Saving draft…" else if (activeEdit) "Save packages to draft" else "Save & continue", nextEnabled = valid && !saving) {
         InfoCard("You control which packages your kitchen offers. At least one selected package with a price is required to continue.")
         PackageEditor("Lunch only", "1 meal/day · 30 days", ProviderDraft.lunchEnabled, { ProviderDraft.lunchEnabled = it }, ProviderDraft.lunchPrice, { ProviderDraft.lunchPrice = it.filter(Char::isDigit) })
         PackageEditor("Dinner only", "1 meal/day · 30 days", ProviderDraft.dinnerEnabled, { ProviderDraft.dinnerEnabled = it }, ProviderDraft.dinnerPrice, { ProviderDraft.dinnerPrice = it.filter(Char::isDigit) })
@@ -426,6 +471,7 @@ fun PackageScreen(onBack: () -> Unit, onNext: () -> Unit) {
             }
         }
         InfoCard("Zomeal commission: 14% initially. Customer platform fee and ₹99 monthly delivery charge are handled separately.")
+        if (activeEdit) InfoCard("Existing approved packages remain available to customers until revised prices are approved.")
     }
 }
 
@@ -444,9 +490,14 @@ private fun PackageEditor(title: String, detail: String, enabled: Boolean, onEna
 fun WeeklyMenuScreen(
     onBack: () -> Unit,
     onNext: () -> Unit,
+    activeEdit: Boolean = false,
+    submittingUpdate: Boolean = false,
     onSaveDay: (Int, (AuthResult) -> Unit) -> Unit
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
+    val menuListState = rememberLazyListState()
+    val nextDayMainCourseFocus = remember { FocusRequester() }
+    var advanceRequest by remember { mutableIntStateOf(0) }
     LaunchedEffect(Unit) {
         ProviderDraft.menus.forEach { day ->
             (day.lunch + day.dinner).forEach { dish ->
@@ -472,6 +523,13 @@ fun WeeklyMenuScreen(
     val completedDays = ProviderDraft.savedMenuDays.count { it }
     val currentValid = (!offersLunch || ProviderDraft.menus[selected].lunch.any { it.name.isNotBlank() }) &&
         (!offersDinner || ProviderDraft.menus[selected].dinner.any { it.name.isNotBlank() })
+    LaunchedEffect(advanceRequest) {
+        if (advanceRequest > 0) {
+            menuListState.animateScrollToItem(1, 190)
+            delay(180)
+            nextDayMainCourseFocus.requestFocus()
+        }
+    }
     val saveCurrentDay = {
         if (!currentValid) {
             dayMessage = "Add at least one ${if (offersLunch && offersDinner) "lunch and one dinner" else if (offersLunch) "lunch" else "dinner"} main course before saving ${days[selected]}."
@@ -486,7 +544,10 @@ fun WeeklyMenuScreen(
                     dayMessage = "${days[dayBeingSaved]} menu saved to Zomeal."
                     val nextUnfinished = ((dayBeingSaved + 1) until 7).firstOrNull { !ProviderDraft.savedMenuDays[it] }
                         ?: (0 until dayBeingSaved).firstOrNull { !ProviderDraft.savedMenuDays[it] }
-                    if (nextUnfinished != null) selected = nextUnfinished else onNext()
+                    if (nextUnfinished != null) {
+                        selected = nextUnfinished
+                        advanceRequest++
+                    } else onNext()
                 } else {
                     ProviderDraft.savedMenuDays[dayBeingSaved] = false
                     dayMessage = result.message ?: "Could not save ${days[dayBeingSaved]}. Please try again."
@@ -494,9 +555,12 @@ fun WeeklyMenuScreen(
             }
         }
     }
-    FlowScaffold(4, "Monday–Sunday menus", "Complete and submit one day at a time. Every saved day is stored in Zomeal, so you can resume from the next unfinished day later.", onBack, saveCurrentDay,
-        nextLabel = if (saving) "Saving ${days[selected]}…" else if (completedDays == 6 && !ProviderDraft.savedMenuDays[selected]) "Save ${days[selected]} & continue" else "Save ${days[selected]} & next",
-        nextEnabled = !saving) {
+    val allDaysSaved = ProviderDraft.savedMenuDays.all { it }
+    FlowScaffold(4, if (activeEdit) "Edit weekly menu" else "Monday–Sunday menus", if (activeEdit) "Choose one day, then review lunch and dinner. Each main course has its own food type, description and photo; side dishes are shown under that meal." else "Complete and submit one day at a time. Every saved day is stored in Zomeal, so you can resume from the next unfinished day later.", onBack, if (activeEdit && allDaysSaved) onNext else saveCurrentDay,
+        nextLabel = if (submittingUpdate) "Saving menu draft…" else if (activeEdit && allDaysSaved) "Finish & save menu draft" else if (saving) "Saving ${days[selected]}…" else if (completedDays == 6 && !ProviderDraft.savedMenuDays[selected]) "Save ${days[selected]} & continue" else "Save ${days[selected]} & next",
+        nextEnabled = !saving && !submittingUpdate,
+        listState = menuListState) {
+        if (activeEdit) InfoCard("Save each changed day into this draft. When you finish all sections, return to Manage business and submit everything together as one request. Your approved menu stays live during review.")
         Section("Choose day") {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 days.chunked(4).forEachIndexed { rowIndex, row ->
@@ -516,10 +580,10 @@ fun WeeklyMenuScreen(
             }
         }
         if (offersLunch) {
-            MealMenuEditor("Lunch", ProviderDraft.menus[selected].lunch, ProviderDraft.menus[selected].lunchFixed, { ProviderDraft.menus[selected].lunchFixed = it; markCurrentDirty() }, markCurrentDirty) { dish -> activeDish = dish; picker.launch("image/*") }
+            MealMenuEditor("Lunch", ProviderDraft.menus[selected].lunch, ProviderDraft.menus[selected].lunchFixed, { ProviderDraft.menus[selected].lunchFixed = it; markCurrentDirty() }, markCurrentDirty, nextDayMainCourseFocus) { dish -> activeDish = dish; picker.launch("image/*") }
         }
         if (offersDinner) {
-            MealMenuEditor("Dinner", ProviderDraft.menus[selected].dinner, ProviderDraft.menus[selected].dinnerFixed, { ProviderDraft.menus[selected].dinnerFixed = it; markCurrentDirty() }, markCurrentDirty) { dish -> activeDish = dish; picker.launch("image/*") }
+            MealMenuEditor("Dinner", ProviderDraft.menus[selected].dinner, ProviderDraft.menus[selected].dinnerFixed, { ProviderDraft.menus[selected].dinnerFixed = it; markCurrentDirty() }, markCurrentDirty, if (offersLunch) null else nextDayMainCourseFocus) { dish -> activeDish = dish; picker.launch("image/*") }
         }
         dayMessage?.let { InfoCard(it) }
         InfoCard("$completedDays of 7 days submitted. Green checkmarks show days safely stored in Zomeal. All seven days are required before account activation, and every photo stays hidden until approved.")
@@ -527,7 +591,7 @@ fun WeeklyMenuScreen(
 }
 
 @Composable
-private fun MealMenuEditor(title: String, dishes: SnapshotStateList<DishDraft>, fixed: String, onFixed: (String) -> Unit, onDirty: () -> Unit, onPhoto: (DishDraft) -> Unit) {
+private fun MealMenuEditor(title: String, dishes: SnapshotStateList<DishDraft>, fixed: String, onFixed: (String) -> Unit, onDirty: () -> Unit, firstDishFocusRequester: FocusRequester? = null, onPhoto: (DishDraft) -> Unit) {
     Section("$title menu") {
         dishes.forEachIndexed { index, dish ->
             Surface(color = PMist, shape = RoundedCornerShape(14.dp)) {
@@ -536,7 +600,23 @@ private fun MealMenuEditor(title: String, dishes: SnapshotStateList<DishDraft>, 
                         Text("Main course ${index + 1}", color = PBrand, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
                         if (dishes.size > 1) IconButton(onClick = { dishes.remove(dish); onDirty() }) { Icon(Icons.Outlined.Delete, "Remove", tint = Color(0xFFB23A32)) }
                     }
-                    Field("Dish name *", dish.name, { dish.name = it; onDirty() }, "e.g. Paneer butter masala")
+                    Field("Dish name *", dish.name, { dish.name = it; onDirty() }, "e.g. Paneer butter masala", modifier = if (index == 0 && firstDishFocusRequester != null) Modifier.focusRequester(firstDishFocusRequester) else Modifier)
+                    Text("Food type *", color = PInk, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                        listOf("Veg", "Non-Veg", "Vegan").forEach { option ->
+                            FilterChip(
+                                selected = dish.foodType == option,
+                                onClick = { dish.foodType = option; onDirty() },
+                                label = { Text(option, fontSize = 10.sp) },
+                                leadingIcon = if (dish.foodType == option) ({ Icon(Icons.Outlined.CheckCircle, null, modifier = Modifier.size(14.dp)) }) else null,
+                                modifier = Modifier.weight(1f),
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = if (option == "Non-Veg") Color(0xFFFFECE7) else Color(0xFFE6F4E9),
+                                    selectedLabelColor = if (option == "Non-Veg") Color(0xFF9D3D27) else PBrand
+                                )
+                            )
+                        }
+                    }
                     Field("Description (optional)", dish.description, { dish.description = it; onDirty() }, "Ingredients, nutrition or allergen note", singleLine = false)
                     OutlinedButton(onClick = { onPhoto(dish) }, modifier = Modifier.fillMaxWidth()) {
                         Icon(if (dish.photo == null) Icons.Outlined.AddAPhoto else Icons.Outlined.CheckCircle, null)
@@ -551,12 +631,15 @@ private fun MealMenuEditor(title: String, dishes: SnapshotStateList<DishDraft>, 
 }
 
 @Composable
-fun OperationsScreen(onBack: () -> Unit, onNext: () -> Unit) {
+fun OperationsScreen(onBack: () -> Unit, onNext: () -> Unit, activeEdit: Boolean = false, saving: Boolean = false) {
     val context = androidx.compose.ui.platform.LocalContext.current
     LaunchedEffect(Unit) {
-        if (ProviderDraft.profilePhoto != null && !isProviderPhotoReadable(context, ProviderDraft.profilePhoto)) ProviderDraft.profilePhoto = null
-        if (ProviderDraft.kitchenPhoto != null && !isProviderPhotoReadable(context, ProviderDraft.kitchenPhoto)) ProviderDraft.kitchenPhoto = null
-        if (ProviderDraft.mealPhoto != null && !isProviderPhotoReadable(context, ProviderDraft.mealPhoto)) ProviderDraft.mealPhoto = null
+        // Approved photos are restored as Supabase object paths, not Android
+        // content URIs. Validate only locally selected content URIs; otherwise a
+        // provider opening this page would silently lose all approved photo refs.
+        if (ProviderDraft.profilePhoto?.let { it.startsWith("content:") || it.startsWith("file:") } == true && !isProviderPhotoReadable(context, ProviderDraft.profilePhoto)) ProviderDraft.profilePhoto = null
+        if (ProviderDraft.kitchenPhoto?.let { it.startsWith("content:") || it.startsWith("file:") } == true && !isProviderPhotoReadable(context, ProviderDraft.kitchenPhoto)) ProviderDraft.kitchenPhoto = null
+        if (ProviderDraft.mealPhoto?.let { it.startsWith("content:") || it.startsWith("file:") } == true && !isProviderPhotoReadable(context, ProviderDraft.mealPhoto)) ProviderDraft.mealPhoto = null
     }
     var target by remember { mutableStateOf(0) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
@@ -564,16 +647,21 @@ fun OperationsScreen(onBack: () -> Unit, onNext: () -> Unit) {
             when (target) { 0 -> ProviderDraft.profilePhoto = storedUri; 1 -> ProviderDraft.kitchenPhoto = storedUri; else -> ProviderDraft.mealPhoto = storedUri }
         } }
     }
-    FlowScaffold(5, "Photos & delivery", "Add authentic business photos and at least one delivery contact. Photos remain pending until admin approval.", onBack, onNext,
-        nextEnabled = ProviderDraft.deliveryPhone.length == 10) {
+    FlowScaffold(5, if (activeEdit) "Photos & delivery contacts" else "Photos & delivery", "Add authentic business photos and at least one delivery contact. Photos remain pending until admin approval.", onBack, onNext,
+        nextLabel = if (saving) "Saving draft…" else if (activeEdit) "Save photos & contacts to draft" else "Save & continue",
+        nextEnabled = ProviderDraft.deliveryPhone.matches(Regex("[6-9][0-9]{9}")) && !saving) {
         Section("Provider photographs", "You may finish optional photos later, but clear photos improve customer trust.") {
             PhotoRow("Provider profile", ProviderDraft.profilePhoto != null) { target = 0; picker.launch("image/*") }
             PhotoRow("Kitchen / hygiene", ProviderDraft.kitchenPhoto != null) { target = 1; picker.launch("image/*") }
             PhotoRow("Complete meal / thali", ProviderDraft.mealPhoto != null) { target = 2; picker.launch("image/*") }
+            if (activeEdit) Text("Use Change photo to replace a selected image, or Upload photo when none exists. New photos remain hidden until Zomeal approves them.", color = PMuted, fontSize = 11.sp, lineHeight = 16.sp)
         }
         Section("Primary delivery contact", "At least one delivery phone number is required and can be changed later.") {
             Field("Delivery person name", ProviderDraft.deliveryName, { ProviderDraft.deliveryName = it }, "Full name")
             Field("Delivery phone number *", ProviderDraft.deliveryPhone, { ProviderDraft.deliveryPhone = it.filter(Char::isDigit).take(10) }, "10-digit mobile number", true)
+            if (ProviderDraft.deliveryPhone.isNotBlank() && !ProviderDraft.deliveryPhone.matches(Regex("[6-9][0-9]{9}"))) {
+                Text("Enter a valid Indian mobile number beginning with 6, 7, 8 or 9.", color = MaterialTheme.colorScheme.error, fontSize = 11.sp)
+            }
             TextButton(onClick = { }) { Icon(Icons.Outlined.PersonAdd, null); Text("Add another delivery person later") }
         }
     }
@@ -584,7 +672,7 @@ private fun PhotoRow(label: String, selected: Boolean, onClick: () -> Unit) {
     Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(13.dp)).background(PMist).clickable(onClick = onClick).padding(13.dp), verticalAlignment = Alignment.CenterVertically) {
         Icon(if (selected) Icons.Outlined.CheckCircle else Icons.Outlined.AddAPhoto, null, tint = PBrand)
         Spacer(Modifier.width(10.dp)); Text(label, color = PInk, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-        Text(if (selected) "Selected" else "Upload", color = PBrand, fontSize = 12.sp)
+        Text(if (selected) "Change photo" else "Upload photo", color = PBrand, fontSize = 12.sp, fontWeight = FontWeight.Bold)
     }
 }
 

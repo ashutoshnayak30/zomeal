@@ -1,0 +1,3 @@
+.photo-alt{display:grid;gap:4px;margin:8px 10px;font-size:9px;color:var(--muted)}
+.photo-alt input{width:100%;border:1px solid var(--line);border-radius:7px;padding:7px}
+.photo-publish{display:flex;align-items:center;gap:6px;margin:8px 10px;font-size:9px;font-weight:700;color:var(--green)}
