@@ -144,10 +144,11 @@ internal class SupabaseCustomerRepository(context:Context) {
                     }}.distinctBy{it.id}
                     val providerId=item.optString("provider_id").trim();val displayName=item.optString("display_name").trim()
                     if(providerId.isBlank()||displayName.isBlank()||packages.isEmpty())continue
+                    fun cleanPath(value:String)=value.trim().takeUnless{it.equals("null",true)||it.equals("undefined",true)}.orEmpty()
                     add(MarketplaceProvider(
                         providerId,displayName,item.optString("locality",item.optString("city","Bhubaneswar")),
                         item.optString("dietary_type","BOTH"),item.optString("description").takeUnless{it.equals("null",true)}.orEmpty(),packages,item.optJSONArray("weekly_menu")?:JSONArray(),
-                        item.optString("primary_photo_path"),item.optString("kitchen_photo_path"),item.optString("meal_photo_path")
+                        cleanPath(item.optString("primary_photo_path")),cleanPath(item.optString("kitchen_photo_path")),cleanPath(item.optString("meal_photo_path"))
                     ))}}
                 main.post{callback(result,null)}
             }catch(error:Exception){main.post{callback(emptyList(),error.message?:"Could not load providers")}}
@@ -202,6 +203,16 @@ internal class SupabaseCustomerRepository(context:Context) {
         },callback)
     }
 
+    fun switchProviderNow(subscriptionId:String,providerId:String,packageId:String,weeklyMenu:JSONObject,callback:(JSONObject?,String?)->Unit){
+        if(customerAccessToken.isBlank()){callback(null,"Please sign in again before changing your provider");return}
+        rpc("customer_switch_provider",JSONObject().apply{
+            put("target_subscription",subscriptionId)
+            put("replacement_provider",providerId)
+            put("replacement_package",packageId)
+            put("target_weekly_menu",weeklyMenu)
+        },callback)
+    }
+
     fun saveCheckoutDraft(providerId:String,packageId:String,payload:JSONObject,callback:(String?)->Unit){
         rpc("customer_save_checkout_draft",JSONObject().apply{put("target_provider",providerId);put("target_package",packageId);put("target_payload",payload)}){_,error->callback(error)}
     }
@@ -220,7 +231,7 @@ internal class SupabaseCustomerRepository(context:Context) {
     fun pauseMeals(subscriptionId:String,dates:List<String>,slot:String,callback:(JSONObject?,String?)->Unit){rpc("customer_pause_subscription_meals",JSONObject().put("target_subscription",subscriptionId).put("target_dates",JSONArray(dates)).put("target_slot",slot.uppercase()),callback)}
 
     fun approvedMedia(path:String,callback:(Bitmap?)->Unit){
-        if(path.isBlank()){callback(null);return}
+        if(path.isBlank()||path.equals("null",true)||path.equals("undefined",true)){callback(null);return}
         Thread{
             val bitmap=runCatching{
                 val encoded=path.split('/').joinToString("/"){URLEncoder.encode(it,"UTF-8").replace("+","%20")}

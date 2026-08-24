@@ -199,8 +199,78 @@ class SupabaseProviderRepository(context: Context) {
         if (payload != null) {
             ProviderDraft.restore(payload)
             if (markPhotoBaseline) ProviderDraft.markEditBaseline(payload)
+            callback(payload)
+        } else {
+            // Older/seeded active providers may have a fully approved catalogue
+            // but no historical mobile-onboarding snapshot. Reconstruct an
+            // editable draft from the live provider read model instead of
+            // leaving Manage Business unresponsive.
+            loadProviderProfileHub { profile, _ ->
+                val reconstructed = profile?.takeIf { it.optString("provider_id").isNotBlank() }?.let(::profileHubToDraft)
+                if (reconstructed != null) {
+                    ProviderDraft.restore(reconstructed)
+                    if (markPhotoBaseline) ProviderDraft.markEditBaseline(reconstructed)
+                }
+                callback(reconstructed)
+            }
         }
-        callback(payload)
+    }
+
+    private fun profileHubToDraft(profile: JSONObject): JSONObject {
+        val packageRows = profile.optJSONArray("packages") ?: JSONArray()
+        var lunchPrice = ""; var dinnerPrice = ""; var bothPrice = ""
+        var lunchEnabled = false; var dinnerEnabled = false; var bothEnabled = false
+        for (index in 0 until packageRows.length()) {
+            val item = packageRows.optJSONObject(index) ?: continue
+            val rupees = (item.optLong("price_paise") / 100L).toString()
+            when (item.optString("kind")) {
+                "LUNCH_ONLY" -> { lunchEnabled = true; lunchPrice = rupees }
+                "DINNER_ONLY" -> { dinnerEnabled = true; dinnerPrice = rupees }
+                "LUNCH_AND_DINNER" -> { bothEnabled = true; bothPrice = rupees }
+            }
+        }
+        val menuDays = JSONArray().apply {
+            repeat(7) { dayIndex ->
+                val lunch = JSONArray(); val dinner = JSONArray()
+                val lunchSides = mutableListOf<String>(); val dinnerSides = mutableListOf<String>()
+                val rows = profile.optJSONArray("weekly_menu") ?: JSONArray()
+                for (rowIndex in 0 until rows.length()) {
+                    val row = rows.optJSONObject(rowIndex) ?: continue
+                    if (row.optInt("day_of_week") != dayIndex + 1) continue
+                    val target = if (row.optString("meal_slot").equals("LUNCH", true)) lunch else dinner
+                    val sides = if (row.optString("meal_slot").equals("LUNCH", true)) lunchSides else dinnerSides
+                    val items = row.optJSONArray("items") ?: JSONArray()
+                    for (itemIndex in 0 until items.length()) {
+                        val item = items.optJSONObject(itemIndex) ?: continue
+                        if (item.optString("category").equals("MAIN_COURSE", true)) {
+                            target.put(JSONObject()
+                                .put("name", item.optString("name"))
+                                .put("description", item.optString("description").takeUnless { it.equals("null", true) }.orEmpty())
+                                .put("foodType", when (item.optString("dietary_type")) { "NON_VEG" -> "Non-Veg"; "VEGAN" -> "Vegan"; else -> "Veg" })
+                                .put("photo", item.optString("photo_path").takeUnless { it.equals("null", true) }.orEmpty()))
+                        } else if (item.optString("name").isNotBlank()) sides += item.optString("name")
+                    }
+                }
+                put(JSONObject().put("day", listOf("Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday")[dayIndex])
+                    .put("lunchFixed", lunchSides.joinToString(", ")).put("dinnerFixed", dinnerSides.joinToString(", "))
+                    .put("lunch", lunch).put("dinner", dinner))
+            }
+        }
+        val pincode = profile.optString("pincode")
+        return JSONObject()
+            .put("businessName", profile.optString("provider_name"))
+            .put("contactName", profile.optString("contact_name"))
+            .put("category", profile.optString("category").replace('_', ' '))
+            .put("address", profile.optString("address")).put("city", profile.optString("city"))
+            .put("state", profile.optString("state")).put("pincode", pincode)
+            .put("radius", "5").put("lunchCapacity", "50").put("dinnerCapacity", "50")
+            .put("lunchEnabled", lunchEnabled).put("dinnerEnabled", dinnerEnabled).put("bothEnabled", bothEnabled)
+            .put("lunchPrice", lunchPrice).put("dinnerPrice", dinnerPrice).put("bothPrice", bothPrice)
+            .put("bothLunchDailyPrice", if (bothPrice.isBlank()) "" else ((bothPrice.toLongOrNull() ?: 0L) / 60L).toString())
+            .put("profilePhoto", profile.optString("profile_photo_path")).put("kitchenPhoto", profile.optString("kitchen_photo_path"))
+            .put("mealPhoto", profile.optString("meal_photo_path"))
+            .put("servicePincodes", JSONArray().put(JSONObject().put("value", pincode).put("areaName", profile.optString("city")).put("verified", pincode.length == 6)))
+            .put("menus", menuDays).put("savedMenuDays", JSONArray().apply { repeat(7) { put(true) } })
     }
 
     fun loadLatestBusinessChange(callback: (JSONObject?) -> Unit) = requestAsync(
