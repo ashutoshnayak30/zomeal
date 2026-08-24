@@ -32,6 +32,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
 import kotlinx.coroutines.delay
 
 private val Brand = Color(0xFF087F43)
@@ -444,5 +446,8 @@ private fun RegistrationStart(saveStatus: String, onStart: () -> Unit) {
 
 @Composable
 private fun ProviderTheme(content: @Composable () -> Unit) {
-    MaterialTheme(colorScheme = lightColorScheme(primary = Brand, surface = Color.White, background = Color(0xFFF8FBF8)), content = content)
+    val density = LocalDensity.current
+    CompositionLocalProvider(LocalDensity provides Density(density.density, density.fontScale * 1.10f)) {
+        MaterialTheme(colorScheme = lightColorScheme(primary = Brand, surface = Color.White, background = Color(0xFFF8FBF8)), content = content)
+    }
 }

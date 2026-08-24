@@ -35,11 +35,13 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.BasicTextField
@@ -317,14 +319,17 @@ private fun SplashBenefits(compact: Boolean) {
 
 @Composable
 private fun ZomealTheme(content: @Composable () -> Unit) {
-    MaterialTheme(
-        colorScheme = lightColorScheme(primary = Brand, background = Color.White, surface = Color.White),
-        typography = Typography(
-            headlineLarge = MaterialTheme.typography.headlineLarge.copy(fontWeight = FontWeight.ExtraBold),
-            titleLarge = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
-        ),
-        content = content
-    )
+    val density = LocalDensity.current
+    CompositionLocalProvider(LocalDensity provides Density(density.density, density.fontScale * 1.08f)) {
+        MaterialTheme(
+            colorScheme = lightColorScheme(primary = Brand, background = Color.White, surface = Color.White),
+            typography = Typography(
+                headlineLarge = MaterialTheme.typography.headlineLarge.copy(fontWeight = FontWeight.ExtraBold),
+                titleLarge = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
+            ),
+            content = content
+        )
+    }
 }
 
 private enum class DietFilter(val label: String, val emoji: String) {
@@ -417,6 +422,7 @@ private fun ProviderListScreen() {
     var showDiscoveryProfile by rememberSaveable { mutableStateOf(false) }
     var selectedProvider by remember { mutableStateOf<Provider?>(null) }
     var activeProvider by remember { mutableStateOf<Provider?>(null) }
+    var changingProvider by rememberSaveable { mutableStateOf(false) }
     var liveProviders by remember { mutableStateOf<List<Provider>>(emptyList()) }
     var marketplaceLoading by remember { mutableStateOf(false) }
     var marketplaceError by remember { mutableStateOf<String?>(null) }
@@ -605,9 +611,9 @@ private fun ProviderListScreen() {
         return
     }
 
-    activeProvider?.let { provider ->
+    activeProvider?.takeUnless { changingProvider }?.let { provider ->
         ActiveSubscriberHome(provider, onBrowseProviders = {
-            activeProvider = null
+            changingProvider = true
             selectedProvider = null
         }, onLogout = {
             marketplaceRepository.signOut()
@@ -642,12 +648,24 @@ private fun ProviderListScreen() {
         return
     }
 
+    BackHandler(enabled = changingProvider && selectedProvider == null) { changingProvider = false }
+
     BackHandler(enabled = selectedProvider != null) { selectedProvider = null }
     selectedProvider?.let { provider ->
         ProviderDetailsScreen(
             provider = provider,
             onBack = { selectedProvider = null },
-            onActivated = { activeProvider = provider; selectedProvider = null }
+            onActivated = {
+                if (changingProvider) {
+                    activeProvider = provider
+                    changingProvider = false
+                    selectedProvider = null
+                } else {
+                    activeProvider = provider
+                    selectedProvider = null
+                }
+            },
+            changeProviderMode = changingProvider
         )
         return
     }
@@ -694,7 +712,8 @@ private fun ProviderListScreen() {
                     providerCount = availableProviders.size,
                     browseMode = browseMode,
                     onQueryChange = { query = it },
-                    onProfile = { showDiscoveryProfile = true }
+                    onProfile = { showDiscoveryProfile = true },
+                    onBack = if (changingProvider) ({ changingProvider = false }) else null
                 )
             }
             if (marketplaceLoading) item { MarketplaceStatusCard("Finding approved kitchens near you…", false, null) }
@@ -854,7 +873,8 @@ private fun ServiceProviderHeader(
     providerCount: Int,
     browseMode: Boolean,
     onQueryChange: (String) -> Unit,
-    onProfile: () -> Unit
+    onProfile: () -> Unit,
+    onBack: (() -> Unit)? = null
 ) {
     Box(
         Modifier
@@ -867,6 +887,12 @@ private fun ServiceProviderHeader(
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(13.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
+                onBack?.let { back ->
+                    IconButton(onClick = back, modifier = Modifier.size(42.dp).background(Color.White.copy(alpha = .14f), CircleShape)) {
+                        Icon(Icons.Filled.ArrowBack, "Back", tint = Color.White, modifier = Modifier.size(20.dp))
+                    }
+                    Spacer(Modifier.width(9.dp))
+                }
                 Column(Modifier.weight(1f)) {
                     Text("zomeal", color = Color.White, fontSize = 29.sp, fontWeight = FontWeight.Black)
                     Text("Service Provider List", color = Color.White.copy(alpha = .84f), fontSize = 10.sp, fontWeight = FontWeight.Bold)
@@ -1249,7 +1275,7 @@ private data class MealPackage(
 )
 
 @Composable
-private fun ProviderDetailsScreen(provider: Provider, onBack: () -> Unit, onActivated: () -> Unit, subscriptionView:Boolean=false) {
+private fun ProviderDetailsScreen(provider: Provider, onBack: () -> Unit, onActivated: () -> Unit, subscriptionView:Boolean=false, changeProviderMode:Boolean=false) {
     val packages = remember(provider) {
         if(provider.isLive) provider.packages.map { packageRecord -> MealPackage(
             packageRecord.id,
@@ -1270,7 +1296,7 @@ private fun ProviderDetailsScreen(provider: Provider, onBack: () -> Unit, onActi
 
     BackHandler(enabled = menuPackage != null) { menuPackage = null }
     menuPackage?.let { plan ->
-        WeeklyMenuScreen(provider = provider, plan = plan, onBack = { menuPackage = null }, onGoHome = onActivated)
+        WeeklyMenuScreen(provider = provider, plan = plan, onBack = { menuPackage = null }, onGoHome = onActivated, changeProviderMode = changeProviderMode)
         return
     }
 
@@ -1654,7 +1680,7 @@ private fun providerMealSlot(rawMenu: String, dayIndex: Int, slot: String): Prov
                         palette.second,
                         item.optString("dietary_type").trim().uppercase().replace('-', '_'),
                         item.optBoolean("is_default"),
-                        item.optString("photo_path"),
+                        item.optString("photo_path").trim().takeUnless { it.equals("null", true) || it.equals("undefined", true) }.orEmpty(),
                         item.optString("description"),
                         item.optString("id")
                     )
@@ -1699,7 +1725,7 @@ private val dinnerChoices = listOf(
 )
 
 @Composable
-private fun WeeklyMenuScreen(provider: Provider, plan: MealPackage, onBack: () -> Unit, onGoHome: () -> Unit) {
+private fun WeeklyMenuScreen(provider: Provider, plan: MealPackage, onBack: () -> Unit, onGoHome: () -> Unit, changeProviderMode:Boolean=false) {
     val days = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
     val dates = listOf("21", "22", "23", "24", "25", "26", "27")
     var selectedDay by remember { mutableIntStateOf(0) }
@@ -1725,7 +1751,8 @@ private fun WeeklyMenuScreen(provider: Provider, plan: MealPackage, onBack: () -
             lunchSelections = lunchSelections,
             dinnerSelections = dinnerSelections,
             onBack = { showReview = false },
-            onGoHome = onGoHome
+            onGoHome = onGoHome,
+            changeProviderMode = changeProviderMode
         )
         return
     }
@@ -2121,7 +2148,8 @@ private fun ReviewPlanScreen(
     lunchSelections: Map<Int, String>,
     dinnerSelections: Map<Int, String>,
     onBack: () -> Unit,
-    onGoHome: () -> Unit
+    onGoHome: () -> Unit,
+    changeProviderMode:Boolean=false
 ) {
     val basePrice = plan.price.filter { it.isDigit() }.toIntOrNull() ?: 0
     val platformFee = kotlin.math.round(basePrice * .015).toInt()
@@ -2131,6 +2159,9 @@ private fun ReviewPlanScreen(
     val showLunch = plan.kind != "DINNER_ONLY"
     val showDinner = plan.kind != "LUNCH_ONLY"
     var showPayment by remember { mutableStateOf(false) }
+    val context = LocalContext.current.applicationContext
+    val repository = remember(context) { SupabaseCustomerRepository(context) }
+    var changeMessage by remember { mutableStateOf<String?>(null) }
 
     BackHandler(enabled = showPayment) { showPayment = false }
     if (showPayment) {
@@ -2161,13 +2192,43 @@ private fun ReviewPlanScreen(
                         Text("Inclusive of taxes", color = Muted, fontSize = 9.sp)
                     }
                     Button(
-                        onClick = { showPayment = true },
+                        onClick = {
+                            if (!changeProviderMode) showPayment = true
+                            else {
+                                val subscriptionId = CustomerSubscriptionStore.current?.id.orEmpty()
+                                if (subscriptionId.isBlank()) changeMessage = "Your active subscription could not be found. Please sign in again."
+                                else repository.switchProviderNow(
+                                    subscriptionId = subscriptionId,
+                                    providerId = provider.id,
+                                    packageId = plan.id,
+                                    weeklyMenu = JSONObject().apply {
+                                        put("lunch", JSONObject().apply { lunchSelections.forEach { (day, name) -> put(day.toString(), name) } })
+                                        put("dinner", JSONObject().apply { dinnerSelections.forEach { (day, name) -> put(day.toString(), name) } })
+                                    }
+                                ) { result, error ->
+                                    if (result != null && error == null) {
+                                        CustomerMenuStore.packageKind = plan.kind
+                                        repository.activeSubscription { subscription, refreshError ->
+                                            if (subscription != null) CustomerSubscriptionStore.current = subscription
+                                            changeMessage = refreshError
+                                            onGoHome()
+                                        }
+                                    }
+                                    else changeMessage = error ?: "Could not submit the provider change request."
+                                }
+                            }
+                        },
                         enabled = CustomerProfileStore.addressSaved,
                         modifier = Modifier.weight(1f).height(54.dp),
                         shape = RoundedCornerShape(17.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = Brand)
                     ) {
-                        Text(if (CustomerProfileStore.addressSaved) "Proceed to Payment" else "Save Address First", fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.weight(1f))
+                        Text(
+                            if (!CustomerProfileStore.addressSaved) "Save Address First"
+                            else if (changeProviderMode) "Confirm Provider Change"
+                            else "Proceed to Payment",
+                            fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.weight(1f)
+                        )
                         Icon(Icons.Filled.ArrowForward, null, modifier = Modifier.size(18.dp))
                     }
                 }
@@ -2179,6 +2240,7 @@ private fun ReviewPlanScreen(
             contentPadding = PaddingValues(bottom = 18.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
+            changeMessage?.let { item { WalletMessageBanner(it) { changeMessage = null } } }
             item { ReviewHeader(onBack) }
             item { ReviewProviderCard(provider) }
             item { ReviewSectionTitle("Your Selected Plan") }
@@ -3461,7 +3523,10 @@ private fun ActiveSubscriberHome(provider: Provider, onBrowseProviders: () -> Un
         (menu.mainCourses.firstOrNull { it.name.equals(saved?.mainCourse,true) }
             ?: menu.mainCourses.firstOrNull()
             ?: saved?.mainCourse?.takeIf { it.isNotBlank() }?.let { MenuChoice(it,Color(0xFFD8D7D2),Brand) }
-            ?: MenuChoice("Menu being updated", Color(0xFFD8D7D2), Brand)).let{choice->if(choice.photoPath.isBlank()&&provider.mealPhotoPath.isNotBlank())choice.copy(photoPath=provider.mealPhotoPath) else choice}
+            ?: MenuChoice("Menu being updated", Color(0xFFD8D7D2), Brand)).let { choice ->
+                val fallback = provider.mealPhotoPath.takeUnless { it.equals("null", true) }.orEmpty()
+                if (choice.photoPath.isBlank() && fallback.isNotBlank()) choice.copy(photoPath = fallback) else choice
+            }
     val savedTodayLunch = persistedMeal(todayIso,"LUNCH") ?: persistedWeeklyMeal(todayIndex,"LUNCH") ?: CustomerMenuStore.lunches[todayIndex]
     val savedTodayDinner = persistedMeal(todayIso,"DINNER") ?: persistedWeeklyMeal(todayIndex,"DINNER") ?: CustomerMenuStore.dinners[todayIndex]
     val savedTomorrowLunch = persistedMeal(tomorrowIso,"LUNCH") ?: persistedWeeklyMeal(tomorrowIndex,"LUNCH") ?: CustomerMenuStore.lunches[tomorrowIndex]
@@ -3617,7 +3682,11 @@ private fun ActiveSubscriberHome(provider: Provider, onBrowseProviders: () -> Un
                             carbs = 72,
                             fat = 18,
                             onInfo = { selectedMeal = "Lunch"; dialog = "meal_info" },
-                            onCancel = { selectedMeal = "Lunch"; dialog = "cancel" },
+                            onCancel = {
+                                selectedMeal = "Lunch"
+                                if (showingTomorrowMenu || homeHour < 7) dialog = "cancel"
+                                else pauseSummary = "Lunch cancellation closed at 7:00 AM. Today's lunch is already finalized."
+                            },
                             onChange = { selectedMeal = "Lunch"; showDailyMenuChange = true },
                             modifier = Modifier.weight(1f)
                         )
@@ -3634,7 +3703,11 @@ private fun ActiveSubscriberHome(provider: Provider, onBrowseProviders: () -> Un
                             carbs = 64,
                             fat = 16,
                             onInfo = { selectedMeal = "Dinner"; dialog = "meal_info" },
-                            onCancel = { selectedMeal = "Dinner"; dialog = "cancel" },
+                            onCancel = {
+                                selectedMeal = "Dinner"
+                                if (showingTomorrowMenu || homeHour < 16) dialog = "cancel"
+                                else pauseSummary = "Dinner cancellation closed at 4:00 PM. Today's dinner is already finalized."
+                            },
                             onChange = { selectedMeal = "Dinner"; showDailyMenuChange = true },
                             modifier = Modifier.weight(1f)
                         )
@@ -3690,6 +3763,18 @@ private fun ActiveSubscriberHome(provider: Provider, onBrowseProviders: () -> Un
             val date = SimpleDateFormat("dd MMM", Locale.ENGLISH).format(pauseStartMillis ?: System.currentTimeMillis())
             pauseSummary = "$pauseSlot meals paused from $date for $pauseDays day${if (pauseDays > 1) "s" else ""}"
             dialog = null
+        },
+        onMealCancelConfirm = {
+            val subscriptionId = persistedSubscription?.id.orEmpty()
+            val targetDate = if (showingTomorrowMenu) tomorrowIso else todayIso
+            if (subscriptionId.isBlank()) {
+                pauseSummary = "Your active subscription could not be found. Please sign in again."
+                dialog = null
+            } else repository.pauseMeals(subscriptionId, listOf(targetDate), selectedMeal) { result, error ->
+                pauseSummary = if (error != null) "Cancellation was not saved: $error"
+                else "$selectedMeal cancelled for ${if (showingTomorrowMenu) "tomorrow" else "today"}. ${result?.optInt("updated_meals") ?: 1} meal updated."
+                dialog = null
+            }
         }
     )
 }
@@ -3725,7 +3810,8 @@ private fun HomeActionDialog(
     onPauseDays: (Int) -> Unit,
     onPauseSlot: (String) -> Unit,
     onDismiss: () -> Unit,
-    onPauseConfirm: () -> Unit
+    onPauseConfirm: () -> Unit,
+    onMealCancelConfirm: () -> Unit
 ) {
     if (type == null) return
     var selection by remember(type, meal) { mutableStateOf("") }
@@ -3833,7 +3919,11 @@ private fun HomeActionDialog(
         },
         confirmButton = {
             Button(
-                onClick = if (type == "pause_options") onPauseConfirm else onDismiss,
+                onClick = when (type) {
+                    "pause_options" -> onPauseConfirm
+                    "cancel" -> onMealCancelConfirm
+                    else -> onDismiss
+                },
                 colors = ButtonDefaults.buttonColors(containerColor = Brand),
                 shape = RoundedCornerShape(11.dp)
             ) { Text(when (type) { "pause_options" -> "Pause Meals"; "cancel" -> "Confirm Cancel"; "change" -> "Save Menu"; else -> "Done" }, fontSize = 10.sp, fontWeight = FontWeight.Bold) }
@@ -4262,9 +4352,11 @@ private fun MyPlanScreen(provider: Provider, onNav: (Int) -> Unit, onSupport: ()
     val repository = remember(context) { SupabaseCustomerRepository(context) }
     var message by remember { mutableStateOf<String?>(null) }
     var showCancelDialog by remember { mutableStateOf(false) }
+    var confirmCancellation by remember { mutableStateOf(false) }
+    BackHandler { onNav(0) }
     Scaffold(containerColor = Color(0xFFFAFCFA), bottomBar = { ZomealBottomBar(1, onNav) }) { padding ->
         LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(bottom = 18.dp), verticalArrangement = Arrangement.spacedBy(13.dp)) {
-            item { AppSectionHeader("My Plan", "Manage your active meal subscription", Icons.Outlined.CalendarMonth) }
+            item { AppSectionHeader("My Plan", "Manage your active meal subscription", Icons.Outlined.CalendarMonth) { onNav(0) } }
             message?.let { item { WalletMessageBanner(it) { message = null } } }
             item { MyPlanHero(provider,onProviderDetails) }
             item { PlanTimelineCard() }
@@ -4276,18 +4368,26 @@ private fun MyPlanScreen(provider: Provider, onNav: (Int) -> Unit, onSupport: ()
             item { TextButton(onClick = { message = "Cancellation policy opened. No change has been made to your plan." }, modifier = Modifier.fillMaxWidth()) { Text("Cancellation, pause & refund policy", color = BrandDark, fontSize = 10.sp) } }
         }
     }
-    if (showCancelDialog) AlertDialog(
+    if (showCancelDialog && !confirmCancellation) AlertDialog(
         onDismissRequest = { showCancelDialog = false },
+        icon = { Icon(Icons.Outlined.SwapHoriz, null, tint = Brand) },
+        title = { Text("Would you rather change provider?", fontWeight = FontWeight.ExtraBold) },
+        text = { Text("You can keep your active plan and choose another approved provider, package and seven-day menu. Any eligible balance will be settled from your Zomeal wallet—no new payment screen is needed.", color = Muted, fontSize = 11.sp) },
+        confirmButton = { Button(onClick = { showCancelDialog = false; onBrowseProviders() }, colors = ButtonDefaults.buttonColors(containerColor = Brand)) { Text("Change provider") } },
+        dismissButton = { TextButton(onClick = { confirmCancellation = true }) { Text("Continue cancellation", color = Color(0xFFD64545)) } }
+    )
+    if (showCancelDialog && confirmCancellation) AlertDialog(
+        onDismissRequest = { showCancelDialog = false; confirmCancellation = false },
         icon = { Icon(Icons.Outlined.Cancel, null, tint = Color(0xFFD64545)) },
-        title = { Text("Cancel subscription", fontWeight = FontWeight.ExtraBold) },
-        text = { Text("Zomeal will review the request within 48 hours. Your meals remain active until the request is approved.", color = Muted, fontSize = 11.sp) },
+        title = { Text("Confirm cancellation request", fontWeight = FontWeight.ExtraBold) },
+        text = { Text("This skips provider change. Zomeal will review the cancellation within 48 hours; meals remain active until approval.", color = Muted, fontSize = 11.sp) },
         confirmButton = { Button(onClick = {
             val subscriptionId = CustomerSubscriptionStore.current?.id.orEmpty()
             if (subscriptionId.isBlank()) message = "Your active subscription could not be found. Sign in again and retry."
-            else repository.requestSubscriptionChange(subscriptionId, "CANCEL", reason = "Requested from My Plan") { result, error -> message = if (result != null && error == null) "Cancellation request submitted for review." else error ?: "Could not submit the request." }
-            showCancelDialog = false
+            else repository.requestSubscriptionChange(subscriptionId, "CANCEL_SUBSCRIPTION", reason = "Customer declined provider change and requested cancellation from My Plan") { result, error -> message = if (result != null && error == null) "Cancellation request submitted for review." else error ?: "Could not submit the request." }
+            showCancelDialog = false; confirmCancellation = false
         }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD64545))) { Text("Request cancellation") } },
-        dismissButton = { TextButton(onClick = { showCancelDialog = false }) { Text("Keep my plan") } }
+        dismissButton = { TextButton(onClick = { confirmCancellation = false }) { Text("Back") } }
     )
 }
 
@@ -5085,7 +5185,7 @@ private fun OrdersScreen(provider: Provider, onNav: (Int) -> Unit, onSupport: ()
     }
     Scaffold(containerColor = Color(0xFFFAFCFA), bottomBar = { ZomealBottomBar(2, onNav) }) { padding ->
         LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(bottom = 18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            item { AppSectionHeader("Orders", "View upcoming and past meals", Icons.Outlined.ReceiptLong) }
+            item { AppSectionHeader("Orders", "View upcoming and past meals", Icons.Outlined.ReceiptLong) { onNav(0) } }
             reviewMessage?.let { item { WalletMessageBanner(it) { reviewMessage = null } } }
             item { OrderSummaryStrip() }
             item {
@@ -5176,7 +5276,7 @@ private fun ProfileScreen(
     }
     Scaffold(containerColor = Color(0xFFFAFCFA), bottomBar = { ZomealBottomBar(3, onNav) }) { padding ->
         LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(bottom = 18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            item { AppSectionHeader("Profile", "Your account, preferences and security", Icons.Outlined.Person) }
+            item { AppSectionHeader("Profile", "Your account, preferences and security", Icons.Outlined.Person) { onNav(0) } }
             item { ProfileIdentityCard { dialog = "Edit profile" } }
             item { SectionTitle("Account") }
             item { ProfileMenuCard(listOf(Triple(Icons.Outlined.LocationOn, "Saved addresses", if (CustomerProfileStore.addressSaved) "Home · ${CustomerProfileStore.locality}" else "Add your delivery address"), Triple(Icons.Outlined.AccountBalanceWallet, "Zomeal Wallet", "₹1,250 available"), Triple(Icons.Outlined.Payment, "Payment methods", "UPI and cards"))) { label -> when (label) { "Zomeal Wallet" -> onWallet(); "Saved addresses" -> editAddress = true; else -> dialog = label } } }
