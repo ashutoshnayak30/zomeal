@@ -77,33 +77,28 @@
 
       <div class="content" id="content">
         <section id="overviewView" class="view">
-          <div class="hero-row"><div><p class="muted">Here’s what needs your attention today.</p></div><div class="hero-actions"><button class="manual-provider-button">＋ Add provider manually</button><button class="primary" data-go="providers">Review approvals <span>→</span></button></div></div>
+          <div class="hero-row"><div><p class="muted">Live production activity. Test payments and finance test cycles are excluded.</p></div><div class="hero-actions"><label class="analytics-date">From <input id="analyticsFrom" type="date"></label><label class="analytics-date">To <input id="analyticsTo" type="date"></label><button id="refreshAnalytics" class="primary">↻ Refresh</button></div></div>
           <div class="stat-grid">
-            <article><span class="stat-icon yellow">⌛</span><div><p>Pending approvals</p><h3>29</h3><small class="up">↑ 7 since yesterday</small></div></article>
-            <article><span class="stat-icon green">♙</span><div><p>Active providers</p><h3>48</h3><small>Across 16 pincodes</small></div></article>
-            <article><span class="stat-icon blue">▣</span><div><p>Active subscriptions</p><h3>1,284</h3><small class="up">↑ 8.4% this month</small></div></article>
-            <article><span class="stat-icon purple">₹</span><div><p>Today’s GMV</p><h3>₹84,620</h3><small>₹11,847 commission</small></div></article>
+            <article><span class="stat-icon blue">▣</span><div><p>Live subscribers</p><h3 id="metricSubscribers">—</h3><small id="metricSubscriberMeta">Loading subscriptions…</small></div></article>
+            <article><span class="stat-icon green">♙</span><div><p>Active providers</p><h3 id="metricProviders">—</h3><small id="metricProviderMeta">Loading providers…</small></div></article>
+            <article><span class="stat-icon yellow">₹</span><div><p>Collected today</p><h3 id="metricTodayCollected">—</h3><small>Captured production payments</small></div></article>
+            <article><span class="stat-icon purple">₹</span><div><p>Zomeal earned today</p><h3 id="metricTodayRevenue">—</h3><small id="metricRevenueMeta">Platform fee + earned commission</small></div></article>
           </div>
 
-          <div class="grid-2">
-            <section class="panel attention-panel">
-              <div class="panel-head"><div><h3>Approval inbox</h3><p>Oldest requests appear first</p></div><button class="link" data-go="providers">View all →</button></div>
-              <div id="approvalInbox"></div>
-            </section>
-            <section class="panel">
-              <div class="panel-head"><div><h3>Provider readiness</h3><p>Activation progress this week</p></div><button class="icon-btn">•••</button></div>
-              <div class="donut-row"><div class="donut"><span>72%</span></div><div class="legend"><p><i class="lg-green"></i> Ready to activate <b>18</b></p><p><i class="lg-yellow"></i> Needs information <b>7</b></p><p><i class="lg-gray"></i> Under review <b>4</b></p></div></div>
-              <div class="mini-alert"><span>✓</span><div><strong>3 providers are ready</strong><p>All mandatory details have been approved.</p></div><button data-go="providers">Review</button></div>
-            </section>
+          <div class="analytics-summary-grid">
+            <article class="panel money-summary"><p>Selected-period collections</p><h3 id="periodCollections">—</h3><small id="periodPaymentMeta">Verified customer payments</small></article>
+            <article class="panel money-summary"><p>Platform fees</p><h3 id="periodPlatformFees">—</h3><small>Customer-paid platform fees</small></article>
+            <article class="panel money-summary"><p>Provider commission</p><h3 id="periodCommission">—</h3><small>Recognized on delivered meals</small></article>
+            <article class="panel money-summary"><p>Zomeal revenue</p><h3 id="periodRevenue">—</h3><small>Platform fees + commission</small></article>
           </div>
 
-          <section class="panel activity-panel">
-            <div class="panel-head"><div><h3>Recent activity</h3><p>Important changes across the marketplace</p></div><button class="link" data-go="audit">Full audit log →</button></div>
-            <div class="activity-table">
-              <div><span class="activity-icon green">✓</span><p><strong>Swaad Ghar was activated</strong><small>Approved by Ashutosh Nayak</small></p><time>12 min ago</time></div>
-              <div><span class="activity-icon blue">₹</span><p><strong>New price request from Maa Home Kitchen</strong><small>Lunch + Dinner: ₹6,199 → ₹6,499</small></p><time>38 min ago</time></div>
-              <div><span class="activity-icon yellow">▧</span><p><strong>8 new meal photos uploaded</strong><small>Delight Non-Veg Meals · Pending review</small></p><time>1 hr ago</time></div>
-            </div>
+          <section class="panel analytics-panel">
+            <div class="panel-head"><div><h3>Earning history</h3><p>Daily production collections and Zomeal revenue</p></div><span id="analyticsRange" class="state-chip active">Last 30 days</span></div>
+            <div id="earningsChart" class="earnings-chart"><div class="loading-row">Loading earning history…</div></div>
+          </section>
+          <section class="panel analytics-panel">
+            <div class="panel-head"><div><h3>Provider performance</h3><p>Current subscribers and selected-period financial contribution</p></div><button class="link" data-go="directory">Open directory →</button></div>
+            <div class="analytics-table-wrap"><table class="analytics-table"><thead><tr><th>Provider</th><th>Status</th><th>Subscribers</th><th>Collections</th><th>Zomeal commission</th><th>Provider earnings</th></tr></thead><tbody id="providerPerformance"><tr><td colspan="6">Loading providers…</td></tr></tbody></table></div>
           </section>
         </section>
 
