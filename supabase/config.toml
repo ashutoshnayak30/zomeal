@@ -47,3 +47,6 @@ verify_jwt = false
 
 [functions.website-provider-search]
 verify_jwt = false
+
+[functions.admin-staff-management]
+verify_jwt = true
