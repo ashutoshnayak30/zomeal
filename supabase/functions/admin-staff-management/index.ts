@@ -93,7 +93,14 @@ Deno.serve(async (request) => {
       await client.from("admin_staff_invitations").update({ status: "CANCELLED" }).eq("email", email).eq("status", "PENDING");
       const { data: invitation, error: invitationError } = await client.from("admin_staff_invitations").insert({ email, role, invited_by: caller.id }).select("id").single();
       if (invitationError) throw invitationError;
-      const { error: otpError } = await client.auth.signInWithOtp({ email, options: { shouldCreateUser: true, data: { invited_to: "zomeal_admin", staff_role: role } } });
+      const { error: otpError } = await client.auth.signInWithOtp({
+        email,
+        options: {
+          shouldCreateUser: true,
+          emailRedirectTo: "https://admin.zomeal.in/?staff-invite=1",
+          data: { invited_to: "zomeal_admin", staff_role: role },
+        },
+      });
       if (otpError) {
         await client.from("admin_staff_invitations").update({ status: "CANCELLED" }).eq("id", invitation.id);
         throw otpError;
