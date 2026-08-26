@@ -13,10 +13,34 @@ Deno.serve(async (request) => {
   if (request.method !== "POST") return jsonResponse({ message: "Method not allowed" }, 405);
 
   try {
-    const caller = await optionalUser(request);
-    if (!caller) return jsonResponse({ message: "Your admin session has expired" }, 401);
-
     const client = serviceClient();
+    const caller = await optionalUser(request);
+    if (!caller) return jsonResponse({ message: "Your session has expired" }, 401);
+    const body = await request.json().catch(() => ({}));
+    const action = String(body.action || "list").toLowerCase();
+
+    if (action === "finalize_otp") {
+      const email = String(caller.email || "").trim().toLowerCase();
+      const { data: invitation, error: invitationError } = await client
+        .from("admin_staff_invitations")
+        .select("id,email,role,invited_by,expires_at")
+        .eq("email", email)
+        .eq("status", "PENDING")
+        .gt("expires_at", new Date().toISOString())
+        .order("invited_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (invitationError) throw invitationError;
+      if (!invitation) return jsonResponse({ message: "No valid staff invitation was found for this email" }, 403);
+      await client.from("user_roles").delete().eq("user_id", caller.id).in("role", [...STAFF_ROLES]);
+      const { error: roleError } = await client.from("user_roles").insert({ user_id: caller.id, role: invitation.role });
+      if (roleError) throw roleError;
+      const { error: verifiedError } = await client.from("admin_staff_invitations").update({ status: "VERIFIED", verified_user_id: caller.id, verified_at: new Date().toISOString() }).eq("id", invitation.id);
+      if (verifiedError) throw verifiedError;
+      await client.from("audit_logs").insert({ actor_id: caller.id, action: "ADMIN_STAFF_EMAIL_OTP_VERIFIED", entity_type: "user", entity_id: caller.id, after_data: { email, role: invitation.role, invited_by: invitation.invited_by } });
+      return jsonResponse({ message: "Email verified and staff access activated", role: invitation.role });
+    }
+
     const { data: callerRole, error: callerRoleError } = await client
       .from("user_roles")
       .select("role")
@@ -25,9 +49,6 @@ Deno.serve(async (request) => {
       .maybeSingle();
     if (callerRoleError) throw callerRoleError;
     if (!callerRole) return jsonResponse({ message: "Only an ADMIN can manage staff access" }, 403);
-
-    const body = await request.json().catch(() => ({}));
-    const action = String(body.action || "list").toLowerCase();
 
     if (action === "list") {
       const { data: roleRows, error: roleError } = await client
@@ -53,7 +74,14 @@ Deno.serve(async (request) => {
           is_current_user: row.user_id === caller.id,
         };
       });
-      return jsonResponse({ staff });
+      const { data: invitations, error: invitationsError } = await client
+        .from("admin_staff_invitations")
+        .select("id,email,role,status,invited_at,expires_at")
+        .eq("status", "PENDING")
+        .order("invited_at", { ascending: false });
+      if (invitationsError) throw invitationsError;
+      const pending = (invitations || []).filter((invite) => !staff.some((member) => member.email.toLowerCase() === invite.email.toLowerCase()));
+      return jsonResponse({ staff, pending });
     }
 
     if (action === "invite") {
@@ -62,31 +90,31 @@ Deno.serve(async (request) => {
       if (!/^\S+@\S+\.\S+$/.test(email)) return jsonResponse({ message: "Enter a valid email address" }, 400);
       if (!validRole(role)) return jsonResponse({ message: "Choose ADMIN, OPERATIONS or FINANCE" }, 400);
 
-      const { data: usersPage, error: usersError } = await client.auth.admin.listUsers({ page: 1, perPage: 1000 });
-      if (usersError) throw usersError;
-      let target = usersPage.users.find((user) => user.email?.toLowerCase() === email);
-      let invited = false;
-      if (!target) {
-        const { data, error } = await client.auth.admin.inviteUserByEmail(email, {
-          redirectTo: "https://admin.zomeal.in",
-          data: { invited_to: "zomeal_admin", staff_role: role },
-        });
-        if (error) throw error;
-        target = data.user;
-        invited = true;
+      await client.from("admin_staff_invitations").update({ status: "CANCELLED" }).eq("email", email).eq("status", "PENDING");
+      const { data: invitation, error: invitationError } = await client.from("admin_staff_invitations").insert({ email, role, invited_by: caller.id }).select("id").single();
+      if (invitationError) throw invitationError;
+      const { error: otpError } = await client.auth.signInWithOtp({ email, options: { shouldCreateUser: true, data: { invited_to: "zomeal_admin", staff_role: role } } });
+      if (otpError) {
+        await client.from("admin_staff_invitations").update({ status: "CANCELLED" }).eq("id", invitation.id);
+        throw otpError;
       }
-
-      await client.from("user_roles").delete().eq("user_id", target.id).in("role", [...STAFF_ROLES]);
-      const { error: insertError } = await client.from("user_roles").insert({ user_id: target.id, role });
-      if (insertError) throw insertError;
       await client.from("audit_logs").insert({
         actor_id: caller.id,
-        action: invited ? "ADMIN_STAFF_INVITED" : "ADMIN_STAFF_ACCESS_GRANTED",
+        action: "ADMIN_STAFF_OTP_SENT",
         entity_type: "user",
-        entity_id: target.id,
-        after_data: { email, role, invited },
+        entity_id: invitation.id,
+        after_data: { email, role, expires_in_hours: 24 },
       });
-      return jsonResponse({ message: invited ? `Invitation sent to ${email}` : `Access updated for ${email}` });
+      return jsonResponse({ message: `Six-digit verification code sent to ${email}` });
+    }
+
+    if (action === "cancel_invite") {
+      const invitationId = String(body.invitation_id || "");
+      if (!invitationId) return jsonResponse({ message: "Choose an invitation" }, 400);
+      const { error } = await client.from("admin_staff_invitations").update({ status: "CANCELLED" }).eq("id", invitationId).eq("status", "PENDING");
+      if (error) throw error;
+      await client.from("audit_logs").insert({ actor_id: caller.id, action: "ADMIN_STAFF_INVITATION_CANCELLED", entity_type: "admin_staff_invitation", entity_id: invitationId });
+      return jsonResponse({ message: "Pending invitation cancelled" });
     }
 
     if (action === "change_role") {
