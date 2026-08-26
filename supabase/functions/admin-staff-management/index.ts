@@ -112,7 +112,7 @@ Deno.serve(async (request) => {
         entity_id: invitation.id,
         after_data: { email, role, expires_in_hours: 24 },
       });
-      return jsonResponse({ message: `Email verification sent to ${email}` });
+      return jsonResponse({ message: `Six-digit email verification sent to ${email}` });
     }
 
     if (action === "cancel_invite") {

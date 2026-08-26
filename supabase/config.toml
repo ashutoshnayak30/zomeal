@@ -30,6 +30,13 @@ additional_redirect_urls = []
 jwt_expiry = 3600
 enable_signup = true
 
+[auth.email]
+enable_signup = true
+double_confirm_changes = true
+enable_confirmations = false
+otp_length = 6
+otp_expiry = 3600
+
 [auth.sms]
 enable_signup = true
 enable_confirmations = false
