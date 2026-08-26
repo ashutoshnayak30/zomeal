@@ -18,6 +18,7 @@
   <link rel="stylesheet" href="changes-extra.css" />
   <link rel="stylesheet" href="leads.css" />
   <link rel="stylesheet" href="typography.css" />
+  <link rel="stylesheet" href="staff.css" />
 </head>
 <body>
   <div id="login" class="login-shell">
@@ -44,6 +45,17 @@
         <button class="primary full" type="submit">Sign in securely <span>→</span></button>
         <p class="demo-note">Access is restricted by your assigned Zomeal role. All administrative actions are audited.</p>
       </form>
+      <form class="login-card hidden" id="invitePasswordForm">
+        <div class="mobile-brand brand"><span class="brand-dot">●</span> zomeal</div>
+        <span class="icon-bubble">✓</span>
+        <p class="eyebrow green">SECURE INVITATION</p>
+        <h2>Create your password</h2>
+        <p class="muted">Your Zomeal staff role is already assigned. Set a private password to activate your admin-panel login.</p>
+        <label>New password<input id="invitePassword" type="password" autocomplete="new-password" minlength="10" placeholder="At least 10 characters" required /></label>
+        <label>Confirm password<input id="invitePasswordConfirm" type="password" autocomplete="new-password" minlength="10" placeholder="Enter it again" required /></label>
+        <button class="primary full" type="submit">Activate staff account <span>→</span></button>
+        <p class="demo-note">Never share this password. Zomeal administrators cannot view it.</p>
+      </form>
     </section>
   </div>
 
@@ -65,6 +77,8 @@
         <button data-view="capacity"><span>◫</span> Capacity</button>
         <button data-view="payouts"><span>₹</span> Finance & payouts <b id="payoutNavCount">0</b></button>
         <button data-view="audit"><span>✓</span> Audit log</button>
+        <p>ACCESS</p>
+        <button data-view="staff"><span>♙</span> Admin users</button>
       </nav>
       <div class="sidebar-foot"><div class="avatar">AN</div><div><strong>Ashutosh Nayak</strong><small>Administrator</small></div><button id="logout">↪</button></div>
     </aside>
@@ -101,6 +115,17 @@
             <div class="panel-head"><div><h3>Provider performance</h3><p>Current subscribers and selected-period financial contribution</p></div><button class="link" data-go="directory">Open directory →</button></div>
             <div class="analytics-table-wrap"><table class="analytics-table"><thead><tr><th>Provider</th><th>Status</th><th>Subscribers</th><th>Collections</th><th>Zomeal commission</th><th>Provider earnings</th></tr></thead><tbody id="providerPerformance"><tr><td colspan="6">Loading providers…</td></tr></tbody></table></div>
           </section>
+        </section>
+
+        <section id="staffView" class="view hidden">
+          <div class="staff-heading"><div><h2>Admin users</h2><p class="muted">Invite staff and control access without sharing passwords.</p></div><button id="refreshStaff" class="edit-provider-button">↻ Refresh staff</button></div>
+          <form id="staffInviteForm" class="panel staff-invite">
+            <label>Email address<input id="staffEmail" type="email" autocomplete="off" placeholder="name@zomeal.in" required></label>
+            <label>Access role<select id="staffRole"><option value="OPERATIONS">Operations</option><option value="FINANCE">Finance</option><option value="ADMIN">Administrator</option></select></label>
+            <button class="primary" type="submit">Send secure invitation</button>
+          </form>
+          <div class="staff-note"><strong>Secure onboarding:</strong> the person receives an email and creates their own password. Passwords are never visible to Zomeal admins.</div>
+          <section class="panel"><div id="staffList" class="staff-list"><div class="staff-empty">Loading staff accounts…</div></div></section>
         </section>
 
         <section id="queueView" class="view hidden">
