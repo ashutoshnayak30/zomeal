@@ -22,9 +22,13 @@ button,input,select,textarea{font-size:14px;line-height:1.4}
 .toast{font-size:13px;line-height:1.45}
 
 /* Keep long admin navigation usable on every desktop height. */
-.sidebar{overflow:hidden;min-height:0}
+.sidebar{overflow-y:auto;overflow-x:hidden;min-height:0;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:#cbd8cf transparent}
 .sidebar .brand,.sidebar-foot{flex:0 0 auto}
-.sidebar nav{flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;padding-right:5px;overscroll-behavior:contain;scrollbar-gutter:stable}
+.sidebar nav{flex:1 0 auto;min-height:max-content;padding-right:5px}
+.sidebar::-webkit-scrollbar{width:7px}
+.sidebar::-webkit-scrollbar-track{background:transparent}
+.sidebar::-webkit-scrollbar-thumb{background:#cbd8cf;border-radius:999px}
+.sidebar::-webkit-scrollbar-thumb:hover{background:#9fb5a6}
 .sidebar nav::-webkit-scrollbar{width:7px}
 .sidebar nav::-webkit-scrollbar-track{background:transparent}
 .sidebar nav::-webkit-scrollbar-thumb{background:#cbd8cf;border-radius:999px}
