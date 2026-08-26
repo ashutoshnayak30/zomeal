@@ -20,4 +20,15 @@ button,input,select,textarea{font-size:14px;line-height:1.4}
 .changes-view p,.changes-view small,.changes-view label,.changes-view button,.changes-view input,.changes-view select,.changes-view textarea{font-size:13px;line-height:1.45}
 .photo-library p,.photo-library small,.media-upload label,.media-upload small,.delivery-list p,.empty-inline{font-size:12px;line-height:1.45}
 .toast{font-size:13px;line-height:1.45}
+
+/* Keep long admin navigation usable on every desktop height. */
+.sidebar{overflow:hidden;min-height:0}
+.sidebar .brand,.sidebar-foot{flex:0 0 auto}
+.sidebar nav{flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;padding-right:5px;overscroll-behavior:contain;scrollbar-gutter:stable}
+.sidebar nav::-webkit-scrollbar{width:7px}
+.sidebar nav::-webkit-scrollbar-track{background:transparent}
+.sidebar nav::-webkit-scrollbar-thumb{background:#cbd8cf;border-radius:999px}
+.sidebar nav::-webkit-scrollbar-thumb:hover{background:#9fb5a6}
+.sidebar nav{scrollbar-width:thin;scrollbar-color:#cbd8cf transparent}
+.sidebar-foot{background:#fbfcfa}
 @media(max-width:760px){body{font-size:14px}.topbar h2{font-size:20px}.stat-grid h3{font-size:23px}.panel-head h3,.detail-card-head h3{font-size:16px}.sidebar nav button{font-size:15px}.analytics-table td{font-size:12px}}
