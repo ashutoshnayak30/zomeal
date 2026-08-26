@@ -50,9 +50,9 @@
         <span class="icon-bubble">✓</span>
         <p class="eyebrow green">SECURE INVITATION</p>
         <h2>Verify your staff email</h2>
-        <p id="inviteInstructions" class="muted">Enter the six-digit code sent to your Gmail, then create your private admin-panel password.</p>
+        <p id="inviteInstructions" class="muted">Enter the six-digit verification code sent to your email, then create your private admin-panel password.</p>
         <label id="inviteEmailField">Invited email<input id="inviteEmail" type="email" autocomplete="email" placeholder="name@gmail.com" required /></label>
-        <label id="inviteOtpField">Six-digit email OTP<input id="inviteOtp" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" placeholder="000000" required /></label>
+        <label id="inviteOtpField">Six-digit email code<input id="inviteOtp" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" minlength="6" maxlength="6" placeholder="000000" required /></label>
         <label>New password<input id="invitePassword" type="password" autocomplete="new-password" minlength="10" placeholder="At least 10 characters" required /></label>
         <label>Confirm password<input id="invitePasswordConfirm" type="password" autocomplete="new-password" minlength="10" placeholder="Enter it again" required /></label>
         <button class="primary full" type="submit">Activate staff account <span>→</span></button>
@@ -125,7 +125,7 @@
             <label>Access role<select id="staffRole"><option value="OPERATIONS">Operations</option><option value="FINANCE">Finance</option><option value="ADMIN">Administrator</option></select></label>
             <button class="primary" type="submit">Send secure invitation</button>
           </form>
-          <div class="staff-note"><strong>Secure onboarding:</strong> the person receives a six-digit email OTP and creates their own password. Access remains pending until verification succeeds.</div>
+          <div class="staff-note"><strong>Secure onboarding:</strong> the person receives a six-digit email verification code or secure link and creates their own password. Access remains pending until verification succeeds.</div>
           <section class="panel"><div id="staffList" class="staff-list"><div class="staff-empty">Loading staff accounts…</div></div></section>
         </section>
 
