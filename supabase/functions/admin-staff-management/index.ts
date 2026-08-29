@@ -69,9 +69,9 @@ Deno.serve(async (request) => {
     if (action === "list") {
       const { data: roleRows, error: roleError } = await client
         .from("user_roles")
-        .select("user_id,role,created_at")
+        .select("user_id,role,granted_at")
         .in("role", [...STAFF_ROLES])
-        .order("created_at", { ascending: false });
+        .order("granted_at", { ascending: false });
       if (roleError) throw roleError;
 
       const { data: usersPage, error: usersError } = await client.auth.admin.listUsers({ page: 1, perPage: 1000 });
@@ -93,7 +93,7 @@ Deno.serve(async (request) => {
           invited_at: user?.invited_at || null,
           last_sign_in_at: user?.last_sign_in_at || null,
           email_confirmed_at: user?.email_confirmed_at || null,
-          created_at: row.created_at,
+          created_at: row.granted_at || user?.created_at || null,
           is_current_user: row.user_id === caller.id,
         };
       });
