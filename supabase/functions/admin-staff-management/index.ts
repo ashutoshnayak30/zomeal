@@ -3,9 +3,23 @@ import { optionalUser, serviceClient } from "../_shared/supabase.ts";
 
 const STAFF_ROLES = ["ADMIN", "OPERATIONS", "FINANCE"] as const;
 type StaffRole = typeof STAFF_ROLES[number];
+const STAFF_TITLES = ["SUPER_ADMIN", "ADMINISTRATOR", "OPERATIONS_MANAGER", "PROVIDER_ONBOARDING", "CATALOGUE_REVIEWER", "SERVICE_AREA_MANAGER", "CUSTOMER_SUPPORT", "FINANCE_MANAGER", "FINANCE_EXECUTIVE", "AUDITOR"] as const;
+type StaffTitle = typeof STAFF_TITLES[number];
 
-function validRole(value: unknown): value is StaffRole {
-  return typeof value === "string" && STAFF_ROLES.includes(value as StaffRole);
+function validStaffTitle(value: unknown): value is StaffTitle {
+  return typeof value === "string" && STAFF_TITLES.includes(value as StaffTitle);
+}
+
+function permissionGroup(title: StaffTitle): StaffRole {
+  if (title === "SUPER_ADMIN" || title === "ADMINISTRATOR") return "ADMIN";
+  if (title === "FINANCE_MANAGER" || title === "FINANCE_EXECUTIVE" || title === "AUDITOR") return "FINANCE";
+  return "OPERATIONS";
+}
+
+function defaultTitle(role: StaffRole): StaffTitle {
+  if (role === "ADMIN") return "ADMINISTRATOR";
+  if (role === "FINANCE") return "FINANCE_MANAGER";
+  return "OPERATIONS_MANAGER";
 }
 
 Deno.serve(async (request) => {
@@ -23,7 +37,7 @@ Deno.serve(async (request) => {
       const email = String(caller.email || "").trim().toLowerCase();
       const { data: invitation, error: invitationError } = await client
         .from("admin_staff_invitations")
-        .select("id,email,role,invited_by,expires_at")
+        .select("id,email,role,staff_role,invited_by,expires_at")
         .eq("email", email)
         .eq("status", "PENDING")
         .gt("expires_at", new Date().toISOString())
@@ -35,6 +49,8 @@ Deno.serve(async (request) => {
       await client.from("user_roles").delete().eq("user_id", caller.id).in("role", [...STAFF_ROLES]);
       const { error: roleError } = await client.from("user_roles").insert({ user_id: caller.id, role: invitation.role });
       if (roleError) throw roleError;
+      const { error: profileError } = await client.from("admin_staff_profiles").upsert({ user_id: caller.id, staff_role: invitation.staff_role || defaultTitle(invitation.role), assigned_by: invitation.invited_by, updated_at: new Date().toISOString() });
+      if (profileError) throw profileError;
       const { error: verifiedError } = await client.from("admin_staff_invitations").update({ status: "VERIFIED", verified_user_id: caller.id, verified_at: new Date().toISOString() }).eq("id", invitation.id);
       if (verifiedError) throw verifiedError;
       await client.from("audit_logs").insert({ actor_id: caller.id, action: "ADMIN_STAFF_EMAIL_OTP_VERIFIED", entity_type: "user", entity_id: caller.id, after_data: { email, role: invitation.role, invited_by: invitation.invited_by } });
@@ -60,6 +76,12 @@ Deno.serve(async (request) => {
 
       const { data: usersPage, error: usersError } = await client.auth.admin.listUsers({ page: 1, perPage: 1000 });
       if (usersError) throw usersError;
+      const userIds = [...new Set((roleRows || []).map((row) => row.user_id))];
+      const { data: profileRows, error: profileError } = userIds.length
+        ? await client.from("admin_staff_profiles").select("user_id,staff_role").in("user_id", userIds)
+        : { data: [], error: null };
+      if (profileError) throw profileError;
+      const staffProfiles = new Map((profileRows || []).map((profile) => [profile.user_id, profile.staff_role]));
       const users = new Map(usersPage.users.map((user) => [user.id, user]));
       const staff = (roleRows || []).map((row) => {
         const user = users.get(row.user_id);
@@ -67,6 +89,8 @@ Deno.serve(async (request) => {
           user_id: row.user_id,
           email: user?.email || "Unknown email",
           role: row.role,
+          permission_group: row.role,
+          staff_role: staffProfiles.get(row.user_id) || defaultTitle(row.role),
           invited_at: user?.invited_at || null,
           last_sign_in_at: user?.last_sign_in_at || null,
           email_confirmed_at: user?.email_confirmed_at || null,
@@ -76,7 +100,7 @@ Deno.serve(async (request) => {
       });
       const { data: invitations, error: invitationsError } = await client
         .from("admin_staff_invitations")
-        .select("id,email,role,status,invited_at,expires_at")
+        .select("id,email,role,staff_role,status,invited_at,expires_at")
         .eq("status", "PENDING")
         .order("invited_at", { ascending: false });
       if (invitationsError) throw invitationsError;
@@ -86,19 +110,20 @@ Deno.serve(async (request) => {
 
     if (action === "invite") {
       const email = String(body.email || "").trim().toLowerCase();
-      const role = body.role;
+      const staffRole = body.staff_role;
       if (!/^\S+@\S+\.\S+$/.test(email)) return jsonResponse({ message: "Enter a valid email address" }, 400);
-      if (!validRole(role)) return jsonResponse({ message: "Choose ADMIN, OPERATIONS or FINANCE" }, 400);
+      if (!validStaffTitle(staffRole)) return jsonResponse({ message: "Choose a valid Zomeal staff role" }, 400);
+      const role = permissionGroup(staffRole);
 
       await client.from("admin_staff_invitations").update({ status: "CANCELLED" }).eq("email", email).eq("status", "PENDING");
-      const { data: invitation, error: invitationError } = await client.from("admin_staff_invitations").insert({ email, role, invited_by: caller.id }).select("id").single();
+      const { data: invitation, error: invitationError } = await client.from("admin_staff_invitations").insert({ email, role, staff_role: staffRole, invited_by: caller.id }).select("id").single();
       if (invitationError) throw invitationError;
       const { error: otpError } = await client.auth.signInWithOtp({
         email,
         options: {
           shouldCreateUser: true,
           emailRedirectTo: "https://admin.zomeal.in/?staff-invite=1",
-          data: { invited_to: "zomeal_admin", staff_role: role },
+          data: { invited_to: "zomeal_admin", staff_role: staffRole, permission_group: role },
         },
       });
       if (otpError) {
@@ -110,7 +135,7 @@ Deno.serve(async (request) => {
         action: "ADMIN_STAFF_OTP_SENT",
         entity_type: "user",
         entity_id: invitation.id,
-        after_data: { email, role, expires_in_hours: 24 },
+        after_data: { email, role, staff_role: staffRole, expires_in_hours: 24 },
       });
       return jsonResponse({ message: `Six-digit email verification sent to ${email}` });
     }
@@ -126,12 +151,15 @@ Deno.serve(async (request) => {
 
     if (action === "change_role") {
       const userId = String(body.user_id || "");
-      const role = body.role;
-      if (!userId || !validRole(role)) return jsonResponse({ message: "A valid staff member and role are required" }, 400);
+      const staffRole = body.staff_role;
+      if (!userId || !validStaffTitle(staffRole)) return jsonResponse({ message: "A valid staff member and role are required" }, 400);
+      const role = permissionGroup(staffRole);
       await client.from("user_roles").delete().eq("user_id", userId).in("role", [...STAFF_ROLES]);
       const { error } = await client.from("user_roles").insert({ user_id: userId, role });
       if (error) throw error;
-      await client.from("audit_logs").insert({ actor_id: caller.id, action: "ADMIN_STAFF_ROLE_CHANGED", entity_type: "user", entity_id: userId, after_data: { role } });
+      const { error: profileError } = await client.from("admin_staff_profiles").upsert({ user_id: userId, staff_role: staffRole, assigned_by: caller.id, updated_at: new Date().toISOString() });
+      if (profileError) throw profileError;
+      await client.from("audit_logs").insert({ actor_id: caller.id, action: "ADMIN_STAFF_ROLE_CHANGED", entity_type: "user", entity_id: userId, after_data: { role, staff_role: staffRole } });
       return jsonResponse({ message: "Staff role updated" });
     }
 
@@ -141,6 +169,7 @@ Deno.serve(async (request) => {
       if (userId === caller.id) return jsonResponse({ message: "You cannot revoke your own admin access" }, 400);
       const { error } = await client.from("user_roles").delete().eq("user_id", userId).in("role", [...STAFF_ROLES]);
       if (error) throw error;
+      await client.from("admin_staff_profiles").delete().eq("user_id", userId);
       await client.from("audit_logs").insert({ actor_id: caller.id, action: "ADMIN_STAFF_ACCESS_REVOKED", entity_type: "user", entity_id: userId });
       return jsonResponse({ message: "Staff access revoked" });
     }

@@ -72,13 +72,9 @@
         <button data-view="directory"><span>♙</span> Provider directory</button>
         <button data-view="changes"><span>↻</span> Provider change requests <b id="changeNavCount">0</b></button>
         <button data-view="providers"><span>✓</span> Provider approvals <b>4</b></button>
-        <button data-view="prices"><span>₹</span> Prices <b>3</b></button>
-        <button data-view="areas"><span>⌖</span> Service areas <b>2</b></button>
-        <button data-view="menus"><span>▤</span> Menus <b>8</b></button>
-        <button data-view="photos"><span>▧</span> Photos <b>12</b></button>
+        <button data-view="areas"><span>⌖</span> Service areas</button>
         <p>OPERATIONS</p>
         <button data-view="leads"><span>♧</span> Early access leads <b id="leadNavCount">0</b></button>
-        <button data-view="capacity"><span>◫</span> Capacity</button>
         <button data-view="payouts"><span>₹</span> Finance & payouts <b id="payoutNavCount">0</b></button>
         <button data-view="audit"><span>✓</span> Audit log</button>
       </nav>
@@ -123,11 +119,16 @@
           <div class="staff-heading"><div><h2>Admin users</h2><p class="muted">Invite staff and control access without sharing passwords.</p></div><button id="refreshStaff" class="edit-provider-button">↻ Refresh staff</button></div>
           <form id="staffInviteForm" class="panel staff-invite">
             <label>Email address<input id="staffEmail" type="email" autocomplete="off" placeholder="name@zomeal.in" required></label>
-            <label>Access role<select id="staffRole"><option value="OPERATIONS">Operations</option><option value="FINANCE">Finance</option><option value="ADMIN">Administrator</option></select></label>
+            <label>Staff role<select id="staffRole"></select></label>
             <button class="primary" type="submit">Send secure invitation</button>
           </form>
           <div class="staff-note"><strong>Secure onboarding:</strong> the person receives a six-digit email verification code or secure link and creates their own password. Access remains pending until verification succeeds.</div>
           <section class="panel"><div id="staffList" class="staff-list"><div class="staff-empty">Loading staff accounts…</div></div></section>
+        </section>
+
+        <section id="areasView" class="view hidden">
+          <div class="directory-head"><div><h2>Service areas</h2><p class="muted">Live coverage grouped by provider. Open a provider to manage its approved pincodes and other listing data.</p></div><button id="refreshAreas" class="edit-provider-button">↻ Refresh areas</button></div>
+          <section class="panel"><div class="directory-tools"><div class="input-search">⌕ <input id="areaSearch" placeholder="Search pincode, city or provider" /></div><select id="areaStatus"><option value="">All provider statuses</option><option>ACTIVE</option><option>PENDING_APPROVAL</option><option>DRAFT</option><option>SUSPENDED</option><option>INACTIVE</option></select></div><div id="areaList" class="directory-list"><div class="loading-row">Loading service areas…</div></div></section>
         </section>
 
         <section id="queueView" class="view hidden">
