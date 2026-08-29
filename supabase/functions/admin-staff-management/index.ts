@@ -77,10 +77,9 @@ Deno.serve(async (request) => {
       const { data: usersPage, error: usersError } = await client.auth.admin.listUsers({ page: 1, perPage: 1000 });
       if (usersError) throw usersError;
       const userIds = [...new Set((roleRows || []).map((row) => row.user_id))];
-      const { data: profileRows, error: profileError } = userIds.length
+      const { data: profileRows } = userIds.length
         ? await client.from("admin_staff_profiles").select("user_id,staff_role").in("user_id", userIds)
         : { data: [], error: null };
-      if (profileError) throw profileError;
       const staffProfiles = new Map((profileRows || []).map((profile) => [profile.user_id, profile.staff_role]));
       const users = new Map(usersPage.users.map((user) => [user.id, user]));
       const staff = (roleRows || []).map((row) => {
@@ -98,12 +97,21 @@ Deno.serve(async (request) => {
           is_current_user: row.user_id === caller.id,
         };
       });
-      const { data: invitations, error: invitationsError } = await client
+      let { data: invitations, error: invitationsError } = await client
         .from("admin_staff_invitations")
         .select("id,email,role,staff_role,status,invited_at,expires_at")
         .eq("status", "PENDING")
         .order("invited_at", { ascending: false });
-      if (invitationsError) throw invitationsError;
+      if (invitationsError) {
+        const legacyResult = await client
+          .from("admin_staff_invitations")
+          .select("id,email,role,status,invited_at,expires_at")
+          .eq("status", "PENDING")
+          .order("invited_at", { ascending: false });
+        if (legacyResult.error) throw legacyResult.error;
+        invitations = (legacyResult.data || []).map((invite) => ({ ...invite, staff_role: defaultTitle(invite.role) }));
+        invitationsError = null;
+      }
       const pending = (invitations || []).filter((invite) => !staff.some((member) => member.email.toLowerCase() === invite.email.toLowerCase()));
       return jsonResponse({ staff, pending });
     }
