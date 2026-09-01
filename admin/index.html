@@ -68,6 +68,7 @@
       <nav id="nav">
         <button class="active" data-view="overview"><span>⌂</span> Overview</button>
         <button data-view="staff"><span>♙</span> Admin users</button>
+        <button data-view="referrals"><span>⌁</span> Referral programme</button>
         <p>APPROVALS</p>
         <button data-view="directory"><span>♙</span> Provider directory</button>
         <button data-view="changes"><span>↻</span> Provider change requests <b id="changeNavCount">0</b></button>
@@ -124,6 +125,22 @@
           </form>
           <div class="staff-note"><strong>Secure onboarding:</strong> the person receives a six-digit email verification code or secure link and creates their own password. Access remains pending until verification succeeds.</div>
           <section class="panel"><div id="staffList" class="staff-list"><div class="staff-empty">Loading staff accounts…</div></div></section>
+        </section>
+
+        <section id="referralsView" class="view hidden">
+          <div class="staff-heading"><div><h2>Referral programme</h2><p class="muted">Set customer rewards and monitor verified referral conversions.</p></div><button id="refreshReferrals" class="edit-provider-button">↻ Refresh</button></div>
+          <div id="referralAdminNotice" class="staff-note">Rewards are issued only after the referred customer’s first captured subscription. Installs or unverified accounts never create wallet money.</div>
+          <div id="referralStats" class="stat-grid referral-stats"></div>
+          <form id="referralSettingsForm" class="panel referral-settings">
+            <div class="panel-head"><div><h3>Reward controls</h3><p>Only the Super Administrator can save these values.</p></div><label class="referral-toggle"><input id="referralEnabled" type="checkbox"> Programme enabled</label></div>
+            <div class="referral-fields">
+              <label>Inviter reward (₹)<input id="referrerReward" type="number" min="0" step="1" required></label>
+              <label>New customer reward (₹)<input id="referredReward" type="number" min="0" step="1" required></label>
+              <label>Inviter cap per cycle (₹)<input id="referralCap" type="number" min="0" step="1" required></label>
+              <label>Reward cycle (days)<input id="referralCycleDays" type="number" min="1" max="365" step="1" required></label>
+            </div>
+            <div class="referral-actions"><p>Changes apply to referrals qualifying after the new setting becomes effective.</p><button id="saveReferralSettings" class="primary" type="submit">Save referral settings</button></div>
+          </form>
         </section>
 
         <section id="areasView" class="view hidden">

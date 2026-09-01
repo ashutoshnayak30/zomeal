@@ -2,6 +2,10 @@ package com.zomeal.app
 
 import android.os.Bundle
 import android.app.Activity
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
 import androidx.activity.compose.BackHandler
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -411,6 +415,7 @@ private fun ProviderListScreen() {
     var pendingFullName by rememberSaveable { mutableStateOf("") }
     var pendingMobile by rememberSaveable { mutableStateOf("") }
     var pendingPincode by rememberSaveable { mutableStateOf("") }
+    var pendingReferralCode by rememberSaveable { mutableStateOf("") }
     var serviceUnavailable by rememberSaveable { mutableStateOf(false) }
     var showLogin by rememberSaveable { mutableStateOf(false) }
     var pendingIsLogin by rememberSaveable { mutableStateOf(false) }
@@ -567,24 +572,28 @@ private fun ProviderListScreen() {
                         if(!auth.success){complete(auth.message?:"OTP verification failed");return@completeAuthentication}
                         marketplaceRepository.saveRegistrationProfile(pendingFullName,pendingMobile){profileError->
                             if(profileError!=null){complete(profileError);return@saveRegistrationProfile}
-                            marketplaceRepository.savePincode(pendingPincode.ifBlank{"751030"})
-                            if (pendingIsLogin) {
-                                marketplaceRepository.activeSubscription{subscription,error->
-                                    if(error!=null){complete(error);return@activeSubscription}
-                                    browseMode=false
-                                    if(subscription!=null)restoreSubscription(subscription)
-                                    else{signupComplete=true;activeProvider=null;showNoSubscriptionHome=false}
-                                    complete(null)
-                                }
-                            } else if(marketplaceRepository.configured){
-                                marketplaceLoading=true
-                                marketplaceRepository.marketplace(pendingPincode){records,error->
-                                    marketplaceLoading=false
-                                    if(error!=null){marketplaceError=error;complete("We couldn't check providers right now. Check your internet and try again.")}
-                                    else if(records.isEmpty()){serviceUnavailable=true;complete(null)}
-                                    else{liveProviders=records.mapIndexed(::marketplaceProviderToUi);browseMode=false;signupComplete=true;complete(null)}
-                                }
-                            } else {marketplaceError="Supabase is not configured in local.properties";complete("The app is not connected to Zomeal services. Please install the latest build.")}
+                            fun continueRegistration(){
+                                marketplaceRepository.savePincode(pendingPincode.ifBlank{"751030"})
+                                if (pendingIsLogin) {
+                                    marketplaceRepository.activeSubscription{subscription,error->
+                                        if(error!=null){complete(error);return@activeSubscription}
+                                        browseMode=false
+                                        if(subscription!=null)restoreSubscription(subscription)
+                                        else{signupComplete=true;activeProvider=null;showNoSubscriptionHome=false}
+                                        complete(null)
+                                    }
+                                } else if(marketplaceRepository.configured){
+                                    marketplaceLoading=true
+                                    marketplaceRepository.marketplace(pendingPincode){records,error->
+                                        marketplaceLoading=false
+                                        if(error!=null){marketplaceError=error;complete("We couldn't check providers right now. Check your internet and try again.")}
+                                        else if(records.isEmpty()){serviceUnavailable=true;complete(null)}
+                                        else{liveProviders=records.mapIndexed(::marketplaceProviderToUi);browseMode=false;signupComplete=true;complete(null)}
+                                    }
+                                } else {marketplaceError="Supabase is not configured in local.properties";complete("The app is not connected to Zomeal services. Please install the latest build.")}
+                            }
+                            if(!pendingIsLogin&&pendingReferralCode.isNotBlank()) marketplaceRepository.applyReferral(pendingReferralCode){_,referralError->if(referralError!=null)complete(referralError) else continueRegistration()}
+                            else continueRegistration()
                         }
                     }
                 },
@@ -600,10 +609,11 @@ private fun ProviderListScreen() {
                     awaitingOtp = true
                 },
                 onCreateAccount = { showLogin = false }
-            ) else SignupScreen(onContinue = { fullName, mobile, pincode ->
+            ) else SignupScreen(onContinue = { fullName, mobile, pincode, referralCode ->
                 pendingFullName = fullName
                 pendingMobile = mobile
                 pendingPincode = pincode
+                pendingReferralCode = referralCode
                 pendingIsLogin = false
                 awaitingOtp = true
             }, onLogin = { showLogin = true })
@@ -4077,19 +4087,45 @@ private fun NotificationItem(notification: ZomealNotification, onClick: () -> Un
 
 @Composable
 private fun WalletScreen(onBack: () -> Unit) {
-    val context=LocalContext.current.applicationContext
-    val repository=remember(context){SupabaseCustomerRepository(context)}
-    var balance by remember { mutableIntStateOf(1250) }
+    val context = LocalContext.current
+    val repository = remember(context) { SupabaseCustomerRepository(context.applicationContext) }
+    var balance by remember { mutableIntStateOf(0) }
     var showAddMoney by remember { mutableStateOf(false) }
-    var selectedAmount by remember { mutableIntStateOf(500) }
-    var selectedPayment by remember { mutableStateOf("UPI") }
     var walletMessage by remember { mutableStateOf<String?>(null) }
     val sharedChannels = remember { mutableStateMapOf<String, Boolean>() }
-    val referralEarned = 350
-    var installReward by remember { mutableIntStateOf(25) }
-    var paidPlanReward by remember { mutableIntStateOf(100) }
+    var referralEarned by remember { mutableIntStateOf(0) }
+    var friendsJoined by remember { mutableIntStateOf(0) }
+    var friendsRewarded by remember { mutableIntStateOf(0) }
+    var referralCode by remember { mutableStateOf("") }
+    var shareLink by remember { mutableStateOf("https://zomeal.in") }
+    var referrerReward by remember { mutableIntStateOf(0) }
+    var referredReward by remember { mutableIntStateOf(0) }
     var rewardLimit by remember { mutableIntStateOf(1000) }
-    LaunchedEffect(Unit){repository.referralProgram{program,_->if(program!=null){installReward=(program.optLong("verified_install_reward_paise",2500)/100).toInt();paidPlanReward=(program.optLong("first_subscription_reward_paise",10000)/100).toInt();rewardLimit=(program.optLong("cycle_cap_paise",100000)/100).toInt()}}}
+    var activity by remember { mutableStateOf(JSONArray()) }
+    var loading by remember { mutableStateOf(true) }
+    LaunchedEffect(Unit) {
+        repository.referralDashboard { data, error ->
+            loading = false
+            if (data != null) {
+                balance = (data.optLong("balance_paise") / 100).toInt()
+                referralEarned = (data.optLong("lifetime_referral_earned_paise") / 100).toInt()
+                friendsJoined = data.optInt("friends_joined")
+                friendsRewarded = data.optInt("friends_rewarded")
+                referralCode = data.optString("referral_code")
+                shareLink = data.optString("share_link", "https://zomeal.in/?ref=$referralCode")
+                referrerReward = (data.optLong("referrer_reward_paise") / 100).toInt()
+                referredReward = (data.optLong("referred_reward_paise") / 100).toInt()
+                rewardLimit = (data.optLong("cycle_cap_paise") / 100).toInt()
+                activity = data.optJSONArray("activity") ?: JSONArray()
+            } else walletMessage = error ?: "Could not load your wallet. Please try again."
+        }
+    }
+    fun shareReferral(channel: String) {
+        if (referralCode.isBlank()) { walletMessage = "Your referral code is still loading."; return }
+        val text = "Join Zomeal for home-style meals. Use my referral code $referralCode. You can earn ₹$referredReward after your first successful paid subscription: $shareLink"
+        context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply { type = "text/plain"; putExtra(Intent.EXTRA_TEXT, text) }, "Share Zomeal via $channel"))
+        sharedChannels[channel] = true
+    }
 
     Scaffold(
         containerColor = Color(0xFFFAFCFA),
@@ -4115,12 +4151,14 @@ private fun WalletScreen(onBack: () -> Unit) {
         ) {
             item { WalletHeader(balance, onBack, onAddMoney = { showAddMoney = true }) }
             walletMessage?.let { message -> item { WalletMessageBanner(message) { walletMessage = null } } }
-            item { WalletQuickFacts(referralEarned, rewardLimit) }
-            item { ReferAndEarnCard(sharedChannels, installReward, paidPlanReward, rewardLimit) { channel ->
-                sharedChannels[channel] = true
-                walletMessage = "Invite prepared for $channel. Rewards are credited after verified registration and subscription."
-            } }
-            item { WalletTransactions() }
+            item { WalletQuickFacts(referralEarned, rewardLimit, friendsJoined) }
+            item { ReferAndEarnCard(sharedChannels, referralCode, referrerReward, referredReward, rewardLimit, referralEarned, friendsRewarded, onCopy = {
+                if (referralCode.isNotBlank()) {
+                    (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("Zomeal referral code", referralCode))
+                    walletMessage = "Referral code copied."
+                }
+            }, onShare = ::shareReferral) }
+            item { WalletTransactions(activity, loading) }
             item { WalletSecurityStrip() }
         }
     }
@@ -4132,40 +4170,12 @@ private fun WalletScreen(onBack: () -> Unit) {
             title = { Text("Add Money", fontWeight = FontWeight.ExtraBold) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(11.dp)) {
-                    Text("Choose amount", color = Ink, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        listOf(200, 500, 1000, 2000).forEach { amount ->
-                            FilterChip(selected = selectedAmount == amount, onClick = { selectedAmount = amount }, label = { Text("₹$amount", fontSize = 9.sp) })
-                        }
-                    }
-                    Text("Payment method", color = Ink, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    listOf(
-                        Triple("UPI", "Any UPI app", Icons.Outlined.QrCode2),
-                        Triple("Cards", "Visa, Mastercard, RuPay", Icons.Outlined.CreditCard),
-                        Triple("Net Banking", "All major banks", Icons.Outlined.AccountBalance)
-                    ).forEach { method ->
-                        Surface(
-                            Modifier.fillMaxWidth().clickable { selectedPayment = method.first },
-                            color = if (selectedPayment == method.first) Mist else Color.White,
-                            shape = RoundedCornerShape(12.dp),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, if (selectedPayment == method.first) Brand else Border)
-                        ) {
-                            Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Icon(method.third, null, tint = Brand, modifier = Modifier.size(18.dp))
-                                Spacer(Modifier.width(9.dp))
-                                Column(Modifier.weight(1f)) { Text(method.first, color = Ink, fontSize = 11.sp, fontWeight = FontWeight.Bold); Text(method.second, color = Muted, fontSize = 8.sp) }
-                                RadioButton(selected = selectedPayment == method.first, onClick = { selectedPayment = method.first }, colors = RadioButtonDefaults.colors(selectedColor = Brand))
-                            }
-                        }
-                    }
+                    Text("Wallet recharge is coming soon.", color = Ink, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text("For safety, only verified Razorpay payments and referral rewards can change this balance. No demo money will be added.", color = Muted, fontSize = 10.sp)
                 }
             },
             confirmButton = {
-                Button(onClick = {
-                    balance += selectedAmount
-                    walletMessage = "₹$selectedAmount added successfully using $selectedPayment."
-                    showAddMoney = false
-                }, colors = ButtonDefaults.buttonColors(containerColor = Brand), shape = RoundedCornerShape(12.dp)) { Text("Add ₹$selectedAmount", fontWeight = FontWeight.Bold) }
+                Button(onClick = { showAddMoney = false }, colors = ButtonDefaults.buttonColors(containerColor = Brand), shape = RoundedCornerShape(12.dp)) { Text("Got it", fontWeight = FontWeight.Bold) }
             },
             dismissButton = { TextButton(onClick = { showAddMoney = false }) { Text("Cancel", color = Muted) } }
         )
@@ -4213,11 +4223,11 @@ private fun WalletMessageBanner(message: String, onDismiss: () -> Unit) {
 }
 
 @Composable
-private fun WalletQuickFacts(referral: Int, rewardLimit: Int) {
+private fun WalletQuickFacts(referral: Int, rewardLimit: Int, friendsJoined: Int) {
     Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
         WalletFactCard(Icons.Outlined.CardGiftcard, "Referral earned", "₹$referral", Modifier.weight(1f))
         WalletFactCard(Icons.Outlined.Savings, "Reward limit", "₹$rewardLimit", Modifier.weight(1f))
-        WalletFactCard(Icons.Outlined.Groups, "Friends joined", "3", Modifier.weight(1f))
+        WalletFactCard(Icons.Outlined.Groups, "Friends joined", friendsJoined.toString(), Modifier.weight(1f))
     }
 }
 
@@ -4233,7 +4243,7 @@ private fun WalletFactCard(icon: ImageVector, label: String, value: String, modi
 }
 
 @Composable
-private fun ReferAndEarnCard(sharedChannels: Map<String, Boolean>, installReward: Int, paidPlanReward: Int, rewardLimit: Int, onShare: (String) -> Unit) {
+private fun ReferAndEarnCard(sharedChannels: Map<String, Boolean>, referralCode: String, referrerReward: Int, referredReward: Int, rewardLimit: Int, earned: Int, friendsRewarded: Int, onCopy: () -> Unit, onShare: (String) -> Unit) {
     Surface(Modifier.fillMaxWidth().padding(horizontal = 18.dp), color = Color(0xFFF1FAEE), shape = RoundedCornerShape(20.dp), border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFCFE7C7))) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(11.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -4241,13 +4251,13 @@ private fun ReferAndEarnCard(sharedChannels: Map<String, Boolean>, installReward
                 Spacer(Modifier.width(11.dp))
                 Column(Modifier.weight(1f)) {
                     Text("Refer & Earn up to ₹${"%,d".format(rewardLimit)}", color = BrandDark, fontSize = 16.sp, fontWeight = FontWeight.Black)
-                    Text("Earn ₹$installReward after your friend installs and verifies their number, plus ₹$paidPlanReward after their first paid subscription.", color = Muted, fontSize = 9.sp, lineHeight = 13.sp)
+                    Text("You get ₹$referrerReward and your friend gets ₹$referredReward after their first successful paid subscription.", color = Muted, fontSize = 9.sp, lineHeight = 13.sp)
                 }
                 Icon(Icons.Outlined.Savings, null, tint = Color(0xFFFFA000), modifier = Modifier.size(34.dp))
             }
             Surface(color = Color.White, shape = RoundedCornerShape(12.dp)) {
-                Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) { Text("Your referral code", color = Muted, fontSize = 8.sp); Text("ZOMEAL-AS100", color = Ink, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold) }
+                Row(Modifier.fillMaxWidth().clickable(onClick = onCopy).padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) { Text("Your referral code", color = Muted, fontSize = 8.sp); Text(referralCode.ifBlank { "Loading…" }, color = Ink, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold) }
                     Icon(Icons.Outlined.ContentCopy, null, tint = Brand, modifier = Modifier.size(17.dp))
                 }
             }
@@ -4265,8 +4275,9 @@ private fun ReferAndEarnCard(sharedChannels: Map<String, Boolean>, installReward
                     }
                 }
             }
-            LinearProgressIndicator(progress = { .35f }, modifier = Modifier.fillMaxWidth().height(6.dp).clip(CircleShape), color = Brand, trackColor = Border)
-            Text("₹350 earned · ₹650 more available this reward cycle", color = BrandDark, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+            val progress = if (rewardLimit <= 0) 0f else (earned.toFloat() / rewardLimit).coerceIn(0f, 1f)
+            LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth().height(6.dp).clip(CircleShape), color = Brand, trackColor = Border)
+            Text("₹$earned earned · $friendsRewarded qualified friend${if (friendsRewarded == 1) "" else "s"} · ₹${(rewardLimit-earned).coerceAtLeast(0)} available", color = BrandDark, fontSize = 8.sp, fontWeight = FontWeight.Bold)
         }
     }
 }
@@ -4294,17 +4305,22 @@ private fun AffiliateMetric(value: String, label: String, modifier: Modifier = M
 }
 
 @Composable
-private fun WalletTransactions() {
+private fun WalletTransactions(activity: JSONArray, loading: Boolean) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp)) {
         Text("Recent Wallet Activity", color = Ink, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold)
         Spacer(Modifier.height(8.dp))
         Surface(color = Color.White, shape = RoundedCornerShape(17.dp), shadowElevation = 1.dp) {
             Column {
-                WalletTransaction(Icons.Outlined.CardGiftcard, "Referral reward", "Friend activated a plan", "+ ₹100", BrandDark)
-                HorizontalDivider(color = Border)
-                WalletTransaction(Icons.Outlined.Restaurant, "Subscription payment", "Swaad Ghar monthly plan", "− ₹6,394", Ink)
-                HorizontalDivider(color = Border)
-                WalletTransaction(Icons.Outlined.AddCard, "Wallet recharge", "Added using UPI", "+ ₹1,000", BrandDark)
+                when {
+                    loading -> Text("Loading activity…", color = Muted, fontSize = 10.sp, modifier = Modifier.padding(18.dp))
+                    activity.length() == 0 -> Text("No wallet activity yet. Share your code to start earning.", color = Muted, fontSize = 10.sp, modifier = Modifier.padding(18.dp))
+                    else -> (0 until activity.length()).forEach { index ->
+                        val entry = activity.optJSONObject(index) ?: JSONObject()
+                        val amount = (entry.optLong("amount_paise") / 100).toInt()
+                        WalletTransaction(Icons.Outlined.CardGiftcard, if (entry.optString("type").startsWith("REFERR")) "Referral reward" else "Wallet activity", entry.optString("description", "Verified Zomeal activity"), "${if (amount >= 0) "+" else "−"} ₹${kotlin.math.abs(amount)}", if (amount >= 0) BrandDark else Ink)
+                        if (index < activity.length() - 1) HorizontalDivider(color = Border)
+                    }
+                }
             }
         }
     }
@@ -5764,10 +5780,11 @@ private fun LoginScreen(onContinue: (String) -> Unit, onCreateAccount: () -> Uni
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun SignupScreen(onContinue: (String, String, String) -> Unit, onLogin: () -> Unit) {
+private fun SignupScreen(onContinue: (String, String, String, String) -> Unit, onLogin: () -> Unit) {
     var fullName by rememberSaveable { mutableStateOf("") }
     var mobile by rememberSaveable { mutableStateOf("") }
     var pincode by rememberSaveable { mutableStateOf("") }
+    var referralCode by rememberSaveable { mutableStateOf("") }
     var useCurrentLocation by rememberSaveable { mutableStateOf(true) }
     val valid = fullName.trim().length >= 2 && mobile.length == 10 && pincode.length == 6
 
@@ -5836,6 +5853,18 @@ private fun SignupScreen(onContinue: (String, String, String) -> Unit, onLogin: 
                             )
                         }
 
+                        TextField(
+                            value = referralCode,
+                            onValueChange = { referralCode = it.uppercase().filter(Char::isLetterOrDigit).take(10) },
+                            modifier = Modifier.fillMaxWidth().height(if (compact) 46.dp else 52.dp),
+                            placeholder = { Text("Referral code (optional)", fontSize = if (compact) 10.sp else 11.sp) },
+                            leadingIcon = { Icon(Icons.Outlined.CardGiftcard, null, tint = Brand, modifier = Modifier.size(18.dp)) },
+                            supportingText = if (compact) null else ({ Text("Rewards unlock after your first successful paid subscription.", fontSize = 7.sp) }),
+                            singleLine = true,
+                            shape = RoundedCornerShape(13.dp),
+                            colors = signupFieldColors()
+                        )
+
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Surface(color = Mist, shape = CircleShape) {
                                 Icon(Icons.Outlined.MyLocation, null, tint = Brand, modifier = Modifier.padding(8.dp).size(18.dp))
@@ -5856,7 +5885,7 @@ private fun SignupScreen(onContinue: (String, String, String) -> Unit, onLogin: 
 
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Button(
-                            onClick = { onContinue(fullName.trim(), mobile, pincode) },
+                            onClick = { onContinue(fullName.trim(), mobile, pincode, referralCode.trim()) },
                             enabled = valid,
                             modifier = Modifier.fillMaxWidth().height(if (compact) 54.dp else 60.dp),
                             shape = RoundedCornerShape(17.dp),
