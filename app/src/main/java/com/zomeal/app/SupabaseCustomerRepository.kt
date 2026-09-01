@@ -227,6 +227,10 @@ internal class SupabaseCustomerRepository(context:Context) {
 
     fun clearCheckoutDraft(callback:(String?)->Unit){rpc("customer_clear_checkout_draft",JSONObject()){_,error->callback(error)}}
     fun referralProgram(callback:(JSONObject?,String?)->Unit){rpc("customer_referral_program",JSONObject(),callback)}
+    fun referralDashboard(callback:(JSONObject?,String?)->Unit){rpc("customer_referral_dashboard",JSONObject(),callback)}
+    fun applyReferral(code:String,callback:(JSONObject?,String?)->Unit){
+        rpc("customer_apply_referral",JSONObject().put("target_code",code.trim().uppercase()),callback)
+    }
     fun changeDailyMeal(mealId:String,itemId:String,callback:(JSONObject?,String?)->Unit){rpc("customer_select_daily_meal",JSONObject().put("target_meal_id",mealId).put("target_item_id",itemId),callback)}
     fun pauseMeals(subscriptionId:String,dates:List<String>,slot:String,callback:(JSONObject?,String?)->Unit){rpc("customer_pause_subscription_meals",JSONObject().put("target_subscription",subscriptionId).put("target_dates",JSONArray(dates)).put("target_slot",slot.uppercase()),callback)}
 
