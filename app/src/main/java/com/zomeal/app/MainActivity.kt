@@ -30,7 +30,10 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -42,6 +45,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
@@ -6260,11 +6264,19 @@ private fun OtpVerificationScreen(mobile: String, onVerified: (String,(String?) 
     var verificationError by rememberSaveable { mutableStateOf<String?>(null) }
     var consentRestartKey by rememberSaveable { mutableIntStateOf(0) }
     var resending by rememberSaveable { mutableStateOf(false) }
+    val otpFocusRequester = remember { FocusRequester() }
+    val keyboardController = LocalSoftwareKeyboardController.current
     val maskedNumber = if (mobile.length >= 4) "${mobile.take(2)}XXXXXX${mobile.takeLast(2)}" else "98XXXXXX42"
 
     OtpSmsConsentListener(consentRestartKey) { code ->
         otp = code
         verificationError = null
+    }
+
+    LaunchedEffect(Unit) {
+        delay(250)
+        otpFocusRequester.requestFocus()
+        keyboardController?.show()
     }
 
     BackHandler(onBack = onBack)
@@ -6345,6 +6357,7 @@ private fun OtpVerificationScreen(mobile: String, onVerified: (String,(String?) 
                         BasicTextField(
                             value = otp,
                             onValueChange = { otp = it.filter(Char::isDigit).take(6) },
+                            modifier = Modifier.fillMaxWidth().focusRequester(otpFocusRequester),
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                             cursorBrush = androidx.compose.ui.graphics.SolidColor(Color.Transparent),
                             decorationBox = { innerTextField ->
@@ -6352,7 +6365,9 @@ private fun OtpVerificationScreen(mobile: String, onVerified: (String,(String?) 
                                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(if (compact) 6.dp else 8.dp)) {
                                         repeat(6) { index -> OtpCell(otp.getOrNull(index), index == otp.length, compact) }
                                     }
-                                    Box(Modifier.size(1.dp)) { innerTextField() }
+                                    // Keep the real editable control over the entire row so
+                                    // every OTP cell is a reliable keyboard/focus target.
+                                    Box(Modifier.matchParentSize().alpha(0f)) { innerTextField() }
                                 }
                             }
                         )
