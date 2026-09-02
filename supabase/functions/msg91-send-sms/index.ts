@@ -108,8 +108,9 @@ Deno.serve(async (request) => {
       return errorResponse("SMS provider could not send the code", 502);
     }
 
-    // Supabase Send SMS hooks require no response body on success.
-    return new Response(null, { status: 200 });
+    // Return explicit JSON because Supabase Auth validates the hook response
+    // content type even though the Send SMS hook has no output payload.
+    return Response.json({}, { status: 200 });
   } catch (error) {
     console.error("MSG91 Send SMS request failed", {
       reason: error instanceof Error ? error.message : "request failed",
