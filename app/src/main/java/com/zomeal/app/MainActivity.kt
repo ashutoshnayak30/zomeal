@@ -6245,7 +6245,13 @@ private fun OtpVerificationScreen(mobile: String, onVerified: (String,(String?) 
     var secondsRemaining by rememberSaveable { mutableIntStateOf(24) }
     var verifying by rememberSaveable { mutableStateOf(false) }
     var verificationError by rememberSaveable { mutableStateOf<String?>(null) }
+    var consentRestartKey by rememberSaveable { mutableIntStateOf(0) }
     val maskedNumber = if (mobile.length >= 4) "${mobile.take(2)}XXXXXX${mobile.takeLast(2)}" else "98XXXXXX42"
+
+    OtpSmsConsentListener(consentRestartKey) { code ->
+        otp = code
+        verificationError = null
+    }
 
     BackHandler(onBack = onBack)
     LaunchedEffect(secondsRemaining) {
@@ -6359,7 +6365,7 @@ private fun OtpVerificationScreen(mobile: String, onVerified: (String,(String?) 
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text("Didn't receive the OTP?", color = Muted, fontSize = 10.sp)
                         TextButton(
-                            onClick = { secondsRemaining = 30; otp = "" },
+                            onClick = { secondsRemaining = 30; otp = ""; consentRestartKey += 1 },
                             enabled = secondsRemaining == 0,
                             contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
                         ) {

@@ -394,6 +394,7 @@ private fun Benefit(value: String, label: String) {
 @Composable
 private fun OtpScreen(phone: String, loading: Boolean, error: String?, onBack: () -> Unit, onVerified: (String) -> Unit) {
     var otp by rememberSaveable { mutableStateOf("") }
+    OtpSmsConsentListener { code -> otp = code }
     Column(Modifier.fillMaxSize().background(Color.White).windowInsetsPadding(WindowInsets.safeDrawing).padding(24.dp)) {
         Text("‹  Back", color = Brand, fontWeight = FontWeight.Bold, modifier = Modifier.clickable(onClick = onBack).padding(vertical = 12.dp))
         Spacer(Modifier.height(45.dp))
@@ -416,7 +417,7 @@ private fun OtpScreen(phone: String, loading: Boolean, error: String?, onBack: (
             if (loading) CircularProgressIndicator(Modifier.size(20.dp), color = Color.White, strokeWidth = 2.dp) else Text("Verify & continue", fontWeight = FontWeight.Bold)
         }
         error?.let { Text(it, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center, fontSize = 11.sp, modifier = Modifier.fillMaxWidth().padding(top = 10.dp)) }
-        Text(if (BuildConfig.DEVELOPMENT_AUTH && phone in setOf("9999999999","7000000001","7000000002","7000000003","7000000004","7000000005")) "Development testing: use OTP 123456" else "Enter the verification code sent by SMS.", color = Muted, fontSize = 11.sp, modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 13.dp))
+        Text(if (BuildConfig.DEVELOPMENT_AUTH && phone in setOf("9999999999","7000000001","7000000002","7000000003","7000000004","7000000005")) "Development testing: use OTP 123456" else "When the SMS arrives, approve Android's one-time prompt to fill the code automatically.", color = Muted, fontSize = 11.sp, textAlign = TextAlign.Center, modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 13.dp))
     }
 }
 
