@@ -5,6 +5,7 @@
 .kotlin/
 .android-build-home/
 .android-home/
+.android-agent/
 .gradle-home/
 .compile-stubs/
 /local.properties

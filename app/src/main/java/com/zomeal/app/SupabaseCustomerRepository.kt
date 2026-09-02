@@ -95,6 +95,16 @@ internal class SupabaseCustomerRepository(context:Context) {
             }
         }
     }
+    fun beginAuthentication(phone:String,callback:(CustomerAuthResult)->Unit){
+        if(BuildConfig.DEVELOPMENT_AUTH){
+            main.post{callback(CustomerAuthResult(true,"Use development OTP 123456"))}
+            return
+        }
+        authRequest(
+            "/auth/v1/otp",
+            JSONObject().put("phone","+91$phone").put("create_user",true)
+        ){_,error->callback(CustomerAuthResult(error==null,error))}
+    }
     private fun bearer():String=customerAccessToken.ifBlank{anonKey}
 
     private fun refreshSessionBlocking():Boolean{

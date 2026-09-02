@@ -13,6 +13,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -419,6 +421,8 @@ private fun ProviderListScreen() {
     var serviceUnavailable by rememberSaveable { mutableStateOf(false) }
     var showLogin by rememberSaveable { mutableStateOf(false) }
     var pendingIsLogin by rememberSaveable { mutableStateOf(false) }
+    var authenticationLoading by rememberSaveable { mutableStateOf(false) }
+    var authenticationError by rememberSaveable { mutableStateOf<String?>(null) }
     var showNoSubscriptionHome by rememberSaveable { mutableStateOf(false) }
     var browseMode by rememberSaveable { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
@@ -597,7 +601,12 @@ private fun ProviderListScreen() {
                         }
                     }
                 },
-                onBack = { awaitingOtp = false }
+                onBack = { awaitingOtp = false },
+                onResend = { complete ->
+                    marketplaceRepository.beginAuthentication(pendingMobile){ result ->
+                        complete(if(result.success)null else result.message?:"Unable to resend OTP")
+                    }
+                }
             )
         } else {
             if (showLogin) LoginScreen(
@@ -606,17 +615,29 @@ private fun ProviderListScreen() {
                     pendingMobile = mobile
                     pendingPincode = "751030"
                     pendingIsLogin = true
-                    awaitingOtp = true
+                    authenticationLoading = true
+                    authenticationError = null
+                    marketplaceRepository.beginAuthentication(mobile){ result ->
+                        authenticationLoading = false
+                        if(result.success)awaitingOtp = true else authenticationError = result.message?:"Unable to send OTP"
+                    }
                 },
-                onCreateAccount = { showLogin = false }
+                onCreateAccount = { showLogin = false; authenticationError = null },
+                submitting = authenticationLoading,
+                error = authenticationError
             ) else SignupScreen(onContinue = { fullName, mobile, pincode, referralCode ->
                 pendingFullName = fullName
                 pendingMobile = mobile
                 pendingPincode = pincode
                 pendingReferralCode = referralCode
                 pendingIsLogin = false
-                awaitingOtp = true
-            }, onLogin = { showLogin = true })
+                authenticationLoading = true
+                authenticationError = null
+                marketplaceRepository.beginAuthentication(mobile){ result ->
+                    authenticationLoading = false
+                    if(result.success)awaitingOtp = true else authenticationError = result.message?:"Unable to send OTP"
+                }
+            }, onLogin = { showLogin = true; authenticationError = null }, submitting = authenticationLoading, error = authenticationError)
         }
         return
     }
@@ -5701,7 +5722,7 @@ private fun SubscriberQuickActions(onPause: () -> Unit, onPlan: () -> Unit, onOr
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun LoginScreen(onContinue: (String) -> Unit, onCreateAccount: () -> Unit) {
+private fun LoginScreen(onContinue: (String) -> Unit, onCreateAccount: () -> Unit, submitting:Boolean = false, error:String? = null) {
     var mobile by rememberSaveable { mutableStateOf("") }
     val valid = mobile.length == 10
     BoxWithConstraints(
@@ -5760,13 +5781,14 @@ private fun LoginScreen(onContinue: (String) -> Unit, onCreateAccount: () -> Uni
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Button(
                             onClick = { onContinue(mobile) },
-                            enabled = valid,
+                            enabled = valid && !submitting,
                             modifier = Modifier.fillMaxWidth().height(if (compact) 54.dp else 58.dp),
                             shape = RoundedCornerShape(17.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = Brand, disabledContainerColor = Border)
                         ) {
-                            Text("Send OTP", fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.weight(1f)); Icon(Icons.Filled.ArrowForward, null, modifier = Modifier.size(17.dp))
+                            Text(if(submitting)"Sending OTP…" else "Send OTP", fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.weight(1f)); if(submitting) CircularProgressIndicator(Modifier.size(17.dp),color=Color.White,strokeWidth=2.dp) else Icon(Icons.Filled.ArrowForward, null, modifier = Modifier.size(17.dp))
                         }
+                        error?.let { Text(it,color=Color(0xFFD64545),fontSize=10.sp,modifier=Modifier.fillMaxWidth()) }
                         Spacer(Modifier.height(10.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) { Text("New to Zomeal? ", color = Muted, fontSize = 10.sp); Text("Create an account", color = BrandDark, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clickable(onClick = onCreateAccount).padding(3.dp)) }
                         Spacer(Modifier.height(7.dp))
@@ -5780,12 +5802,11 @@ private fun LoginScreen(onContinue: (String) -> Unit, onCreateAccount: () -> Uni
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun SignupScreen(onContinue: (String, String, String, String) -> Unit, onLogin: () -> Unit) {
+private fun SignupScreen(onContinue: (String, String, String, String) -> Unit, onLogin: () -> Unit, submitting:Boolean = false, error:String? = null) {
     var fullName by rememberSaveable { mutableStateOf("") }
     var mobile by rememberSaveable { mutableStateOf("") }
     var pincode by rememberSaveable { mutableStateOf("") }
     var referralCode by rememberSaveable { mutableStateOf("") }
-    var useCurrentLocation by rememberSaveable { mutableStateOf(true) }
     val valid = fullName.trim().length >= 2 && mobile.length == 10 && pincode.length == 6
 
     BoxWithConstraints(
@@ -5806,8 +5827,7 @@ private fun SignupScreen(onContinue: (String, String, String, String) -> Unit, o
                 shadowElevation = 8.dp
             ) {
                 Column(
-                    modifier = Modifier.fillMaxSize().padding(horizontal = if (compact) 15.dp else 18.dp, vertical = if (compact) 10.dp else 14.dp),
-                    verticalArrangement = Arrangement.SpaceBetween
+                    modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = if (compact) 15.dp else 18.dp, vertical = if (compact) 10.dp else 14.dp)
                 ) {
                     Column(verticalArrangement = Arrangement.spacedBy(if (compact) 6.dp else 9.dp)) {
                         RegistrationFieldHeader(Icons.Outlined.Person, "Full Name", "Enter your full name", compact)
@@ -5853,47 +5873,40 @@ private fun SignupScreen(onContinue: (String, String, String, String) -> Unit, o
                             )
                         }
 
-                        TextField(
-                            value = referralCode,
-                            onValueChange = { referralCode = it.uppercase().filter(Char::isLetterOrDigit).take(10) },
-                            modifier = Modifier.fillMaxWidth().height(if (compact) 46.dp else 52.dp),
-                            placeholder = { Text("Referral code (optional)", fontSize = if (compact) 10.sp else 11.sp) },
-                            leadingIcon = { Icon(Icons.Outlined.CardGiftcard, null, tint = Brand, modifier = Modifier.size(18.dp)) },
-                            supportingText = if (compact) null else ({ Text("Rewards unlock after your first successful paid subscription.", fontSize = 7.sp) }),
-                            singleLine = true,
-                            shape = RoundedCornerShape(13.dp),
-                            colors = signupFieldColors()
-                        )
-
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Surface(color = Mist, shape = CircleShape) {
-                                Icon(Icons.Outlined.MyLocation, null, tint = Brand, modifier = Modifier.padding(8.dp).size(18.dp))
+                        Surface(color=Mist,shape=RoundedCornerShape(16.dp),border=androidx.compose.foundation.BorderStroke(1.dp,Border)) {
+                            Column(Modifier.fillMaxWidth().padding(horizontal=12.dp,vertical=10.dp)) {
+                                Row(verticalAlignment=Alignment.CenterVertically) {
+                                    Surface(color=Color.White,shape=CircleShape){ Icon(Icons.Outlined.CardGiftcard,null,tint=Brand,modifier=Modifier.padding(7.dp).size(17.dp)) }
+                                    Spacer(Modifier.width(9.dp))
+                                    Column { Text("Have a referral code?",color=Ink,fontSize=if(compact)10.sp else 12.sp,fontWeight=FontWeight.ExtraBold); Text("Optional — rewards apply after your first paid plan",color=Muted,fontSize=if(compact)7.sp else 8.sp) }
+                                }
+                                Spacer(Modifier.height(7.dp))
+                                TextField(
+                                    value=referralCode,
+                                    onValueChange={ referralCode=it.uppercase().filter(Char::isLetterOrDigit).take(10) },
+                                    modifier=Modifier.fillMaxWidth().height(if(compact)44.dp else 50.dp),
+                                    placeholder={ Text("Enter code",fontSize=if(compact)10.sp else 11.sp) },
+                                    singleLine=true,
+                                    shape=RoundedCornerShape(12.dp),
+                                    colors=signupFieldColors()
+                                )
                             }
-                            Spacer(Modifier.width(9.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text("Use my current location", color = Ink, fontSize = if (compact) 11.sp else 12.sp, fontWeight = FontWeight.Bold)
-                                Text("Detect only your pincode", color = Muted, fontSize = 8.sp)
-                            }
-                            Switch(
-                                checked = useCurrentLocation,
-                                onCheckedChange = { useCurrentLocation = it },
-                                modifier = Modifier.scale(.78f),
-                                colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = Color(0xFF42A62A))
-                            )
                         }
                     }
 
+                    Spacer(Modifier.height(if(compact)10.dp else 14.dp))
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Button(
                             onClick = { onContinue(fullName.trim(), mobile, pincode, referralCode.trim()) },
-                            enabled = valid,
+                            enabled = valid && !submitting,
                             modifier = Modifier.fillMaxWidth().height(if (compact) 54.dp else 60.dp),
                             shape = RoundedCornerShape(17.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = Brand, disabledContainerColor = Border)
                         ) {
-                            Text("Create Account", fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.weight(1f))
-                            Icon(Icons.Filled.ArrowForward, null, modifier = Modifier.size(17.dp))
+                            Text(if(submitting)"Sending OTP…" else "Create Account", fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.weight(1f))
+                            if(submitting)CircularProgressIndicator(Modifier.size(17.dp),color=Color.White,strokeWidth=2.dp) else Icon(Icons.Filled.ArrowForward, null, modifier = Modifier.size(17.dp))
                         }
+                        error?.let { Text(it,color=Color(0xFFD64545),fontSize=10.sp,lineHeight=14.sp,modifier=Modifier.fillMaxWidth().padding(top=6.dp)) }
                         Spacer(Modifier.height(7.dp))
                         Row(horizontalArrangement = Arrangement.Center) {
                             Text("Already have an account? ", color = Muted, fontSize = 9.sp)
@@ -6240,12 +6253,13 @@ private fun BrowsePossibilities(compact: Boolean) {
 }
 
 @Composable
-private fun OtpVerificationScreen(mobile: String, onVerified: (String,(String?) -> Unit) -> Unit, onBack: () -> Unit) {
+private fun OtpVerificationScreen(mobile: String, onVerified: (String,(String?) -> Unit) -> Unit, onBack: () -> Unit, onResend: ((String?) -> Unit) -> Unit) {
     var otp by rememberSaveable { mutableStateOf("") }
     var secondsRemaining by rememberSaveable { mutableIntStateOf(24) }
     var verifying by rememberSaveable { mutableStateOf(false) }
     var verificationError by rememberSaveable { mutableStateOf<String?>(null) }
     var consentRestartKey by rememberSaveable { mutableIntStateOf(0) }
+    var resending by rememberSaveable { mutableStateOf(false) }
     val maskedNumber = if (mobile.length >= 4) "${mobile.take(2)}XXXXXX${mobile.takeLast(2)}" else "98XXXXXX42"
 
     OtpSmsConsentListener(consentRestartKey) { code ->
@@ -6365,11 +6379,20 @@ private fun OtpVerificationScreen(mobile: String, onVerified: (String,(String?) 
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text("Didn't receive the OTP?", color = Muted, fontSize = 10.sp)
                         TextButton(
-                            onClick = { secondsRemaining = 30; otp = ""; consentRestartKey += 1 },
-                            enabled = secondsRemaining == 0,
+                            onClick = {
+                                if(!resending){
+                                    resending=true; verificationError=null
+                                    onResend { resendError ->
+                                        resending=false
+                                        if(resendError==null){ secondsRemaining=30; otp=""; consentRestartKey+=1 }
+                                        else verificationError=resendError
+                                    }
+                                }
+                            },
+                            enabled = secondsRemaining == 0 && !resending,
                             contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
                         ) {
-                            Text("Resend OTP", color = if (secondsRemaining == 0) BrandDark else Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text(if(resending)"Sending…" else "Resend OTP", color = if (secondsRemaining == 0) BrandDark else Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
                         Spacer(Modifier.height(if (compact) 6.dp else 9.dp))
                         Button(

@@ -14,7 +14,7 @@ type Msg91Response = {
   message?: string;
 };
 
-const MSG91_FLOW_URL = "https://control.msg91.com/api/v5/flow/";
+const MSG91_FLOW_URL = "https://api.msg91.com/api/v5/flow/";
 
 function errorResponse(message: string, status: number): Response {
   return Response.json(
