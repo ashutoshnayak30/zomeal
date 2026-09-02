@@ -45,6 +45,7 @@ internal data class CustomerAuthResult(val success:Boolean,val message:String?=n
 
 internal class SupabaseCustomerRepository(context:Context) {
     companion object { @Volatile private var customerAccessToken:String="" }
+    private val developmentPhones=setOf("9999999999")
     private val prefs=context.applicationContext.getSharedPreferences("zomeal_customer_session",Context.MODE_PRIVATE)
     private val main=Handler(Looper.getMainLooper())
     private val baseUrl=BuildConfig.SUPABASE_URL.trimEnd('/')
@@ -74,7 +75,7 @@ internal class SupabaseCustomerRepository(context:Context) {
         }
     }
     fun completeAuthentication(phone:String,token:String,callback:(CustomerAuthResult)->Unit){
-        if(BuildConfig.DEVELOPMENT_AUTH){
+        if(BuildConfig.DEVELOPMENT_AUTH&&phone in developmentPhones){
             if(token!="123456"){callback(CustomerAuthResult(false,"For testing, enter OTP 123456"));return}
             val existingRefresh=prefs.getString("refresh_token",null).orEmpty()
             if(existingRefresh.isNotBlank()){
@@ -96,7 +97,7 @@ internal class SupabaseCustomerRepository(context:Context) {
         }
     }
     fun beginAuthentication(phone:String,callback:(CustomerAuthResult)->Unit){
-        if(BuildConfig.DEVELOPMENT_AUTH){
+        if(BuildConfig.DEVELOPMENT_AUTH&&phone in developmentPhones){
             main.post{callback(CustomerAuthResult(true,"Use development OTP 123456"))}
             return
         }
