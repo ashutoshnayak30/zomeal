@@ -21,10 +21,11 @@ button,input,select,textarea{font-size:14px;line-height:1.4}
 .photo-library p,.photo-library small,.media-upload label,.media-upload small,.delivery-list p,.empty-inline{font-size:12px;line-height:1.45}
 .toast{font-size:13px;line-height:1.45}
 
-/* Keep long admin navigation usable on every desktop height. */
-.sidebar{overflow-y:auto;overflow-x:hidden;min-height:0;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:#cbd8cf transparent}
+/* One scroll owner: a nested nav with overscroll containment traps trackpad
+   gestures even when its content expands to fit. Scroll the entire sidebar. */
+.sidebar{height:100vh;height:100dvh;overflow-y:auto;overflow-x:hidden;min-height:0;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:#cbd8cf transparent}
 .sidebar .brand,.sidebar-foot{flex:0 0 auto}
-.sidebar nav{flex:1 0 auto;min-height:max-content;padding-right:5px}
+.sidebar nav{flex:1 0 auto;min-height:max-content;padding-right:5px;overflow:visible;overflow-x:visible;overflow-y:visible;overscroll-behavior:auto}
 .sidebar::-webkit-scrollbar{width:7px}
 .sidebar::-webkit-scrollbar-track{background:transparent}
 .sidebar::-webkit-scrollbar-thumb{background:#cbd8cf;border-radius:999px}

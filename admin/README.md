@@ -12,3 +12,7 @@ Cloudflare Pages deployment settings:
 - Custom domain: `admin.zomeal.in`
 
 Sensitive writes use role-checked PostgreSQL functions and are recorded in `audit_logs`. Without a configured public key the panel stays in clearly labelled demo mode.
+
+Super Administrator and Administrator account lookup and guarded deletion: see
+[`docs/super-admin-account-explorer.md`](../docs/super-admin-account-explorer.md)
+for permissions, deletion limits, deployment and isolated tests.

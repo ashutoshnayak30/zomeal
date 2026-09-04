@@ -1,0 +1,40 @@
+#accountsView {font-size:1rem;line-height:1.55}
+#accountsNav.hidden {display:none}
+.account-search {display:flex;align-items:end;gap:1rem;padding:1.4rem;margin-bottom:1.2rem}
+.account-search label {flex:1;font-weight:600}
+.account-search input,.account-delete input,.account-delete textarea {display:block;width:100%;padding:.85rem;margin-top:.4rem;border:1px solid #b9ccc0;border-radius:10px;font:inherit;color:#17352b;background:white;box-sizing:border-box}
+.account-search button,.account-actions button,.account-pages button,.account-delete button,.account-results button,.account-cleanup button {padding:.7rem 1rem;min-height:44px;border:1px solid #b9ccc0;border-radius:10px;font:inherit;cursor:pointer;background:white;color:#08783f}
+#accountsView button:disabled,.account-delete button:disabled {opacity:.5;cursor:not-allowed}
+#accountsView button:focus-visible,.account-delete :focus-visible {outline:3px solid #08783f;outline-offset:3px}
+.account-layout {display:grid;grid-template-columns:minmax(230px,300px) minmax(0,1fr);gap:1.4rem;align-items:start}
+.account-results {padding:1rem;display:grid;gap:.75rem}
+.account-results button {text-align:left;overflow-wrap:anywhere}
+.account-results button[aria-pressed=true] {background:#e5f5eb;border:2px solid #08783f}
+.account-results strong,.account-results small {display:block}
+.account-results small {font-size:.875rem;color:#50635a}
+.account-card {padding:1.4rem;margin-bottom:1rem;min-width:0}
+.account-card h3 {margin:0 0 .8rem}
+.account-id {overflow-wrap:anywhere;color:#50635a;font-size:.875rem}
+.account-actions,.account-pages {display:flex;gap:.6rem;align-items:center;flex-wrap:wrap;margin-top:1rem}
+.account-stats {display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:.8rem;margin-bottom:1rem}
+.account-stats article {background:#edf7f0;border:1px solid #d7e9dc;border-radius:12px;padding:1rem}
+.account-stats strong {display:block;font-size:1.4rem;color:#08783f}
+.account-fields {display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:.8rem;margin:0}
+.account-fields div {min-width:0;overflow-wrap:anywhere}
+.account-fields dt {color:#50635a;font-size:.875rem}
+.account-fields dd {margin:0;white-space:pre-wrap}
+.account-table {overflow-x:auto}
+.account-table table {border-collapse:collapse;width:100%;font-size:.95rem}
+.account-table th,.account-table td {padding:.7rem;text-align:left;border-bottom:1px solid #e1e9e3;vertical-align:top;max-width:340px;overflow-wrap:anywhere}
+.account-table th {color:#50635a}
+.account-card details {border-top:1px solid #e1e9e3;padding-top:.7rem;margin-top:.7rem}
+.account-card summary {cursor:pointer;font-weight:600;padding:.4rem 0}
+.account-notice {padding:1rem;background:#edf7f0;border-radius:10px;margin-bottom:1rem}
+.account-error {color:#922b25;background:#fff0ef;padding:1rem;border-radius:10px}
+.account-danger {color:#a22b26!important;border-color:#e1ada9!important}
+.account-delete {border:1px solid #cbd9cf;border-radius:18px;max-width:620px;width:calc(100% - 2rem);max-height:85vh;padding:1.5rem;overflow:auto;color:#17352b}
+.account-delete::backdrop {background:#10271c99}
+.account-delete label {display:block;margin:1rem 0}
+.account-cleanup {margin-bottom:1rem}
+@media(max-width:1000px){.account-layout{grid-template-columns:1fr}.account-results{grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}}
+@media(max-width:600px){.account-search{flex-direction:column;align-items:stretch}.account-fields{grid-template-columns:1fr}.account-card{padding:1rem}}

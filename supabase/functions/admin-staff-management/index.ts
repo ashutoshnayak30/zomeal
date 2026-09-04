@@ -66,6 +66,14 @@ Deno.serve(async (request) => {
     if (callerRoleError) throw callerRoleError;
     if (!callerRole) return jsonResponse({ message: "Only an ADMIN can manage staff access" }, 403);
 
+    // Do not let an ordinary admin promote themselves into the data-deletion role.
+    const { data: callerTitle, error: callerTitleError } = await client.from("admin_staff_profiles")
+      .select("staff_role").eq("user_id", caller.id).maybeSingle();
+    if (callerTitleError) throw callerTitleError;
+    if (["invite", "change_role", "revoke", "cancel_invite"].includes(action) && callerTitle?.staff_role !== "SUPER_ADMIN") {
+      return jsonResponse({ message: "Only a Super Administrator can change staff access" }, 403);
+    }
+
     if (action === "list") {
       const { data: roleRows, error: roleError } = await client
         .from("user_roles")
@@ -161,6 +169,7 @@ Deno.serve(async (request) => {
       const userId = String(body.user_id || "");
       const staffRole = body.staff_role;
       if (!userId || !validStaffTitle(staffRole)) return jsonResponse({ message: "A valid staff member and role are required" }, 400);
+      if (userId === caller.id && staffRole !== "SUPER_ADMIN") return jsonResponse({ message: "You cannot remove your own Super Administrator access" }, 400);
       const role = permissionGroup(staffRole);
       await client.from("user_roles").delete().eq("user_id", userId).in("role", [...STAFF_ROLES]);
       const { error } = await client.from("user_roles").insert({ user_id: userId, role });

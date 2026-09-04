@@ -59,6 +59,9 @@ verify_jwt = false
 [functions.admin-staff-management]
 verify_jwt = true
 
+[functions.admin-account-cleanup]
+verify_jwt = true
+
 [functions.msg91-send-sms]
 # Supabase Auth calls this before a user JWT exists. The function verifies the
 # signed Standard Webhooks headers instead.
