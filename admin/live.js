@@ -18,8 +18,8 @@ async function manageStaff(action='list',payload={}){return request('/functions/
 async function accountAccess(){return request('/rest/v1/rpc/can_manage_accounts',{method:'POST',body:{}})}
 async function accountSearch(search_text,page_number=0){return request('/rest/v1/rpc/super_admin_account_search',{method:'POST',body:{search_text,page_number}})}
 async function lowWalletCustomers(search_text='',page_number=0){return request('/rest/v1/rpc/admin_low_wallet_customers',{method:'POST',body:{search_text,page_number}})}
-async function notifyLowWalletCustomer(target_customer){return request('/rest/v1/rpc/admin_notify_low_wallet_customer',{method:'POST',body:{target_customer}})}
-async function notifyAllLowWalletCustomers(){return request('/rest/v1/rpc/admin_notify_all_low_wallet_customers',{method:'POST',body:{}})}
+async function notifyLowWalletCustomer(target_customer,target_title,target_message){return request('/rest/v1/rpc/admin_notify_low_wallet_customer_custom',{method:'POST',body:{target_customer,target_title,target_message}})}
+async function notifyAllLowWalletCustomers(target_title,target_message){return request('/rest/v1/rpc/admin_notify_all_low_wallet_customers_custom',{method:'POST',body:{target_title,target_message}})}
 async function sendPushNotification(payload){return request('/functions/v1/send-fcm-notification',{method:'POST',body:payload})}
 async function accountDetail(target_kind,target_id,page_number=0){return request('/rest/v1/rpc/super_admin_account_detail',{method:'POST',body:{target_kind,target_id,page_number}})}
 async function accountDeletePreview(target_kind,target_id){return request('/rest/v1/rpc/super_admin_deletion_preview',{method:'POST',body:{target_kind,target_id}})}
