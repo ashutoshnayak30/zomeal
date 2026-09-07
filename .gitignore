@@ -6,6 +6,7 @@
 .android-build-home/
 .android-home/
 .android-agent/
+.android-user/
 .gradle-home/
 .compile-stubs/
 /local.properties
