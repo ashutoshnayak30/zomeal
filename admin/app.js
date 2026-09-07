@@ -48,7 +48,53 @@ async function editMedia(media){const alt=prompt('Photo description',media.alt_t
 let selectedRequest=null,selectedWorkspace=null,editingProviderId=null;
 async function openProviderDetail(row={}){selectedRequest=row;hideViews();detailView.classList.remove('hidden');title.textContent='Review provider';crumb.textContent=`Providers / ${row.name||'Provider'}`;weeklyMenus.lunch=[];weeklyMenus.dinner=[];renderWeeklyMenu();document.querySelector('#photoGallery').innerHTML='<div class="loading-row">Loading photo library…</div>';if(ZomealAPI.configured&&row.id&&row.type==='PROVIDER'){try{selectedWorkspace=await ZomealAPI.providerWorkspace(row.id);hydrateProviderDetail(selectedWorkspace);await loadProviderCommission(row.id)}catch(error){showToast(error.message)}}window.scrollTo(0,0)}
 async function loadProviderCommission(providerId){const c=await ZomealAPI.providerCommission(providerId),row=detailView.querySelector('.tag-row');row.querySelector('#commissionTag')?.remove();row.querySelector('#editCommission')?.remove();row.insertAdjacentHTML('beforeend',`<span id="commissionTag">Commission: <b>${Number(c.rate_percent).toFixed(2).replace(/\.00$/,'')}%</b>${c.agreed_by_provider?' · Agreed':' · Default'}</span><button id="editCommission" class="link">Edit commission</button>`);document.querySelector('#editCommission').onclick=async()=>{const rate=Number(prompt('Negotiated commission percentage (example: 14 or 12.5):',c.rate_percent));if(!Number.isFinite(rate)||rate<0||rate>100)return showToast('Enter a percentage from 0 to 100');const note=prompt('Negotiation/approval note:')?.trim();if(!note)return showToast('A negotiation note is required');const agreed=confirm('Has the provider agreed to this commission?');try{await ZomealAPI.setProviderCommission(providerId,Math.round(rate*100),note,agreed);showToast('Provider commission updated for future subscriptions');await loadProviderCommission(providerId)}catch(error){showToast(error.message)}}}
-function hydrateProviderDetail(w){if(!w?.provider)return;const p=w.provider;detailView.querySelector('.provider-banner h2').textContent=p.display_name;detailView.querySelector('.provider-banner>div:nth-child(2)>p').textContent=`${p.dietary_type.replace('_',' ')} · ${p.business_city||''}`;detailView.querySelector('.tag-row').innerHTML=`<span>Owner: ${p.contact_person_name||'—'}</span><span>${p.support_phone||'—'}</span><span>${p.status}</span>`;detailView.querySelector('.pincode-list').innerHTML=(w.service_areas||[]).map(a=>`<span>${a.pincode}</span>`).join('');const menuVersion=[...(w.menus||[])].sort((a,b)=>(b.days?.length||0)-(a.days?.length||0))[0],menu=menuVersion?.days||[];weeklyMenus.lunch=menu.filter(d=>d.meal_slot==='LUNCH').sort((a,b)=>a.day-b.day).map(d=>[weekDays[d.day-1]?.slice(0,3),d.choices.filter(c=>c.category==='MAIN_COURSE').map(c=>c.name).join(' / '),d.choices.filter(c=>c.category!=='MAIN_COURSE').map(c=>c.name).join(' · ')]);weeklyMenus.dinner=menu.filter(d=>d.meal_slot==='DINNER').sort((a,b)=>a.day-b.day).map(d=>[weekDays[d.day-1]?.slice(0,3),d.choices.filter(c=>c.category==='MAIN_COURSE').map(c=>c.name).join(' / '),d.choices.filter(c=>c.category!=='MAIN_COURSE').map(c=>c.name).join(' · ')]);const activeMeal=document.querySelector('.meal-tabs button.active')?.dataset.meal||'lunch';renderWeeklyMenu(activeMeal);renderPhotos(w.media||[]);renderDeliveryPeople(w.delivery_people||[]);const items=[...new Map(menu.flatMap(d=>d.choices||[]).filter(i=>i.item_id).map(i=>[i.item_id,i])).values()];document.querySelector('#mediaItem').innerHTML='<option value="">Choose an item</option>'+items.map(i=>`<option value="${i.item_id}">${i.name}</option>`).join('');const missing=w.readiness?.missing_requirements||[];detailView.querySelector('.checklist').innerHTML='<h3>Activation checklist</h3>'+(missing.length?missing.map(x=>`<div class="missing"><span>!</span><p><strong>${x}</strong><small>Required before standard activation</small></p></div>`).join(''):'<div><span>✓</span><p><strong>Activation ready</strong><small>All mandatory operational data is complete.</small></p></div>')}
+function hydrateProviderDetail(w){
+  if(!w?.provider)return;
+  const p=w.provider,status=String(p.status||'DRAFT').toUpperCase(),isActive=status==='ACTIVE';
+  const dietary={VEG:'Pure Vegetarian',NON_VEG:'Non-Vegetarian',BOTH:'Veg & Non-Veg',VEGAN:'Vegan'}[p.dietary_type]||String(p.dietary_type||'Not specified').replaceAll('_',' ');
+  title.textContent=isActive?'Provider details':'Review provider';
+  crumb.textContent=`Providers / ${p.display_name||'Provider'}`;
+  detailView.querySelector('.provider-banner h2').textContent=p.display_name||'Unnamed provider';
+  detailView.querySelector('.provider-mark').textContent=String(p.display_name||'?').trim().split(/\s+/).map(x=>x[0]).slice(0,2).join('').toUpperCase();
+  detailView.querySelector('.provider-banner>div:nth-child(2)>p').textContent=`${dietary} · ${p.business_city||'City not saved'}`;
+  const statusChip=detailView.querySelector('.provider-banner .review-chip');
+  statusChip.className=`state-chip ${status.toLowerCase()}`;
+  statusChip.textContent=isActive?'Active provider':status.replaceAll('_',' ').toLowerCase().replace(/^./,x=>x.toUpperCase());
+  detailView.querySelector('.tag-row').innerHTML=`<span>Owner: ${safeText(p.contact_person_name||'—')}</span><span>${safeText(p.support_phone||'—')}</span><span>${safeText(status)}</span>`;
+  document.querySelector('#approveProvider').hidden=isActive;
+  document.querySelector('#rejectProvider').hidden=isActive;
+  const readiness=detailView.querySelector('.provider-banner .readiness');
+  readiness.querySelector('strong').textContent=isActive?'ACTIVE':`${Number(w.readiness?.readiness_percent??100)}%`;
+  readiness.querySelector('small').textContent=isActive?'Provider is live':'Activation readiness';
+
+  const infoCells=detailView.querySelectorAll('.info-grid>div');
+  if(infoCells[0])infoCells[0].innerHTML=`<small>Business address</small><strong>${safeText([p.business_address_line,p.business_city,p.business_state,p.business_pincode].filter(Boolean).join(', ')||'Not saved')}</strong>`;
+  if(infoCells[1])infoCells[1].innerHTML=`<small>Dietary category</small><strong>${safeText(dietary)}</strong>`;
+  const approvedAreas=(w.service_areas||[]).filter(a=>a.status==='APPROVED');
+  detailView.querySelector('.pincode-list').innerHTML=approvedAreas.length?approvedAreas.map(a=>`<span>${safeText(a.pincode)}</span>`).join(''):'<span>None approved</span>';
+  if(infoCells[3])infoCells[3].style.display='none';
+
+  const packages=(w.packages||[]).filter(pkg=>pkg.is_active);
+  const packageTable=detailView.querySelector('.package-table');
+  const packageRows=packages.map(pkg=>{
+    const prices=[...(pkg.prices||[])].sort((a,b)=>Number(b.version||0)-Number(a.version||0));
+    const price=prices.find(x=>x.status==='APPROVED'&&!x.effective_until)||prices.find(x=>x.status==='APPROVED')||prices[0];
+    const amount=price?money(price.total_price_paise):'Price pending';
+    return `<div class="package-row"><strong>${safeText(pkg.name||String(pkg.kind).replaceAll('_',' '))}</strong><span>${pkg.kind==='LUNCH_AND_DINNER'?'2 meals/day':'1 meal/day'}</span><span>${safeText(pkg.duration_days||30)} days</span><b>${safeText(amount)}</b></div>`;
+  }).join('');
+  packageTable.innerHTML='<div class="package-row heading"><span>Package</span><span>Meals</span><span>Duration</span><span>Price</span></div>'+packageRows;
+  packageTable.closest('.detail-card').querySelector('.complete-chip').textContent=`✓ ${packages.length} package${packages.length===1?'':'s'}`;
+
+  const menuVersion=[...(w.menus||[])].sort((a,b)=>(b.days?.length||0)-(a.days?.length||0))[0],menu=menuVersion?.days||[];
+  weeklyMenus.lunch=menu.filter(d=>d.meal_slot==='LUNCH').sort((a,b)=>a.day-b.day).map(d=>[weekDays[d.day-1]?.slice(0,3),d.choices.filter(c=>c.category==='MAIN_COURSE').map(c=>c.name).join(' / '),d.choices.filter(c=>c.category!=='MAIN_COURSE').map(c=>c.name).join(' · ')]);
+  weeklyMenus.dinner=menu.filter(d=>d.meal_slot==='DINNER').sort((a,b)=>a.day-b.day).map(d=>[weekDays[d.day-1]?.slice(0,3),d.choices.filter(c=>c.category==='MAIN_COURSE').map(c=>c.name).join(' / '),d.choices.filter(c=>c.category!=='MAIN_COURSE').map(c=>c.name).join(' · ')]);
+  renderWeeklyMenu(document.querySelector('.meal-tabs button.active')?.dataset.meal||'lunch');
+  renderPhotos(w.media||[]);renderDeliveryPeople(w.delivery_people||[]);
+  const items=[...new Map(menu.flatMap(d=>d.choices||[]).filter(i=>i.item_id).map(i=>[i.item_id,i])).values()];
+  document.querySelector('#mediaItem').innerHTML='<option value="">Choose an item</option>'+items.map(i=>`<option value="${i.item_id}">${safeText(i.name)}</option>`).join('');
+  const missing=w.readiness?.missing_requirements||[];
+  detailView.querySelector('.checklist').innerHTML='<h3>Activation checklist</h3>'+(isActive?'<div><span>✓</span><p><strong>Provider active</strong><small>This provider is approved and visible to eligible customers.</small></p></div>':missing.length?missing.map(x=>`<div class="missing"><span>!</span><p><strong>${safeText(x)}</strong><small>Required before standard activation</small></p></div>`).join(''):'<div><span>✓</span><p><strong>Activation ready</strong><small>All mandatory operational data is complete.</small></p></div>');
+}
 async function reviewRow(row,decision){if(!ZomealAPI.configured)return showToast('Configure Supabase to perform approvals');const reason=decision==='APPROVED'?null:(prompt('Reason for this decision:')||'');if(decision!=='APPROVED'&&!reason)return;try{await ZomealAPI.review(row.type,row.id,decision,reason);await loadLiveQueue();navigate(({PROVIDER:'providers',PRICE:'prices',SERVICE_AREA:'areas',MENU:'menus',MEDIA:'photos'})[row.type]);showToast(`${row.name} ${decision.toLowerCase()}`)}catch(error){showToast(error.message)}}
 document.querySelector('#backToQueue').onclick=()=>navigate('providers');document.querySelectorAll('.meal-tabs button').forEach(b=>b.onclick=()=>{document.querySelectorAll('.meal-tabs button').forEach(x=>x.classList.remove('active'));b.classList.add('active');renderWeeklyMenu(b.dataset.meal)});
 document.querySelector('#closePhoto').onclick=()=>document.querySelector('#photoModal').classList.add('hidden');
