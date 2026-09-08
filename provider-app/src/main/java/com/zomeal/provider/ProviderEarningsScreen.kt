@@ -100,10 +100,10 @@ fun ProviderEarningsScreen(
                         Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Box(Modifier.size(40.dp).clip(CircleShape).background(Color.White.copy(alpha = .16f)), contentAlignment = Alignment.Center) { Icon(Icons.Outlined.AccountBalanceWallet, null, tint = Color.White) }
-                                Spacer(Modifier.width(10.dp)); Text("Available to withdraw", color = Color.White.copy(alpha = .85f), fontSize = 12.sp)
+                            Spacer(Modifier.width(10.dp)); Text("Available for a new payout request", color = Color.White.copy(alpha = .9f), fontSize = 12.sp)
                             }
                             Text(money(available), color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.ExtraBold)
-                            Text("Delivered earnings become available after ${summary.optInt("payout_hold_hours",48)} hours", color = Color.White.copy(alpha = .78f), fontSize = 10.sp)
+                            Text("Net delivered-meal earnings, after commission and advance recovery. New earnings unlock after ${summary.optInt("payout_hold_hours",48)} hours.", color = Color.White.copy(alpha = .82f), fontSize = 11.sp, lineHeight = 16.sp)
                             Button(
                                 onClick = { showRequest = true }, enabled = available > 0 && !loading,
                                 modifier = Modifier.fillMaxWidth().height(48.dp), shape = RoundedCornerShape(13.dp),
@@ -114,13 +114,13 @@ fun ProviderEarningsScreen(
                 }
                 item {
                     Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-                        MiniMoneyCard("Settlement pending", summary.optLong("pending_48h_paise"), Icons.Outlined.Schedule, Modifier.weight(1f))
-                        MiniMoneyCard("Payout reserved", summary.optLong("reserved_paise"), Icons.Outlined.HourglassTop, Modifier.weight(1f))
+                        MiniMoneyCard("Net earnings waiting to unlock", summary.optLong("pending_48h_paise"), Icons.Outlined.Schedule, Modifier.weight(1f))
+                        MiniMoneyCard("Held in open payout requests", summary.optLong("reserved_paise"), Icons.Outlined.HourglassTop, Modifier.weight(1f))
                     }
                 }
                 item {
-                    EarningsSection("Advance funds", "Advances have 0% commission. The full approved amount is paid and recovered from future net earnings") {
-                        MoneyRow("Outstanding advance", -summary.optLong("advance_outstanding_paise"), true)
+                    EarningsSection("Provider advance", "This is money Zomeal paid you before it was earned. It has 0% commission and is recovered only from future net meal earnings.") {
+                        MoneyRow("Advance still to recover", summary.optLong("advance_outstanding_paise"), true)
                         OutlinedButton(onClick = { showAdvance = true }, enabled = !loading, modifier = Modifier.fillMaxWidth().height(44.dp)) { Icon(Icons.Outlined.RequestQuote, null); Spacer(Modifier.width(7.dp)); Text("Request advance money") }
                         val advanceRequests = jsonList(summary.optJSONArray("advance_requests"))
                         if (advanceRequests.isEmpty()) Text("No advance requests yet.", color = EMuted, fontSize = 10.sp)
@@ -128,12 +128,12 @@ fun ProviderEarningsScreen(
                     }
                 }
                 item {
-                    EarningsSection("Earnings summary", "Your negotiated commission is calculated once on each delivered meal") {
-                        MoneyRow("Gross delivered meal value", summary.optLong("gross_paise"))
-                        MoneyRow("Zomeal commission total", -summary.optLong("commission_paise"))
+                    EarningsSection("Lifetime delivered-meal earnings", "These totals are not your withdrawable balance. Your negotiated commission is calculated once on each delivered meal.") {
+                        MoneyRow("Gross value of delivered meals", summary.optLong("gross_paise"))
+                        MoneyRow("Less: Zomeal commission", -summary.optLong("commission_paise"))
                         Text("Current agreed rate: ${formatRate(summary.optDouble("commission_rate_percent",14.0))}% · historical earnings retain their original agreed rates", color = EMuted, fontSize = 9.sp)
                         HorizontalDivider(color = Color(0xFFE1EAE3))
-                        MoneyRow("Provider net earnings", summary.optLong("provider_net_paise"), true)
+                        MoneyRow("Lifetime net earnings", summary.optLong("provider_net_paise"), true)
                         val slots = summary.optJSONArray("by_slot") ?: JSONArray()
                         for (index in 0 until slots.length()) slots.optJSONObject(index)?.let { slot ->
                             Row(verticalAlignment = Alignment.CenterVertically) {
