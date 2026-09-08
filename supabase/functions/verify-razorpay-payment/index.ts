@@ -66,20 +66,30 @@ Deno.serve(async (request) => {
     if (updateError) throw updateError;
 
     let subscriptionId: string | null = null;
-    if (captured && user) {
-      const { data: activation, error: activationError } = await db.rpc("finalize_captured_payment", {
+    let application: Record<string, unknown> | null = null;
+    if (captured && user && !order.test_mode) {
+      const { data: activation, error: activationError } = await db.rpc("apply_captured_payment", {
         target_payment_order: order.id, target_customer: user.id,
       });
       if (activationError) throw activationError;
+      application = activation as Record<string, unknown> | null;
       subscriptionId = activation?.subscription_id ?? null;
     }
 
-    // Anonymous Test Mode orders verify the gateway flow without creating business data.
+    const purpose = String(order.checkout_payload?.purpose ?? "INITIAL_PLAN");
+    const paymentApplied = captured && !order.test_mode && application !== null;
+    const walletCredited = paymentApplied && purpose === "WALLET_RECHARGE";
     return jsonResponse({
       verified: true, captured, status: update.status, payment_order_id: order.id,
       razorpay_payment_id: body.razorpay_payment_id,
+      test_mode: Boolean(order.test_mode), purpose, payment_applied: paymentApplied,
+      wallet_credited: walletCredited,
+      wallet_balance_paise: walletCredited ? application?.wallet_balance_paise ?? null : null,
       subscription_activated: subscriptionId !== null, subscription_id: subscriptionId,
-      activation_note: subscriptionId ? "Payment verified and subscription activated." : user ? "Payment is authorized and will activate after capture." : "Anonymous Test Mode payment verified; no subscription was created.",
+      activation_note: order.test_mode ? "Razorpay test payment verified. No real wallet or subscription value was created."
+        : subscriptionId ? "Payment verified and subscription activated."
+        : walletCredited ? "Payment verified and wallet credited."
+        : captured ? "Payment was captured but could not be applied." : "Payment is authorized and will be applied after capture.",
     });
   } catch (error) {
     console.error("verify-razorpay-payment", error);

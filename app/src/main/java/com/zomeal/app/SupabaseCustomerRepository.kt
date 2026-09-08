@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.os.Handler
 import android.os.Looper
+import android.util.LruCache
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
@@ -20,7 +21,7 @@ internal data class MarketplaceProvider(
 internal data class PendingCheckout(val providerId:String,val packageId:String,val payload:JSONObject,val updatedAt:String)
 
 internal data class MarketplacePackage(
-    val id:String,val name:String,val kind:String,val pricePaise:Long
+    val id:String,val name:String,val kind:String,val pricePaise:Long,val durationDays:Int=30
 )
 
 internal data class RazorpayCheckoutOrder(
@@ -36,6 +37,7 @@ internal data class PersistedDailyMeal(
 internal data class PersistedSubscription(
     val id:String,val status:String,val providerId:String,val providerName:String,
     val packageId:String,val packageName:String,val packageKind:String,
+    val durationDays:Int,
     val startDate:String,val endDate:String,val paymentReference:String,
     val address:JSONObject?,val weeklyMenu:JSONArray,val dailyMeals:List<PersistedDailyMeal>,
     val payment:JSONObject?
@@ -44,15 +46,21 @@ internal data class PersistedSubscription(
 internal data class CustomerAuthResult(val success:Boolean,val message:String?=null)
 
 internal class SupabaseCustomerRepository(context:Context) {
-    companion object { @Volatile private var customerAccessToken:String="" }
+    companion object {
+        @Volatile private var customerAccessToken:String=""
+        private val approvedBitmapCache=object:LruCache<String,Bitmap>(32*1024){
+            override fun sizeOf(key:String,value:Bitmap):Int=value.byteCount/1024
+        }
+    }
     private val developmentPhones=setOf("9999999999")
-    private val prefs=context.applicationContext.getSharedPreferences("zomeal_customer_session",Context.MODE_PRIVATE)
+    private val appContext=context.applicationContext
+    private val prefs=appContext.getSharedPreferences("zomeal_customer_session",Context.MODE_PRIVATE)
     private val main=Handler(Looper.getMainLooper())
     private val baseUrl=BuildConfig.SUPABASE_URL.trimEnd('/')
     private val anonKey=BuildConfig.SUPABASE_ANON_KEY
     val configured get()=baseUrl.startsWith("https://")&&anonKey.isNotBlank()
     val isAuthenticated:Boolean get()=!prefs.getBoolean("signed_out",false)&&!prefs.getString("access_token",null).isNullOrBlank()
-    val savedPincode:String get()=prefs.getString("pincode","751030").orEmpty().ifBlank{"751030"}
+    val savedPincode:String get()=prefs.getString("pincode","").orEmpty()
     /** Only customer JWTs are stored here. Service-role credentials must never enter the app. */
     private fun saveSession(json:JSONObject){
         customerAccessToken=json.optString("access_token").trim()
@@ -60,6 +68,7 @@ internal class SupabaseCustomerRepository(context:Context) {
             .putString("refresh_token",json.optString("refresh_token"))
             .putString("user_id",json.optJSONObject("user")?.optString("id"))
             .putBoolean("signed_out",false).apply()
+        CustomerPushNotifications.sync(appContext)
     }
     fun savePincode(pincode:String){if(pincode.length==6)prefs.edit().putString("pincode",pincode).apply()}
     fun signOut(){customerAccessToken="";prefs.edit().clear().putBoolean("signed_out",true).apply()}
@@ -139,19 +148,35 @@ internal class SupabaseCustomerRepository(context:Context) {
         if(!configured){callback(emptyList(),"Supabase is not configured");return}
         Thread{
             try{
-                fun execute():Pair<Int,String>{
-                    val connection=(URL("$baseUrl/rest/v1/rpc/customer_marketplace").openConnection() as HttpURLConnection).apply{requestMethod="POST";connectTimeout=12000;readTimeout=18000;doOutput=true;setRequestProperty("apikey",anonKey);setRequestProperty("Authorization","Bearer ${bearer()}");setRequestProperty("Content-Type","application/json")}
-                    connection.outputStream.use{it.write(JSONObject().put("target_pincode",pincode).toString().toByteArray())};val code=connection.responseCode;val text=(if(code in 200..299)connection.inputStream else connection.errorStream)?.bufferedReader()?.use{it.readText()}.orEmpty();connection.disconnect();return code to text
+                fun execute(path:String,body:JSONObject):Pair<Int,String>{
+                    val connection=(URL("$baseUrl$path").openConnection() as HttpURLConnection).apply{requestMethod="POST";connectTimeout=12000;readTimeout=24000;doOutput=true;setRequestProperty("apikey",anonKey);setRequestProperty("Authorization","Bearer ${bearer()}");setRequestProperty("Content-Type","application/json")}
+                    connection.outputStream.use{it.write(body.toString().toByteArray())};val code=connection.responseCode;val text=(if(code in 200..299)connection.inputStream else connection.errorStream)?.bufferedReader()?.use{it.readText()}.orEmpty();connection.disconnect();return code to text
                 }
-                var response=execute();if(response.first==401&&refreshSessionBlocking())response=execute();val(code,text)=response
+                // This edge function signs only the paths returned by the approved
+                // customer catalogue. Customers can therefore render private
+                // provider-media objects without depending on storage RLS in the
+                // Android image request itself.
+                var response=execute("/functions/v1/website-provider-search",JSONObject().put("pincode",pincode))
+                if(response.first==401&&refreshSessionBlocking())response=execute("/functions/v1/website-provider-search",JSONObject().put("pincode",pincode))
+                var(code,text)=response
+                var root=runCatching{JSONObject(text)}.getOrNull()
+                var array=root?.optJSONArray("providers")
+                // Keep the original RPC as a safe fallback while older Supabase
+                // environments are upgraded to the signed-media function.
+                if(code !in 200..299||array==null){
+                    response=execute("/rest/v1/rpc/customer_marketplace",JSONObject().put("target_pincode",pincode))
+                    if(response.first==401&&refreshSessionBlocking())response=execute("/rest/v1/rpc/customer_marketplace",JSONObject().put("target_pincode",pincode))
+                    code=response.first;text=response.second;root=null
+                    array=runCatching{JSONArray(text)}.getOrNull()
+                }
                 if(code !in 200..299)throw IllegalStateException(runCatching{JSONObject(text).optString("message")}.getOrNull().orEmpty().ifBlank{if(code==401)"Your session expired. Please log in again." else "Marketplace request failed ($code)"})
-                val array=JSONArray(text);val result=buildList{for(index in 0 until array.length()){val item=array.optJSONObject(index)?:continue
+                val providerRows=array?:JSONArray();val result=buildList{for(index in 0 until providerRows.length()){val item=providerRows.optJSONObject(index)?:continue
                     val packageJson=item.optJSONArray("packages")?:JSONArray()
                     val packages=buildList{for(packageIndex in 0 until packageJson.length()){
                         val value=packageJson.optJSONObject(packageIndex)?:continue
                         val id=value.optString("id").trim();val kind=value.optString("kind").trim().uppercase();val price=value.optLong("price_paise")
                         if(id.isNotBlank()&&kind in setOf("LUNCH_ONLY","DINNER_ONLY","LUNCH_AND_DINNER")&&price>0)
-                            add(MarketplacePackage(id,value.optString("name").trim(),kind,price))
+                            add(MarketplacePackage(id,value.optString("name").trim(),kind,price,value.optInt("duration_days",30)))
                     }}.distinctBy{it.id}
                     val providerId=item.optString("provider_id").trim();val displayName=item.optString("display_name").trim()
                     if(providerId.isBlank()||displayName.isBlank()||packages.isEmpty())continue
@@ -159,17 +184,57 @@ internal class SupabaseCustomerRepository(context:Context) {
                     add(MarketplaceProvider(
                         providerId,displayName,item.optString("locality",item.optString("city","Bhubaneswar")),
                         item.optString("dietary_type","BOTH"),item.optString("description").takeUnless{it.equals("null",true)}.orEmpty(),packages,item.optJSONArray("weekly_menu")?:JSONArray(),
-                        cleanPath(item.optString("primary_photo_path")),cleanPath(item.optString("kitchen_photo_path")),cleanPath(item.optString("meal_photo_path"))
+                        cleanPath(item.optString("primary_photo_url").ifBlank{item.optString("primary_photo_path")}),
+                        cleanPath(item.optString("kitchen_photo_url").ifBlank{item.optString("kitchen_photo_path")}),
+                        cleanPath(item.optString("meal_photo_url").ifBlank{item.optString("meal_photo_path")})
                     ))}}
+                // Prefer each signed dish URL while preserving the original
+                // storage path for the RPC fallback.
+                for(providerIndex in 0 until providerRows.length()){
+                    val menu=providerRows.optJSONObject(providerIndex)?.optJSONArray("weekly_menu")?:continue
+                    for(dayIndex in 0 until menu.length()){
+                        val items=menu.optJSONObject(dayIndex)?.optJSONArray("items")?:continue
+                        for(itemIndex in 0 until items.length())items.optJSONObject(itemIndex)?.let{dish->
+                            val signed=dish.optString("photo_url").trim()
+                            if(signed.isNotBlank()&&!signed.equals("null",true))dish.put("photo_path",signed)
+                        }
+                    }
+                }
                 main.post{callback(result,null)}
             }catch(error:Exception){main.post{callback(emptyList(),error.message?:"Could not load providers")}}
         }.start()
     }
 
-    fun createRazorpayOrder(packageId:String,deliveryAddress:JSONObject,weeklyMenu:JSONObject,startDate:String,firstMeal:String,callback:(RazorpayCheckoutOrder?,String?)->Unit){
+    fun paymentQuote(packageId:String,callback:(JSONObject?,String?)->Unit){
+        functionRequest("create-razorpay-order",JSONObject().put("package_id",packageId).put("quote_only",true),callback)
+    }
+
+    fun balancePaymentQuote(subscriptionId:String,callback:(JSONObject?,String?)->Unit){
+        functionRequest("create-razorpay-order",JSONObject().put("subscription_id",subscriptionId).put("quote_only",true),callback)
+    }
+
+    fun createBalanceRazorpayOrder(subscriptionId:String,amountPaise:Long,callback:(RazorpayCheckoutOrder?,String?)->Unit){
+        functionRequest("create-razorpay-order",JSONObject().put("subscription_id",subscriptionId).put("amount_paise",amountPaise)){json,error->
+            if(error!=null||json==null)callback(null,error?:"Could not create balance payment")
+            else callback(RazorpayCheckoutOrder(json.getString("payment_order_id"),json.getString("razorpay_order_id"),json.getString("key_id"),
+                json.getLong("amount_paise"),json.optString("currency","INR"),json.getString("receipt"),json.optBoolean("test_mode",true)),null)
+        }
+    }
+
+    fun createWalletRechargeOrder(amountPaise:Long,callback:(RazorpayCheckoutOrder?,String?)->Unit){
+        functionRequest("create-razorpay-order",JSONObject().put("purpose","WALLET_RECHARGE").put("amount_paise",amountPaise)){json,error->
+            if(error!=null||json==null)callback(null,error?:"Could not create wallet recharge")
+            else callback(RazorpayCheckoutOrder(json.getString("payment_order_id"),json.getString("razorpay_order_id"),json.getString("key_id"),
+                json.getLong("amount_paise"),json.optString("currency","INR"),json.getString("receipt"),json.optBoolean("test_mode",true)),null)
+        }
+    }
+
+    fun createRazorpayOrder(packageId:String,deliveryAddress:JSONObject,weeklyMenu:JSONObject,startDate:String,firstMeal:String,amountPaise:Long,quotedTotalPaise:Long,callback:(RazorpayCheckoutOrder?,String?)->Unit){
         functionRequest("create-razorpay-order",JSONObject().apply{
             put("package_id",packageId);put("delivery_address",deliveryAddress);put("weekly_menu",weeklyMenu)
             put("start_date",startDate);put("first_meal",firstMeal)
+            put("amount_paise",amountPaise)
+            put("quoted_total_paise",quotedTotalPaise)
         }){json,error->
             if(error!=null||json==null)callback(null,error?:"Could not create payment order")
             else callback(RazorpayCheckoutOrder(
@@ -197,7 +262,7 @@ internal class SupabaseCustomerRepository(context:Context) {
                 }}
                 PersistedSubscription(
                     subscription.getString("id"),subscription.optString("status"),subscription.optString("provider_id"),subscription.optString("provider_name"),
-                    subscription.optString("package_id"),subscription.optString("package_name"),subscription.optString("package_kind"),
+                    subscription.optString("package_id"),subscription.optString("package_name"),subscription.optString("package_kind"),subscription.optInt("duration_days",30),
                     subscription.optString("start_date"),subscription.optString("end_date"),subscription.optString("payment_reference"),
                     json.optJSONObject("address"),json.optJSONArray("weekly_menu")?:JSONArray(),meals,json.optJSONObject("payment")
                 )
@@ -239,6 +304,17 @@ internal class SupabaseCustomerRepository(context:Context) {
     fun clearCheckoutDraft(callback:(String?)->Unit){rpc("customer_clear_checkout_draft",JSONObject()){_,error->callback(error)}}
     fun referralProgram(callback:(JSONObject?,String?)->Unit){rpc("customer_referral_program",JSONObject(),callback)}
     fun referralDashboard(callback:(JSONObject?,String?)->Unit){rpc("customer_referral_dashboard",JSONObject(),callback)}
+    fun notificationFeed(callback:(JSONArray?,String?)->Unit){
+        rpc("customer_notification_feed",JSONObject().put("target_limit",50)){json,error->
+            if(error!=null){callback(null,error);return@rpc}
+            callback(json?.optJSONArray("items")?:runCatching{JSONArray(json?.toString()?:"[]")}.getOrNull(),null)
+        }
+    }
+    fun markNotificationsRead(notificationId:String?=null,read:Boolean=true,callback:(String?)->Unit={}){
+        rpc("customer_mark_notifications_read",JSONObject().apply{
+            put("target_notification",notificationId?.takeIf{it.isNotBlank()}?:JSONObject.NULL);put("target_read",read)
+        }){_,error->callback(error)}
+    }
     fun applyReferral(code:String,callback:(JSONObject?,String?)->Unit){
         rpc("customer_apply_referral",JSONObject().put("target_code",code.trim().uppercase()),callback)
     }
@@ -246,21 +322,28 @@ internal class SupabaseCustomerRepository(context:Context) {
     fun pauseMeals(subscriptionId:String,dates:List<String>,slot:String,callback:(JSONObject?,String?)->Unit){rpc("customer_pause_subscription_meals",JSONObject().put("target_subscription",subscriptionId).put("target_dates",JSONArray(dates)).put("target_slot",slot.uppercase()),callback)}
 
     fun approvedMedia(path:String,callback:(Bitmap?)->Unit){
-        if(path.isBlank()||path.equals("null",true)||path.equals("undefined",true)){callback(null);return}
+        val requestedPath=path.trim()
+        approvedBitmapCache.get(requestedPath)?.let{callback(it);return}
+        val objectPath=requestedPath.substringBefore('?')
+            .substringAfter("provider-media/",requestedPath.substringBefore('?'))
+            .trimStart('/')
+        if(objectPath.isBlank()||objectPath.equals("null",true)||objectPath.equals("undefined",true)){callback(null);return}
         Thread{
             val bitmap=runCatching{
-                val encoded=path.split('/').joinToString("/"){URLEncoder.encode(it,"UTF-8").replace("+","%20")}
-                fun download():Pair<Int,ByteArray?>{
-                    val connection=(URL("$baseUrl/storage/v1/object/authenticated/provider-media/$encoded").openConnection() as HttpURLConnection).apply{
+                val encoded=objectPath.split('/').joinToString("/"){URLEncoder.encode(it,"UTF-8").replace("+","%20")}
+                fun download(url:String,authorised:Boolean):Pair<Int,ByteArray?>{
+                    val connection=(URL(url).openConnection() as HttpURLConnection).apply{
                         requestMethod="GET";connectTimeout=12000;readTimeout=20000
-                        setRequestProperty("apikey",anonKey);setRequestProperty("Authorization","Bearer ${bearer()}")
+                        if(authorised){setRequestProperty("apikey",anonKey);setRequestProperty("Authorization","Bearer ${bearer()}")}
                     }
                     val code=connection.responseCode
                     val bytes=if(code in 200..299)connection.inputStream.use{it.readBytes()}else null
                     connection.disconnect();return code to bytes
                 }
-                var response=download();if(response.first==401&&refreshSessionBlocking())response=download()
-                response.second?.let{BitmapFactory.decodeByteArray(it,0,it.size)}
+                val signed=requestedPath.startsWith("https://")||requestedPath.startsWith("http://")
+                var response=if(signed)download(requestedPath,false) else download("$baseUrl/storage/v1/object/authenticated/provider-media/$encoded",true)
+                if(!signed&&response.first==401&&refreshSessionBlocking())response=download("$baseUrl/storage/v1/object/authenticated/provider-media/$encoded",true)
+                response.second?.let{BitmapFactory.decodeByteArray(it,0,it.size)}?.also{approvedBitmapCache.put(requestedPath,it)}
             }.getOrNull()
             main.post{callback(bitmap)}
         }.start()

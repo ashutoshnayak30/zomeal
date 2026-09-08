@@ -113,6 +113,9 @@ internal object ProviderDraft {
     var lunchPrice by mutableStateOf("")
     var dinnerPrice by mutableStateOf("")
     var bothPrice by mutableStateOf("")
+    var weeklyLunchPrice by mutableStateOf("")
+    var weeklyDinnerPrice by mutableStateOf("")
+    var weeklyBothPrice by mutableStateOf("")
     var bothLunchDailyPrice by mutableStateOf("")
     val menus = days.map { DayDraft() }
     val savedMenuDays = mutableStateListOf<Boolean>().apply { repeat(7) { add(false) } }
@@ -128,6 +131,7 @@ internal object ProviderDraft {
         put("radius", radius); put("lunchCapacity", lunchCapacity); put("dinnerCapacity", dinnerCapacity)
         put("lunchEnabled", lunchEnabled); put("dinnerEnabled", dinnerEnabled); put("bothEnabled", bothEnabled)
         put("lunchPrice", lunchPrice); put("dinnerPrice", dinnerPrice); put("bothPrice", bothPrice); put("bothLunchDailyPrice", bothLunchDailyPrice)
+        put("weeklyLunchPrice", weeklyLunchPrice); put("weeklyDinnerPrice", weeklyDinnerPrice); put("weeklyBothPrice", weeklyBothPrice)
         put("deliveryName", deliveryName); put("deliveryPhone", deliveryPhone)
         put("profilePhoto", profilePhoto); put("kitchenPhoto", kitchenPhoto); put("mealPhoto", mealPhoto)
         put("servicePincodes", JSONArray().apply { servicePincodes.forEach { p -> put(JSONObject().put("value", p.value).put("areaName", p.areaName).put("verified", p.verified)) } })
@@ -180,6 +184,7 @@ internal object ProviderDraft {
         radius = json.optString("radius", "5"); lunchCapacity = json.optString("lunchCapacity", "50"); dinnerCapacity = json.optString("dinnerCapacity", "50")
         lunchEnabled = json.optBoolean("lunchEnabled", true); dinnerEnabled = json.optBoolean("dinnerEnabled", true); bothEnabled = json.optBoolean("bothEnabled", true)
         lunchPrice = json.optString("lunchPrice"); dinnerPrice = json.optString("dinnerPrice"); bothPrice = json.optString("bothPrice"); bothLunchDailyPrice = json.optString("bothLunchDailyPrice")
+        weeklyLunchPrice = json.optString("weeklyLunchPrice"); weeklyDinnerPrice = json.optString("weeklyDinnerPrice"); weeklyBothPrice = json.optString("weeklyBothPrice")
         deliveryName = json.optString("deliveryName"); deliveryPhone = json.optString("deliveryPhone")
         profilePhoto = json.optString("profilePhoto").ifBlank { null }; kitchenPhoto = json.optString("kitchenPhoto").ifBlank { null }; mealPhoto = json.optString("mealPhoto").ifBlank { null }
         json.optJSONArray("servicePincodes")?.let { array ->
@@ -442,20 +447,21 @@ fun PackageScreen(onBack: () -> Unit, onNext: () -> Unit, activeEdit: Boolean = 
         combinedLunchDaily > java.math.BigDecimal.ZERO && combinedLunchDaily.multiply(java.math.BigDecimal(30)) < combinedTotal)
     val hasSelection = ProviderDraft.lunchEnabled || ProviderDraft.dinnerEnabled || ProviderDraft.bothEnabled
     val valid = hasSelection &&
-        (!ProviderDraft.lunchEnabled || ProviderDraft.lunchPrice.isNotBlank()) &&
-        (!ProviderDraft.dinnerEnabled || ProviderDraft.dinnerPrice.isNotBlank()) &&
-        (!ProviderDraft.bothEnabled || ProviderDraft.bothPrice.isNotBlank()) && validCombinedSplit
+        (!ProviderDraft.lunchEnabled || (ProviderDraft.weeklyLunchPrice.isNotBlank() && ProviderDraft.lunchPrice.isNotBlank())) &&
+        (!ProviderDraft.dinnerEnabled || (ProviderDraft.weeklyDinnerPrice.isNotBlank() && ProviderDraft.dinnerPrice.isNotBlank())) &&
+        (!ProviderDraft.bothEnabled || (ProviderDraft.weeklyBothPrice.isNotBlank() && ProviderDraft.bothPrice.isNotBlank())) && validCombinedSplit
     FlowScaffold(3, if (activeEdit) "Packages & prices" else "Choose packages", if (activeEdit) "Review each offering and submit package or price changes for approval." else "Lunch, dinner and combined packages are selected by default. Turn off anything you do not want to provide, then enter prices for the selected packages.", onBack, onNext,
         nextLabel = if (saving) "Saving draft…" else if (activeEdit) "Save packages to draft" else "Save & continue", nextEnabled = valid && !saving) {
-        InfoCard("You control which packages your kitchen offers. At least one selected package with a price is required to continue.")
-        PackageEditor("Lunch only", "1 meal/day · 30 days", ProviderDraft.lunchEnabled, { ProviderDraft.lunchEnabled = it }, ProviderDraft.lunchPrice, { ProviderDraft.lunchPrice = it.filter(Char::isDigit) })
-        PackageEditor("Dinner only", "1 meal/day · 30 days", ProviderDraft.dinnerEnabled, { ProviderDraft.dinnerEnabled = it }, ProviderDraft.dinnerPrice, { ProviderDraft.dinnerPrice = it.filter(Char::isDigit) })
+        InfoCard("Set a 7-day trial price and a 30-day regular price for every package you offer. Both prices require Zomeal approval.")
+        PackageEditor("Lunch only", "1 meal/day", ProviderDraft.lunchEnabled, { ProviderDraft.lunchEnabled = it }, ProviderDraft.weeklyLunchPrice, { ProviderDraft.weeklyLunchPrice = it.filter(Char::isDigit) }, ProviderDraft.lunchPrice, { ProviderDraft.lunchPrice = it.filter(Char::isDigit) })
+        PackageEditor("Dinner only", "1 meal/day", ProviderDraft.dinnerEnabled, { ProviderDraft.dinnerEnabled = it }, ProviderDraft.weeklyDinnerPrice, { ProviderDraft.weeklyDinnerPrice = it.filter(Char::isDigit) }, ProviderDraft.dinnerPrice, { ProviderDraft.dinnerPrice = it.filter(Char::isDigit) })
         Section("Lunch + Dinner") {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("2 meals/day · 30 days", color = PMuted, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                Text("2 meals/day · weekly or monthly", color = PMuted, fontSize = 12.sp, modifier = Modifier.weight(1f))
                 Switch(ProviderDraft.bothEnabled, { ProviderDraft.bothEnabled = it }, colors = SwitchDefaults.colors(checkedTrackColor = PBrand))
             }
             if (ProviderDraft.bothEnabled) {
+                Field("7-day trial price (₹) *", ProviderDraft.weeklyBothPrice, { ProviderDraft.weeklyBothPrice = it.filter(Char::isDigit) }, "Enter weekly price", true)
                 Field("Combined monthly price (₹) *", ProviderDraft.bothPrice, { ProviderDraft.bothPrice = it.filter(Char::isDigit) }, "3000", true)
                 val dailyTotal = combinedTotal?.divide(java.math.BigDecimal(30), 2, RoundingMode.HALF_UP)
                 dailyTotal?.let { Text("Combined daily meal value: ₹$it", color = PBrand, fontSize = 12.sp, fontWeight = FontWeight.Bold) }
@@ -476,13 +482,16 @@ fun PackageScreen(onBack: () -> Unit, onNext: () -> Unit, activeEdit: Boolean = 
 }
 
 @Composable
-private fun PackageEditor(title: String, detail: String, enabled: Boolean, onEnabled: (Boolean) -> Unit, price: String, onPrice: (String) -> Unit) {
+private fun PackageEditor(title: String, detail: String, enabled: Boolean, onEnabled: (Boolean) -> Unit, weeklyPrice: String, onWeeklyPrice: (String) -> Unit, monthlyPrice: String, onMonthlyPrice: (String) -> Unit) {
     Section(title) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(detail, color = PMuted, fontSize = 12.sp, modifier = Modifier.weight(1f))
             Switch(enabled, onEnabled, colors = SwitchDefaults.colors(checkedTrackColor = PBrand))
         }
-        if (enabled) Field("Monthly price (₹) *", price, onPrice, "Enter package price", true)
+        if (enabled) {
+            Field("7-day trial price (₹) *", weeklyPrice, onWeeklyPrice, "Enter weekly price", true)
+            Field("30-day price (₹) *", monthlyPrice, onMonthlyPrice, "Enter monthly price", true)
+        }
     }
 }
 
@@ -716,6 +725,7 @@ fun SubmittedScreen(repository: SupabaseProviderRepository, onReview: () -> Unit
             status = json?.optString("status")?.ifBlank { "PENDING_APPROVAL" } ?: "PENDING_APPROVAL"
             requests = json?.optJSONArray("change_requests")?.length() ?: 0
             refreshing = false
+            if (status == "ACTIVE") onDashboard()
         }
     }
     LaunchedEffect(Unit) { refresh() }
@@ -837,13 +847,13 @@ fun SubmittedApplicationDetailsScreen(repository: SupabaseProviderRepository, on
             }
             item {
                 Section("Packages & submitted prices") {
-                    if (ProviderDraft.lunchEnabled) SubmittedValue("Lunch only", "₹${ProviderDraft.lunchPrice} / 30 days")
-                    if (ProviderDraft.dinnerEnabled) SubmittedValue("Dinner only", "₹${ProviderDraft.dinnerPrice} / 30 days")
+                    if (ProviderDraft.lunchEnabled) SubmittedValue("Lunch only", "₹${ProviderDraft.weeklyLunchPrice} / 7 days · ₹${ProviderDraft.lunchPrice} / 30 days")
+                    if (ProviderDraft.dinnerEnabled) SubmittedValue("Dinner only", "₹${ProviderDraft.weeklyDinnerPrice} / 7 days · ₹${ProviderDraft.dinnerPrice} / 30 days")
                     if (ProviderDraft.bothEnabled) {
                         val total = ProviderDraft.bothPrice.toBigDecimalOrNull()
                         val lunch = ProviderDraft.bothLunchDailyPrice.toBigDecimalOrNull()
                         val dinner = if (total != null && lunch != null) total.subtract(lunch.multiply(java.math.BigDecimal(30))).divide(java.math.BigDecimal(30), 2, RoundingMode.HALF_UP) else null
-                        SubmittedValue("Lunch + Dinner", "₹${ProviderDraft.bothPrice} / 30 days · Lunch ₹${ProviderDraft.bothLunchDailyPrice}/day · Dinner ₹${dinner ?: "—"}/day")
+                        SubmittedValue("Lunch + Dinner", "₹${ProviderDraft.weeklyBothPrice} / 7 days · ₹${ProviderDraft.bothPrice} / 30 days · Lunch ₹${ProviderDraft.bothLunchDailyPrice}/day · Dinner ₹${dinner ?: "—"}/day")
                     }
                     Text("Prices remain subject to Zomeal approval.", color = PMuted, fontSize = 11.sp)
                 }

@@ -50,6 +50,7 @@ class SupabaseProviderRepository(context: Context) {
                 .putString("refresh_token", json.optString("refresh_token"))
                 .putString("user_id", json.optJSONObject("user")?.optString("id"))
                 .apply()
+            ProviderPushNotifications.sync(appContext)
             callback(AuthResult(true))
         } else callback(AuthResult(false, errorMessage(json, "OTP verification failed")))
     }
@@ -88,6 +89,7 @@ class SupabaseProviderRepository(context: Context) {
                 .putString("development_phone",phone)
                 .putBoolean("signed_out", false)
                 .apply()
+            ProviderPushNotifications.sync(appContext)
             claimSeededProvider(phone,callback)
         } else callback(AuthResult(false, errorMessage(json, "Anonymous sign-ins must be enabled in Supabase Authentication settings")))
     }
@@ -138,16 +140,19 @@ class SupabaseProviderRepository(context: Context) {
             callback(AuthResult(false, "Provider record was not returned"))
             return@requestAsync
         }
+        val finishWeekly:()->Unit={syncWeeklyPrices(ProviderDraft.toJson(), null) { weeklyResult ->
+            if (weeklyResult.success) uploadAllSelectedMedia(providerId, callback = callback) else callback(weeklyResult)
+        }}
         if (ProviderDraft.bothEnabled) {
             requestAsync(
                 path = "/rest/v1/rpc/provider_set_combined_package_values",
                 body = JSONObject().put("target_lunch_daily_rupees", ProviderDraft.bothLunchDailyPrice.toDoubleOrNull() ?: 0.0),
                 authenticated = true
             ) { splitCode, splitJson ->
-                if (splitCode in 200..299) uploadAllSelectedMedia(providerId, callback = callback)
+                if (splitCode in 200..299) finishWeekly()
                 else callback(AuthResult(false, errorMessage(splitJson, "Combined lunch and dinner values could not be saved")))
             }
-        } else uploadAllSelectedMedia(providerId, callback = callback)
+        } else finishWeekly()
     }
 
     /**
@@ -170,14 +175,22 @@ class SupabaseProviderRepository(context: Context) {
             callback(AuthResult(false, "Provider record was not returned"))
             return@requestAsync
         }
+        syncWeeklyPrices(ProviderDraft.toJson(), changeRequestId.ifBlank { null }) { weeklyResult ->
+        if (!weeklyResult.success) { callback(weeklyResult); return@syncWeeklyPrices }
         uploadAllSelectedMedia(providerId, changeRequestId.ifBlank { null }, onlyChanged = true) { mediaResult ->
             if (!mediaResult.success) { callback(mediaResult); return@uploadAllSelectedMedia }
             savePrimaryDeliveryContact(ProviderDraft.deliveryName, ProviderDraft.deliveryPhone) { deliveryResult ->
                 if (deliveryResult.success) ProviderDraft.acceptCurrentAsBaseline()
                 callback(if (deliveryResult.success) AuthResult(true, "Only your changed information was submitted for Zomeal approval. Your current listing remains active.") else deliveryResult)
             }
-        }
+        }}
     }
+
+    private fun syncWeeklyPrices(payload:JSONObject, changeRequestId:String?, callback:(AuthResult)->Unit)=requestAsync(
+        path="/rest/v1/rpc/provider_sync_weekly_packages",
+        body=JSONObject().put("payload",payload).put("target_change_request",changeRequestId?.let{it}?:JSONObject.NULL),
+        authenticated=true
+    ){code,json->callback(if(code in 200..299)AuthResult(true) else AuthResult(false,errorMessage(json,"Weekly package prices could not be saved")))}
 
     fun loadApplicationStatus(callback: (JSONObject?) -> Unit) = requestAsync(
         path = "/rest/v1/rpc/provider_application_status",
@@ -219,14 +232,16 @@ class SupabaseProviderRepository(context: Context) {
     private fun profileHubToDraft(profile: JSONObject): JSONObject {
         val packageRows = profile.optJSONArray("packages") ?: JSONArray()
         var lunchPrice = ""; var dinnerPrice = ""; var bothPrice = ""
+        var weeklyLunchPrice = ""; var weeklyDinnerPrice = ""; var weeklyBothPrice = ""
         var lunchEnabled = false; var dinnerEnabled = false; var bothEnabled = false
         for (index in 0 until packageRows.length()) {
             val item = packageRows.optJSONObject(index) ?: continue
             val rupees = (item.optLong("price_paise") / 100L).toString()
+            val weekly = item.optInt("duration_days",30) == 7
             when (item.optString("kind")) {
-                "LUNCH_ONLY" -> { lunchEnabled = true; lunchPrice = rupees }
-                "DINNER_ONLY" -> { dinnerEnabled = true; dinnerPrice = rupees }
-                "LUNCH_AND_DINNER" -> { bothEnabled = true; bothPrice = rupees }
+                "LUNCH_ONLY" -> { lunchEnabled = true; if(weekly) weeklyLunchPrice=rupees else lunchPrice = rupees }
+                "DINNER_ONLY" -> { dinnerEnabled = true; if(weekly) weeklyDinnerPrice=rupees else dinnerPrice = rupees }
+                "LUNCH_AND_DINNER" -> { bothEnabled = true; if(weekly) weeklyBothPrice=rupees else bothPrice = rupees }
             }
         }
         val menuDays = JSONArray().apply {
@@ -266,6 +281,7 @@ class SupabaseProviderRepository(context: Context) {
             .put("radius", "5").put("lunchCapacity", "50").put("dinnerCapacity", "50")
             .put("lunchEnabled", lunchEnabled).put("dinnerEnabled", dinnerEnabled).put("bothEnabled", bothEnabled)
             .put("lunchPrice", lunchPrice).put("dinnerPrice", dinnerPrice).put("bothPrice", bothPrice)
+            .put("weeklyLunchPrice", weeklyLunchPrice).put("weeklyDinnerPrice", weeklyDinnerPrice).put("weeklyBothPrice", weeklyBothPrice)
             .put("bothLunchDailyPrice", if (bothPrice.isBlank()) "" else ((bothPrice.toLongOrNull() ?: 0L) / 60L).toString())
             .put("profilePhoto", profile.optString("profile_photo_path")).put("kitchenPhoto", profile.optString("kitchen_photo_path"))
             .put("mealPhoto", profile.optString("meal_photo_path"))

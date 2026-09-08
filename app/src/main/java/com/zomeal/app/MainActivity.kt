@@ -1,6 +1,8 @@
 package com.zomeal.app
 
 import android.os.Bundle
+import android.os.Build
+import android.Manifest
 import android.app.Activity
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -64,6 +66,7 @@ import java.util.Locale
 import org.json.JSONArray
 import org.json.JSONObject
 import com.razorpay.Checkout
+import com.razorpay.OpinionatedSoln
 import com.razorpay.PaymentData
 import com.razorpay.PaymentResultWithDataListener
 
@@ -78,10 +81,15 @@ private val Border = Color(0xFFDCE8E0)
 private object CustomerProfileStore {
     var house by mutableStateOf("")
     var street by mutableStateOf("")
-    var locality by mutableStateOf("Khandagiri, Bhubaneswar")
+    var locality by mutableStateOf("")
     var landmark by mutableStateOf("")
-    var pincode by mutableStateOf("751030")
+    var pincode by mutableStateOf("")
     var addressSaved by mutableStateOf(false)
+
+    fun reset(registrationPincode: String = "") {
+        house = ""; street = ""; locality = ""; landmark = ""
+        pincode = registrationPincode; addressSaved = false
+    }
 
     val completeAddress: String
         get() = listOf(house, street, locality, landmark.takeIf { it.isNotBlank() }, "Odisha - $pincode")
@@ -110,11 +118,32 @@ private object RazorpayCoordinator {
     var result by mutableStateOf<RazorpayAppResult?>(null)
 }
 
+private object CustomerNotificationNavigation {
+    var openCentre by mutableStateOf(false)
+}
+
 class MainActivity : ComponentActivity(), PaymentResultWithDataListener {
+    private fun handleNotificationIntent(intent: Intent?) {
+        if (intent?.hasExtra("notification_destination") == true || intent?.hasExtra("destination") == true) {
+            CustomerNotificationNavigation.openCentre = true
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        handleNotificationIntent(intent)
+        CustomerPushNotifications.initialize(applicationContext)
+        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 4101)
+        }
         Checkout.preload(applicationContext)
         setContent { ZomealTheme { ZomealApp() } }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleNotificationIntent(intent)
     }
 
     override fun onPaymentSuccess(razorpayPaymentId: String?, paymentData: PaymentData?) {
@@ -330,13 +359,28 @@ private fun SplashBenefits(compact: Boolean) {
 @Composable
 private fun ZomealTheme(content: @Composable () -> Unit) {
     val density = LocalDensity.current
-    CompositionLocalProvider(LocalDensity provides Density(density.density, density.fontScale * 1.08f)) {
+    val baseTypography = Typography()
+    val appTypography = Typography(
+        displayLarge = baseTypography.displayLarge.copy(fontSize = 34.sp, lineHeight = 40.sp, fontWeight = FontWeight.Black),
+        displayMedium = baseTypography.displayMedium.copy(fontSize = 30.sp, lineHeight = 36.sp, fontWeight = FontWeight.Black),
+        displaySmall = baseTypography.displaySmall.copy(fontSize = 27.sp, lineHeight = 33.sp, fontWeight = FontWeight.ExtraBold),
+        headlineLarge = baseTypography.headlineLarge.copy(fontSize = 26.sp, lineHeight = 32.sp, fontWeight = FontWeight.ExtraBold),
+        headlineMedium = baseTypography.headlineMedium.copy(fontSize = 23.sp, lineHeight = 29.sp, fontWeight = FontWeight.ExtraBold),
+        headlineSmall = baseTypography.headlineSmall.copy(fontSize = 20.sp, lineHeight = 26.sp, fontWeight = FontWeight.Bold),
+        titleLarge = baseTypography.titleLarge.copy(fontSize = 19.sp, lineHeight = 25.sp, fontWeight = FontWeight.Bold),
+        titleMedium = baseTypography.titleMedium.copy(fontSize = 17.sp, lineHeight = 23.sp, fontWeight = FontWeight.Bold),
+        titleSmall = baseTypography.titleSmall.copy(fontSize = 15.sp, lineHeight = 21.sp, fontWeight = FontWeight.Bold),
+        bodyLarge = baseTypography.bodyLarge.copy(fontSize = 15.sp, lineHeight = 22.sp),
+        bodyMedium = baseTypography.bodyMedium.copy(fontSize = 14.sp, lineHeight = 20.sp),
+        bodySmall = baseTypography.bodySmall.copy(fontSize = 12.sp, lineHeight = 17.sp),
+        labelLarge = baseTypography.labelLarge.copy(fontSize = 14.sp, lineHeight = 19.sp, fontWeight = FontWeight.Bold),
+        labelMedium = baseTypography.labelMedium.copy(fontSize = 12.sp, lineHeight = 17.sp, fontWeight = FontWeight.Bold),
+        labelSmall = baseTypography.labelSmall.copy(fontSize = 11.sp, lineHeight = 15.sp, fontWeight = FontWeight.Medium)
+    )
+    CompositionLocalProvider(LocalDensity provides Density(density.density, density.fontScale * 1.10f)) {
         MaterialTheme(
             colorScheme = lightColorScheme(primary = Brand, background = Color.White, surface = Color.White),
-            typography = Typography(
-                headlineLarge = MaterialTheme.typography.headlineLarge.copy(fontWeight = FontWeight.ExtraBold),
-                titleLarge = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
-            ),
+            typography = appTypography,
             content = content
         )
     }
@@ -379,8 +423,8 @@ private fun marketplaceProviderToUi(index:Int,record:MarketplaceProvider):Provid
 }
 
 private fun persistedSubscriptionToProvider(subscription:PersistedSubscription):Provider{
-    val amountPaise=subscription.payment?.optLong("amount_paise")?:0L
-    val packageRecord=MarketplacePackage(subscription.packageId,subscription.packageName,subscription.packageKind,amountPaise)
+    val amountPaise=subscription.payment?.let { it.optLong("plan_package_paise", it.optLong("amount_paise")) }?:0L
+    val packageRecord=MarketplacePackage(subscription.packageId,subscription.packageName,subscription.packageKind,amountPaise,subscription.durationDays)
     return Provider(
         name=subscription.providerName,locality=subscription.address?.optString("locality","Bhubaneswar")?:"Bhubaneswar",
         diet="Subscribed plan",category=DietFilter.BOTH,rating=0.0,reviews=0,price=(amountPaise/100).toInt(),
@@ -403,7 +447,7 @@ private fun pendingCheckoutProvider(draft:PendingCheckout):Provider{
 private fun pendingCheckoutPlan(draft:PendingCheckout):MealPackage{
     val value=draft.payload.optJSONObject("package")?:JSONObject()
     val kind=value.optString("kind","LUNCH_AND_DINNER")
-    return MealPackage(draft.packageId,kind,value.optString("title","Monthly plan"),value.optString("meals",if(kind=="LUNCH_AND_DINNER")"2 meals / day" else "1 meal / day"),value.optString("price","₹0"),if(kind=="LUNCH_ONLY")Icons.Outlined.LightMode else if(kind=="DINNER_ONLY")Icons.Outlined.DarkMode else Icons.Outlined.Restaurant,true)
+    return MealPackage(draft.packageId,kind,value.optString("title","Meal plan"),value.optString("meals",if(kind=="LUNCH_AND_DINNER")"2 meals / day" else "1 meal / day"),value.optString("price","₹0"),if(kind=="LUNCH_ONLY")Icons.Outlined.LightMode else if(kind=="DINNER_ONLY")Icons.Outlined.DarkMode else Icons.Outlined.Restaurant,value.optInt("duration_days",30),true)
 }
 
 private fun jsonSelectionMap(value:JSONObject?):Map<Int,String>{
@@ -498,7 +542,7 @@ private fun ProviderListScreen() {
         subscription.address?.let{address->
             CustomerProfileStore.house=address.optString("house")
             CustomerProfileStore.street=address.optString("street")
-            CustomerProfileStore.locality=address.optString("locality","Bhubaneswar")
+            CustomerProfileStore.locality=address.optString("locality")
             CustomerProfileStore.landmark=address.optString("landmark")
             CustomerProfileStore.pincode=address.optString("pincode",marketplaceRepository.savedPincode)
             CustomerProfileStore.addressSaved=true
@@ -516,6 +560,7 @@ private fun ProviderListScreen() {
     }
 
     LaunchedEffect(Unit){
+        CustomerProfileStore.reset(marketplaceRepository.savedPincode)
         marketplaceRepository.restoreSession{authenticated,error->
             if(!authenticated){marketplaceError=error;restoringSession=false}
             else marketplaceRepository.activeSubscription{subscription,subscriptionError->
@@ -581,7 +626,10 @@ private fun ProviderListScreen() {
                         marketplaceRepository.saveRegistrationProfile(pendingFullName,pendingMobile){profileError->
                             if(profileError!=null){complete(profileError);return@saveRegistrationProfile}
                             fun continueRegistration(){
-                                marketplaceRepository.savePincode(pendingPincode.ifBlank{"751030"})
+                                if (!pendingIsLogin) {
+                                    marketplaceRepository.savePincode(pendingPincode)
+                                }
+                                CustomerProfileStore.reset(marketplaceRepository.savedPincode)
                                 if (pendingIsLogin) {
                                     marketplaceRepository.activeSubscription{subscription,error->
                                         if(error!=null){complete(error);return@activeSubscription}
@@ -646,10 +694,23 @@ private fun ProviderListScreen() {
         return
     }
 
+    if (CustomerNotificationNavigation.openCentre) {
+        BackHandler { CustomerNotificationNavigation.openCentre = false }
+        NotificationCentreScreen(
+            onBack = { CustomerNotificationNavigation.openCentre = false },
+            onDestination = { CustomerNotificationNavigation.openCentre = false }
+        )
+        return
+    }
+
     activeProvider?.takeUnless { changingProvider }?.let { provider ->
         ActiveSubscriberHome(provider, onBrowseProviders = {
             changingProvider = true
             selectedProvider = null
+            // Provider photos are delivered with short-lived signed URLs. Fetch a
+            // fresh approved catalogue whenever an active subscriber starts a
+            // provider change instead of reusing URLs loaded earlier in the day.
+            refreshMarketplace()
         }, onLogout = {
             marketplaceRepository.signOut()
             activeProvider = null
@@ -663,6 +724,16 @@ private fun ProviderListScreen() {
         return
     }
 
+    if (showNoSubscriptionHome) {
+        NoSubscriptionHomeScreen(
+            hasSavedPlan = pendingCheckoutState != null,
+            onFindPlan = { showNoSubscriptionHome = false },
+            onResumePlan = { showNoSubscriptionHome = false; resumePendingPayment = true },
+            onLogout = { marketplaceRepository.signOut();showNoSubscriptionHome = false; signupComplete = false; awaitingOtp = false; showLogin = true }
+        )
+        return
+    }
+
     pendingCheckoutState?.let { draft ->
         val draftProvider=remember(draft){pendingCheckoutProvider(draft)}
         val draftPlan=remember(draft){pendingCheckoutPlan(draft)}
@@ -670,16 +741,8 @@ private fun ProviderListScreen() {
         payload.optJSONObject("delivery_address")?.let{address->CustomerProfileStore.house=address.optString("house");CustomerProfileStore.street=address.optString("street");CustomerProfileStore.locality=address.optString("locality");CustomerProfileStore.landmark=address.optString("landmark");CustomerProfileStore.pincode=address.optString("pincode");CustomerProfileStore.addressSaved=true}
         val draftMenu=payload.optJSONObject("weekly_menu")?:JSONObject()
         if(resumePendingPayment){
-            PaymentScreen(draftProvider,draftPlan,jsonSelectionMap(draftMenu.optJSONObject("lunch")),jsonSelectionMap(draftMenu.optJSONObject("dinner")),payload.optInt("base_price"),payload.optInt("platform_fee"),payload.optInt("delivery_fee"),payload.optInt("discount"),payload.optInt("total"),onBack={resumePendingPayment=false},onGoHome={marketplaceRepository.activeSubscription{subscription,_->if(subscription!=null)restoreSubscription(subscription) else{pendingCheckoutState=null;showNoSubscriptionHome=true}}})
+            PaymentScreen(draftProvider,draftPlan,jsonSelectionMap(draftMenu.optJSONObject("lunch")),jsonSelectionMap(draftMenu.optJSONObject("dinner")),payload.optInt("base_price"),payload.optInt("platform_fee"),payload.optInt("delivery_fee"),payload.optInt("discount"),payload.optInt("total"),initialStartDateIso=payload.optString("start_date"),onBack={resumePendingPayment=false},onPayLater={resumePendingPayment=false;showNoSubscriptionHome=true},onGoHome={marketplaceRepository.activeSubscription{subscription,_->if(subscription!=null)restoreSubscription(subscription) else{resumePendingPayment=false;showNoSubscriptionHome=true}}})
         }else PendingCheckoutResumeScreen(draftProvider,draftPlan,onContinue={resumePendingPayment=true},onSkip={showNoSubscriptionHome=true;pendingCheckoutState=null},onDiscard={marketplaceRepository.clearCheckoutDraft{error->if(error==null)pendingCheckoutState=null else marketplaceError=error}})
-        return
-    }
-
-    if (showNoSubscriptionHome) {
-        NoSubscriptionHomeScreen(
-            onFindPlan = { showNoSubscriptionHome = false },
-            onLogout = { marketplaceRepository.signOut();showNoSubscriptionHome = false; signupComplete = false; awaitingOtp = false; showLogin = true }
-        )
         return
     }
 
@@ -698,6 +761,15 @@ private fun ProviderListScreen() {
                 } else {
                     activeProvider = provider
                     selectedProvider = null
+                }
+            },
+            onPayLater = {
+                activeProvider = null
+                selectedProvider = null
+                showNoSubscriptionHome = true
+                marketplaceRepository.pendingCheckout { draft, error ->
+                    pendingCheckoutState = draft
+                    if (error != null) marketplaceError = error
                 }
             },
             changeProviderMode = changingProvider
@@ -1287,7 +1359,7 @@ private fun ZomealBottomBar(selected: Int, onSelect: (Int) -> Unit) {
                     selected = selected == index,
                     onClick = { onSelect(index) },
                     icon = { Icon(if (selected == index) item.second else item.third, item.first, modifier = Modifier.size(20.dp)) },
-                    label = { Text(item.first, fontSize = 8.sp, maxLines = 1) },
+                    label = { Text(item.first, style = MaterialTheme.typography.labelSmall, maxLines = 1) },
                     alwaysShowLabel = true,
                     colors = NavigationBarItemDefaults.colors(
                         selectedIconColor = Brand, selectedTextColor = Brand,
@@ -1306,12 +1378,13 @@ private data class MealPackage(
     val meals: String,
     val price: String,
     val icon: ImageVector,
+    val durationDays: Int = 30,
     val popular: Boolean = false
 )
 
 @Composable
-private fun ProviderDetailsScreen(provider: Provider, onBack: () -> Unit, onActivated: () -> Unit, subscriptionView:Boolean=false, changeProviderMode:Boolean=false) {
-    val packages = remember(provider) {
+private fun ProviderDetailsScreen(provider: Provider, onBack: () -> Unit, onActivated: () -> Unit, onPayLater: () -> Unit = {}, subscriptionView:Boolean=false, changeProviderMode:Boolean=false) {
+    val allPackages = remember(provider) {
         if(provider.isLive) provider.packages.map { packageRecord -> MealPackage(
             packageRecord.id,
             packageRecord.kind,
@@ -1319,19 +1392,26 @@ private fun ProviderDetailsScreen(provider: Provider, onBack: () -> Unit, onActi
             if(packageRecord.kind=="LUNCH_AND_DINNER")"2 meals / day" else "1 meal / day",
             "₹${"%,d".format(packageRecord.pricePaise/100)}",
             when(packageRecord.kind){"DINNER_ONLY"->Icons.Outlined.DarkMode;"LUNCH_AND_DINNER"->Icons.Outlined.WbTwilight;else->Icons.Outlined.LightMode},
+            packageRecord.durationDays,
             packageRecord.kind=="LUNCH_AND_DINNER"
         ) } else listOf(
             MealPackage("lunch", "LUNCH_ONLY", "Lunch Only", "1 meal / day", "₹3,499", Icons.Outlined.LightMode),
-            MealPackage("both", "LUNCH_AND_DINNER", "Lunch & Dinner", "2 meals / day", "₹6,499", Icons.Outlined.WbTwilight, true),
+            MealPackage("both", "LUNCH_AND_DINNER", "Lunch & Dinner", "2 meals / day", "₹6,499", Icons.Outlined.WbTwilight,30, true),
             MealPackage("dinner", "DINNER_ONLY", "Dinner Only", "1 meal / day", "₹3,299", Icons.Outlined.DarkMode)
         )
+    }
+    val packages=remember(allPackages){
+        listOf("LUNCH_ONLY","LUNCH_AND_DINNER","DINNER_ONLY").mapNotNull { kind ->
+            val matching=allPackages.filter{it.kind==kind}
+            matching.firstOrNull{it.durationDays==30}?:matching.firstOrNull()
+        }
     }
     var selectedPackage by remember(provider) { mutableIntStateOf(packages.indexOfFirst { it.kind=="LUNCH_AND_DINNER" }.takeIf { it>=0 } ?: 0) }
     var menuPackage by remember { mutableStateOf<MealPackage?>(null) }
 
     BackHandler(enabled = menuPackage != null) { menuPackage = null }
     menuPackage?.let { plan ->
-        WeeklyMenuScreen(provider = provider, plan = plan, onBack = { menuPackage = null }, onGoHome = onActivated, changeProviderMode = changeProviderMode)
+        WeeklyMenuScreen(provider = provider, plan = plan, onBack = { menuPackage = null }, onGoHome = onActivated, onPayLater = onPayLater, changeProviderMode = changeProviderMode)
         return
     }
 
@@ -1359,8 +1439,8 @@ private fun ProviderDetailsScreen(provider: Provider, onBack: () -> Unit, onActi
     ) { padding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(padding),
-            contentPadding = PaddingValues(bottom = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(22.dp)
+            contentPadding = PaddingValues(bottom = 18.dp),
+            verticalArrangement = Arrangement.spacedBy(17.dp)
         ) {
             item { ProviderDetailsTopBar(onBack) }
             item { ProviderIdentity(provider) }
@@ -1372,7 +1452,8 @@ private fun ProviderDetailsScreen(provider: Provider, onBack: () -> Unit, onActi
                 item {
                     Row(
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp),
-                        horizontalArrangement = Arrangement.spacedBy(7.dp)
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.Bottom
                     ) {
                         packages.forEachIndexed { index, mealPackage ->
                             PackageCard(
@@ -1386,7 +1467,6 @@ private fun ProviderDetailsScreen(provider: Provider, onBack: () -> Unit, onActi
                 }
             }
             item { BenefitsStrip() }
-            if(provider.isLive) item { LiveWeeklyMenuPreview(provider,if(subscriptionView)provider.packageKind else null) }
             item { AboutProvider(provider) }
             if(provider.kitchenPhotoPath.isNotBlank()) item { ProviderKitchenCard(provider) }
             item { QualityBadges() }
@@ -1399,8 +1479,8 @@ private fun ProviderDetailsScreen(provider: Provider, onBack: () -> Unit, onActi
     Surface(Modifier.fillMaxWidth().padding(horizontal=18.dp),color=Mist,shape=RoundedCornerShape(20.dp),border=androidx.compose.foundation.BorderStroke(1.dp,Border)){
         Row(Modifier.padding(16.dp),verticalAlignment=Alignment.CenterVertically){
             Box(Modifier.size(46.dp).clip(CircleShape).background(Color.White),contentAlignment=Alignment.Center){Icon(plan?.icon?:Icons.Outlined.Restaurant,null,tint=Brand,modifier=Modifier.size(23.dp))}
-            Spacer(Modifier.width(12.dp));Column(Modifier.weight(1f)){Text("Your current package",color=BrandDark,fontSize=10.sp,fontWeight=FontWeight.Bold);Text(plan?.title?:"Active meal plan",color=Ink,fontSize=16.sp,fontWeight=FontWeight.ExtraBold);Text("${plan?.meals?:"Monthly meals"} · ${plan?.price.orEmpty()} / month",color=Muted,fontSize=10.sp)}
-            Surface(color=Color(0xFFE0F2E4),shape=RoundedCornerShape(12.dp)){Text("Active",Modifier.padding(horizontal=10.dp,vertical=6.dp),color=BrandDark,fontSize=9.sp,fontWeight=FontWeight.Bold)}
+            Spacer(Modifier.width(12.dp));Column(Modifier.weight(1f)){Text("Your current package",color=BrandDark,style=MaterialTheme.typography.labelSmall);Text(plan?.title?:"Active meal plan",color=Ink,style=MaterialTheme.typography.titleMedium);Text("${plan?.meals?:"Meal plan"} · ${plan?.price.orEmpty()} / ${plan?.durationDays?:30} days",color=Muted,style=MaterialTheme.typography.bodySmall)}
+            Surface(color=Color(0xFFE0F2E4),shape=RoundedCornerShape(12.dp)){Text("Active",Modifier.padding(horizontal=10.dp,vertical=6.dp),color=BrandDark,style=MaterialTheme.typography.labelSmall)}
         }
     }
 }
@@ -1433,11 +1513,11 @@ private fun SmallHeaderAction(icon: ImageVector, label: String) {
 
 @Composable
 private fun ProviderIdentity(provider: Provider) {
-    Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
         Row(verticalAlignment = Alignment.Top) {
             Column(Modifier.weight(1f)) {
-                Text(provider.name, color = Ink, fontSize = 24.sp, lineHeight = 28.sp, fontWeight = FontWeight.Black)
-                Text("Verified home-style meal provider", color = Muted, fontSize = 9.sp)
+                Text(provider.name, color = Ink, fontSize = 20.sp, lineHeight = 24.sp, fontWeight = FontWeight.ExtraBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text("Verified home-style meal provider", color = Muted, style = MaterialTheme.typography.bodySmall)
             }
             RatingPill(provider.rating, provider.reviews)
         }
@@ -1454,7 +1534,7 @@ private fun ProviderIdentity(provider: Provider) {
             Spacer(Modifier.width(12.dp))
             Icon(Icons.Outlined.LocationOn, null, tint = Muted, modifier = Modifier.size(16.dp))
             Spacer(Modifier.width(4.dp))
-            Text(provider.locality, color = Muted, fontSize = 13.sp)
+            Text(provider.locality, color = Muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }
@@ -1478,8 +1558,8 @@ private fun TrustSummary(provider: Provider) {
                                 Icon(item.first, null, tint = Brand, modifier = Modifier.size(20.dp))
                                 Spacer(Modifier.width(8.dp))
                                 Column {
-                                    Text(item.second, color = BrandDark, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                    Text(item.third, color = Muted, fontSize = 8.sp, maxLines = 1)
+                                    Text(item.second, color = BrandDark, style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Text(item.third, color = Muted, style = MaterialTheme.typography.labelSmall, maxLines = 1)
                                 }
                             }
                         }
@@ -1493,61 +1573,60 @@ private fun TrustSummary(provider: Provider) {
 @Composable
 private fun PackageHeader() {
     Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Text("Choose Your Package", color = Ink, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold)
-            Text("Select the meal plan that suits you best", color = Muted, fontSize = 12.sp)
+        Column(modifier = Modifier.weight(1f)) {
+            Text("Choose Your Package", color = Ink, fontSize = 18.sp, lineHeight = 22.sp, fontWeight = FontWeight.ExtraBold)
+            Text("Select the meal plan that suits you best", color = Muted, fontSize = 12.sp, lineHeight = 16.sp)
         }
-        Surface(color = Mist, shape = RoundedCornerShape(18.dp)) {
-            Text("Customizable menu", color = BrandDark, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 11.dp, vertical = 8.dp))
+        Spacer(Modifier.width(8.dp))
+        Surface(color = Mist, shape = RoundedCornerShape(16.dp)) {
+            Text("Customizable menu", color = BrandDark, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 9.dp, vertical = 7.dp), maxLines = 1)
         }
     }
 }
 
 @Composable
 private fun PackageCard(mealPackage: MealPackage, selected: Boolean, onSelect: () -> Unit, modifier: Modifier = Modifier) {
+    val displayTitle = when (mealPackage.kind) {
+        "LUNCH_ONLY" -> "Lunch Only"
+        "LUNCH_AND_DINNER" -> "Lunch + Dinner"
+        "DINNER_ONLY" -> "Dinner Only"
+        else -> mealPackage.title.replace(" & ", " + ")
+    }
     Surface(
-        modifier = modifier.height(196.dp).clickable(onClick = onSelect),
+        modifier = modifier.clickable(onClick = onSelect),
         color = if (selected) Color(0xFFF6FBF7) else Color.White,
         shape = RoundedCornerShape(18.dp),
         border = androidx.compose.foundation.BorderStroke(if (selected) 1.5.dp else 1.dp, if (selected) Brand else Border),
         shadowElevation = if (selected) 4.dp else 1.dp
     ) {
-        Box {
-            if (mealPackage.popular) {
-                Surface(color = BrandDark, shape = RoundedCornerShape(bottomStart = 10.dp, bottomEnd = 10.dp), modifier = Modifier.align(Alignment.TopCenter)) {
-                    Text("Most Popular", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp))
+        Column(
+            Modifier.fillMaxWidth().heightIn(min = 224.dp).padding(horizontal = 7.dp, vertical = 8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Box(Modifier.height(29.dp),contentAlignment=Alignment.TopCenter) {
+              if (mealPackage.popular) {
+                Surface(color = BrandDark, shape = RoundedCornerShape(8.dp)) {
+                    Text("Most Popular", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),maxLines=1)
                 }
+              }
             }
-            Column(Modifier.fillMaxSize().padding(horizontal = 6.dp, vertical = 9.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Spacer(Modifier.height(if (mealPackage.popular) 20.dp else 7.dp))
-                Icon(mealPackage.icon, null, tint = if (mealPackage.title.contains("Dinner")) Color(0xFF34547A) else Color(0xFFFFB300), modifier = Modifier.size(23.dp))
-                Spacer(Modifier.height(7.dp))
-                Text(mealPackage.title, color = if (selected) BrandDark else Ink, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
-                Text(mealPackage.meals, color = Muted, fontSize = 8.sp)
-                Spacer(Modifier.height(9.dp))
-                Text(mealPackage.price, color = BrandDark, fontSize = 15.sp, fontWeight = FontWeight.Black)
-                Text("/ month", color = Muted, fontSize = 8.sp)
-                Spacer(Modifier.weight(1f))
+            Icon(mealPackage.icon, null, tint = if(mealPackage.kind=="DINNER_ONLY")Color(0xFF315A81) else if(mealPackage.kind=="LUNCH_ONLY")Color(0xFFE5A900) else Brand, modifier = Modifier.size(25.dp))
+            Spacer(Modifier.height(6.dp))
+            Text(displayTitle, color = if (selected) BrandDark else Ink, fontSize = 13.sp, lineHeight = 17.sp, fontWeight = FontWeight.ExtraBold, textAlign = androidx.compose.ui.text.style.TextAlign.Center,maxLines=2,minLines=2)
+            Text(mealPackage.meals, color = Muted, fontSize = 10.sp, lineHeight = 14.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center,maxLines=1)
+            Spacer(Modifier.weight(1f))
+            Text(mealPackage.price, color = BrandDark, fontSize = 18.sp, lineHeight = 22.sp, fontWeight = FontWeight.Black,maxLines=1)
+            Text(if(mealPackage.durationDays==7)"/ 7 days" else "/ month", color = Muted, fontSize = 9.sp, lineHeight = 13.sp)
+            Spacer(Modifier.height(8.dp))
                 OutlinedButton(
                     onClick = onSelect,
-                    modifier = Modifier.fillMaxWidth().height(34.dp),
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 38.dp),
                     contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
                     shape = RoundedCornerShape(10.dp),
                     colors = ButtonDefaults.outlinedButtonColors(containerColor = if (selected) Brand else Color.Transparent, contentColor = if (selected) Color.White else BrandDark),
                     border = androidx.compose.foundation.BorderStroke(1.dp, Brand)
-                ) { Text(if (selected) "Selected" else "Select", fontSize = 9.sp, fontWeight = FontWeight.Bold) }
-            }
+                ) { Text(if (selected) "Selected" else "Select", fontSize = 10.sp, fontWeight = FontWeight.Bold,maxLines=1) }
         }
-    }
-}
-
-@Composable
-private fun LiveWeeklyMenuPreview(provider:Provider,packageKind:String?){
-    val slots=remember(provider.weeklyMenu,packageKind){
-        buildList<Pair<String,ProviderMealSlot>>{for(day in 0..6){if(packageKind!="DINNER_ONLY")add("${listOf("Mon","Tue","Wed","Thu","Fri","Sat","Sun")[day]} · Lunch" to providerMealSlot(provider.weeklyMenu,day,"LUNCH"));if(packageKind!="LUNCH_ONLY")add("${listOf("Mon","Tue","Wed","Thu","Fri","Sat","Sun")[day]} · Dinner" to providerMealSlot(provider.weeklyMenu,day,"DINNER"))}}.filter{it.second.mainCourses.isNotEmpty()||it.second.carbs.isNotEmpty()||it.second.included.isNotEmpty()}
-    }
-    Surface(Modifier.fillMaxWidth().padding(horizontal=18.dp),color=Color.White,shape=RoundedCornerShape(18.dp),border=androidx.compose.foundation.BorderStroke(1.dp,Border)){
-        Column(Modifier.padding(15.dp),verticalArrangement=Arrangement.spacedBy(10.dp)){Text("Seven-day main courses",color=Ink,fontSize=16.sp,fontWeight=FontWeight.ExtraBold);Text("Approved lunch and dinner choices available in this package",color=Muted,fontSize=9.sp);if(slots.isEmpty())Text("Menu details are being updated.",color=Muted,fontSize=10.sp) else slots.forEach{(label,menu)->Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Mist.copy(alpha=.55f)).padding(10.dp)){Text(label,color=BrandDark,fontSize=11.sp,fontWeight=FontWeight.ExtraBold);Spacer(Modifier.height(7.dp));Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){menu.mainCourses.take(2).forEach{course->Column(Modifier.weight(1f)){Box(Modifier.fillMaxWidth().height(82.dp).clip(RoundedCornerShape(11.dp))){ApprovedDishImage(if(course.photoPath.isBlank())course.copy(photoPath=provider.mealPhotoPath) else course,Modifier.fillMaxSize())};Text(course.name,color=Ink,fontSize=10.sp,fontWeight=FontWeight.Bold,maxLines=2,modifier=Modifier.padding(top=5.dp));Text(course.dietaryType.replace('_',' '),color=Muted,fontSize=7.sp)}}};val sides=(menu.carbs+menu.included).joinToString(" · ");if(sides.isNotBlank())Text("Included: $sides",color=Muted,fontSize=8.sp,modifier=Modifier.padding(top=6.dp))}}}
     }
 }
 
@@ -1567,7 +1646,7 @@ private fun RowScope.Benefit(icon: ImageVector, label: String) {
     Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
         Icon(icon, null, tint = Brand, modifier = Modifier.size(18.dp))
         Spacer(Modifier.width(5.dp))
-        Text(label, color = BrandDark, fontSize = 10.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+        Text(label, color = BrandDark, style = MaterialTheme.typography.labelSmall, maxLines = 1)
     }
 }
 
@@ -1684,6 +1763,16 @@ private data class ProviderMealSlot(
     val included: List<String>
 )
 
+private fun ProviderMealSlot.withApprovedMealFallback(fallbackPath: String): ProviderMealSlot {
+    val cleanFallback = fallbackPath.trim()
+        .takeUnless { it.equals("null", true) || it.equals("undefined", true) }
+        .orEmpty()
+    if (cleanFallback.isBlank()) return this
+    return copy(mainCourses = mainCourses.map { choice ->
+        if (choice.photoPath.isBlank()) choice.copy(photoPath = cleanFallback) else choice
+    })
+}
+
 private fun providerMealSlot(rawMenu: String, dayIndex: Int, slot: String): ProviderMealSlot {
     return runCatching {
         val rows = JSONArray(rawMenu)
@@ -1760,12 +1849,16 @@ private val dinnerChoices = listOf(
 )
 
 @Composable
-private fun WeeklyMenuScreen(provider: Provider, plan: MealPackage, onBack: () -> Unit, onGoHome: () -> Unit, changeProviderMode:Boolean=false) {
+private fun WeeklyMenuScreen(provider: Provider, plan: MealPackage, onBack: () -> Unit, onGoHome: () -> Unit, onPayLater: () -> Unit, changeProviderMode:Boolean=false) {
     val days = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
     val dates = listOf("21", "22", "23", "24", "25", "26", "27")
     var selectedDay by remember { mutableIntStateOf(0) }
-    val providerLunchMenus = remember(provider.weeklyMenu) { days.indices.associateWith { providerMealSlot(provider.weeklyMenu, it, "LUNCH") } }
-    val providerDinnerMenus = remember(provider.weeklyMenu) { days.indices.associateWith { providerMealSlot(provider.weeklyMenu, it, "DINNER") } }
+    val providerLunchMenus = remember(provider.weeklyMenu, provider.mealPhotoPath) {
+        days.indices.associateWith { providerMealSlot(provider.weeklyMenu, it, "LUNCH").withApprovedMealFallback(provider.mealPhotoPath) }
+    }
+    val providerDinnerMenus = remember(provider.weeklyMenu, provider.mealPhotoPath) {
+        days.indices.associateWith { providerMealSlot(provider.weeklyMenu, it, "DINNER").withApprovedMealFallback(provider.mealPhotoPath) }
+    }
     val lunchSelections = remember(provider.weeklyMenu) { mutableStateMapOf<Int, String>().apply { days.indices.forEach { day -> put(day, providerLunchMenus[day]?.preferredMainCourse("DEFAULT")?.name.orEmpty()) } } }
     val dinnerSelections = remember(provider.weeklyMenu) { mutableStateMapOf<Int, String>().apply { days.indices.forEach { day -> put(day, providerDinnerMenus[day]?.preferredMainCourse("DEFAULT")?.name.orEmpty()) } } }
     val lunchCarbs = remember(provider.weeklyMenu) { mutableStateMapOf<Int, String>().apply { days.indices.forEach { day -> put(day, providerLunchMenus[day]?.carbs?.firstOrNull().orEmpty()) } } }
@@ -1787,6 +1880,7 @@ private fun WeeklyMenuScreen(provider: Provider, plan: MealPackage, onBack: () -
             dinnerSelections = dinnerSelections,
             onBack = { showReview = false },
             onGoHome = onGoHome,
+            onPayLater = onPayLater,
             changeProviderMode = changeProviderMode
         )
         return
@@ -2184,11 +2278,12 @@ private fun ReviewPlanScreen(
     dinnerSelections: Map<Int, String>,
     onBack: () -> Unit,
     onGoHome: () -> Unit,
+    onPayLater: () -> Unit,
     changeProviderMode:Boolean=false
 ) {
     val basePrice = plan.price.filter { it.isDigit() }.toIntOrNull() ?: 0
     val platformFee = kotlin.math.round(basePrice * .015).toInt()
-    val deliveryFee = 99
+    val deliveryFee = kotlin.math.round(99.0 * plan.durationDays / 30.0).toInt()
     val discount = 0
     val total = basePrice + platformFee + deliveryFee - discount
     val showLunch = plan.kind != "DINNER_ONLY"
@@ -2211,6 +2306,7 @@ private fun ReviewPlanScreen(
             discount = discount,
             total = total,
             onBack = { showPayment = false },
+            onPayLater = onPayLater,
             onGoHome = onGoHome
         )
         return
@@ -2222,9 +2318,9 @@ private fun ReviewPlanScreen(
             Surface(modifier = Modifier.navigationBarsPadding(), color = Color.White, shadowElevation = 10.dp) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.width(112.dp)) {
-                        Text("Total amount", color = Muted, fontSize = 10.sp)
+                        Text("Plan estimate", color = Muted, fontSize = 13.sp)
                         Text(formatRupees(total), color = BrandDark, fontSize = 20.sp, fontWeight = FontWeight.Black)
-                        Text("Inclusive of taxes", color = Muted, fontSize = 9.sp)
+                        Text("Choose advance next", color = Muted, fontSize = 12.sp)
                     }
                     Button(
                         onClick = {
@@ -2261,7 +2357,7 @@ private fun ReviewPlanScreen(
                         Text(
                             if (!CustomerProfileStore.addressSaved) "Save Address First"
                             else if (changeProviderMode) "Confirm Provider Change"
-                            else "Proceed to Payment",
+                            else "Choose payment amount",
                             fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.weight(1f)
                         )
                         Icon(Icons.Filled.ArrowForward, null, modifier = Modifier.size(18.dp))
@@ -2311,6 +2407,22 @@ private fun subscriptionStartIso(startOffsetDays: Int = 0): String =
     Calendar.getInstance().apply { add(Calendar.DAY_OF_MONTH, 1 + startOffsetDays) }
         .let { SimpleDateFormat("yyyy-MM-dd", Locale.US).format(it.time) }
 
+private fun subscriptionStartMillis(initialIso: String?): Long {
+    val tomorrow = Calendar.getInstance().apply {
+        add(Calendar.DAY_OF_MONTH, 1)
+        set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+    }.timeInMillis
+    return initialIso?.takeIf { it.matches(Regex("\\d{4}-\\d{2}-\\d{2}")) }
+        ?.let { runCatching { SimpleDateFormat("yyyy-MM-dd", Locale.US).apply { isLenient = false }.parse(it)?.time }.getOrNull() }
+        ?.takeIf { it >= tomorrow } ?: tomorrow
+}
+
+private fun subscriptionStartIso(selectedMillis: Long): String =
+    SimpleDateFormat("yyyy-MM-dd", Locale.US).format(selectedMillis)
+
+private fun subscriptionStartLabel(selectedMillis: Long): String =
+    SimpleDateFormat("EEE, dd MMM yyyy", Locale.ENGLISH).format(selectedMillis)
+
 @Composable
 private fun ReviewHeader(onBack: () -> Unit) {
     Box(
@@ -2330,7 +2442,7 @@ private fun ReviewHeader(onBack: () -> Unit) {
         }
         Column(Modifier.padding(end = 18.dp, top = 26.dp).align(Alignment.CenterEnd), horizontalAlignment = Alignment.CenterHorizontally) {
             Icon(Icons.Outlined.AccountBalanceWallet, null, tint = Color.White, modifier = Modifier.size(22.dp))
-            Text("₹1,250", color = Color.White, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
+            Text("Secure", color = Color.White, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
         }
     }
 }
@@ -2374,7 +2486,7 @@ private fun ReviewSectionTitle(title: String) {
 private fun SelectedPlanCard(plan: MealPackage) {
     Surface(Modifier.fillMaxWidth().padding(horizontal = 20.dp), color = Mist, shape = RoundedCornerShape(18.dp)) {
         Row(Modifier.padding(vertical = 17.dp), verticalAlignment = Alignment.CenterVertically) {
-            ReviewPlanFact(Icons.Outlined.CalendarMonth, "Monthly package", "30 days plan", Modifier.weight(1f))
+            ReviewPlanFact(Icons.Outlined.CalendarMonth, if(plan.durationDays==7)"Weekly trial" else "Monthly package", "${plan.durationDays} days plan", Modifier.weight(1f))
             ReviewDivider()
             ReviewPlanFact(plan.icon, plan.title, plan.meals, Modifier.weight(1f))
             ReviewDivider()
@@ -2480,8 +2592,8 @@ private fun AddressReviewCard() {
                 IconCircle(Icons.Outlined.LocationOn)
                 Spacer(Modifier.width(10.dp))
                 Column(Modifier.weight(1f)) {
-                    Text("Complete Delivery Address", color = Ink, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold)
-                    Text("Required once · saved securely to your profile", color = Muted, fontSize = 9.sp)
+                    Text("Complete Delivery Address", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
+                    Text("Enter your delivery details below", color = Muted, fontSize = 14.sp)
                 }
                 if (CustomerProfileStore.addressSaved && !editing) TextButton(onClick = { editing = true }) { Text("Change", color = BrandDark, fontSize = 9.sp) }
             }
@@ -2511,9 +2623,9 @@ private fun AddressReviewCard() {
                             }
                         }
                     },
-                    modifier = Modifier.fillMaxWidth().height(42.dp), shape = RoundedCornerShape(13.dp), colors = ButtonDefaults.buttonColors(containerColor = BrandDark)
-                ) { Icon(Icons.Outlined.Save, null, modifier = Modifier.size(15.dp)); Spacer(Modifier.width(6.dp)); Text("Save Delivery Address", fontSize = 10.sp, fontWeight = FontWeight.Bold) }
-                Text("Your pincode was confirmed during registration. This address will be saved securely to your profile.", color = Muted, fontSize = 8.sp)
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp), shape = RoundedCornerShape(13.dp), colors = ButtonDefaults.buttonColors(containerColor = BrandDark)
+                ) { Icon(Icons.Outlined.Save, null, modifier = Modifier.size(20.dp)); Spacer(Modifier.width(6.dp)); Text("Save Delivery Address", fontSize = 15.sp, fontWeight = FontWeight.Bold) }
+                Text("Pincode is filled from registration when available. Check your address before continuing.", color = Muted, fontSize = 13.sp)
             }
         }
     }
@@ -2522,14 +2634,15 @@ private fun AddressReviewCard() {
 @Composable
 private fun ReviewAddressField(label: String, value: String, placeholder: String, numeric: Boolean = false, onValueChange: (String) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(label, color = Ink, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+        Text(label, color = Ink, fontSize = 14.sp, fontWeight = FontWeight.Bold)
         OutlinedTextField(
             value = value,
             onValueChange = { updated -> onValueChange(if (numeric) updated.filter(Char::isDigit) else updated) },
-            modifier = Modifier.fillMaxWidth().height(48.dp), singleLine = true,
-            placeholder = { Text(placeholder, fontSize = 9.sp) },
+            modifier = Modifier.fillMaxWidth().heightIn(min = 60.dp), singleLine = numeric,
+            minLines = 1,
+            placeholder = { Text(placeholder, fontSize = 16.sp) },
             keyboardOptions = KeyboardOptions(keyboardType = if (numeric) KeyboardType.Number else KeyboardType.Text),
-            textStyle = LocalTextStyle.current.copy(fontSize = 10.sp),
+            textStyle = LocalTextStyle.current.copy(fontSize = 16.sp, lineHeight = 22.sp),
             shape = RoundedCornerShape(12.dp)
         )
     }
@@ -2576,9 +2689,9 @@ private fun PriceDetailsCard(plan: MealPackage, base: Int, fee: Int, deliveryFee
     Surface(Modifier.fillMaxWidth().padding(horizontal = 20.dp), color = Color.White, shape = RoundedCornerShape(18.dp), shadowElevation = 2.dp) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
             Text("Price Details", color = Ink, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold)
-            PriceRow("Monthly plan (${plan.title})", formatRupees(base))
+            PriceRow("${if(plan.durationDays==7)"Weekly" else "Monthly"} plan (${plan.title})", formatRupees(base))
             PriceRow("Platform fee", formatRupees(fee))
-            PriceRow("30-day delivery fee", formatRupees(deliveryFee))
+            PriceRow("${plan.durationDays}-day delivery fee", formatRupees(deliveryFee))
             if(discount>0) PriceRow("Discount", "− ${formatRupees(discount)}", BrandDark)
             HorizontalDivider(color = Border)
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -2647,8 +2760,11 @@ private data class PaymentMethod(
 private enum class PrototypeState { NONE, LOADING, OFFLINE, SERVER_ERROR, SESSION_EXPIRED, NO_PROVIDERS, PAYMENT_PENDING, PAYMENT_FAILED, PROVIDER_UNAVAILABLE, PACKAGE_UNAVAILABLE, MENU_UNAVAILABLE, TERMS, PRIVACY, REFUND_POLICY, PAUSE_POLICY }
 
 @Composable
-private fun NoSubscriptionHomeScreen(onFindPlan: () -> Unit, onLogout: () -> Unit) {
+private fun NoSubscriptionHomeScreen(hasSavedPlan:Boolean,onFindPlan: () -> Unit,onResumePlan:()->Unit,onLogout: () -> Unit) {
     var testState by remember { mutableStateOf(PrototypeState.NONE) }
+    var showWallet by remember { mutableStateOf(false) }
+    BackHandler(enabled = showWallet) { showWallet = false }
+    if(showWallet){ WalletScreen(onBack={showWallet=false});return }
     BackHandler(enabled = testState != PrototypeState.NONE) { testState = PrototypeState.NONE }
     if (testState in setOf(PrototypeState.PAYMENT_PENDING, PrototypeState.PAYMENT_FAILED)) {
         PaymentOutcomeScreen(pending = testState == PrototypeState.PAYMENT_PENDING, onBack = { testState = PrototypeState.NONE }, onRetry = { testState = PrototypeState.PAYMENT_PENDING }, onChangeMethod = { testState = PrototypeState.NONE })
@@ -2668,8 +2784,8 @@ private fun NoSubscriptionHomeScreen(onFindPlan: () -> Unit, onLogout: () -> Uni
     }
     Scaffold(containerColor = Color(0xFFFAFCFA)) { padding ->
         LazyColumn(Modifier.fillMaxSize().padding(padding).navigationBarsPadding(), contentPadding = PaddingValues(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            item { NoPlanHeader(onLogout) }
-            item { NoPlanHero(onFindPlan) }
+            item { NoPlanHeader(onLogout,onWallet={showWallet=true}) }
+            item { NoPlanHero(hasSavedPlan,onFindPlan,onResumePlan,onWallet={showWallet=true}) }
             item { NoPlanBenefits() }
             item { SectionTitle("Recommended near you") }
             items(providers.take(2)) { provider -> ProviderCard(provider, onClick = onFindPlan) }
@@ -2679,20 +2795,23 @@ private fun NoSubscriptionHomeScreen(onFindPlan: () -> Unit, onLogout: () -> Uni
     }
 }
 
-@Composable private fun NoPlanHeader(onLogout: () -> Unit) {
+@Composable private fun NoPlanHeader(onLogout: () -> Unit,onWallet:()->Unit) {
     Box(Modifier.fillMaxWidth().height(175.dp).background(Brush.linearGradient(listOf(BrandDark, Brand, Lime), start = Offset.Zero, end = Offset(900f, 360f)), RoundedCornerShape(bottomStart = 28.dp, bottomEnd = 28.dp))) {
         Column(Modifier.align(Alignment.CenterStart).padding(start = 20.dp)) { Text("zomeal", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Black); Text("Welcome back!", color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.ExtraBold); Text("Your next homely meal is only a few taps away", color = Color.White.copy(alpha = .88f), fontSize = 9.sp) }
         IconButton(onClick = onLogout, modifier = Modifier.align(Alignment.TopEnd).padding(14.dp).size(40.dp).clip(CircleShape).background(Color.White.copy(alpha = .16f))) { Icon(Icons.Outlined.Logout, "Log out", tint = Color.White, modifier = Modifier.size(18.dp)) }
+        IconButton(onClick = onWallet, modifier = Modifier.align(Alignment.BottomEnd).padding(14.dp).size(42.dp).clip(CircleShape).background(Color.White.copy(alpha = .16f))) { Icon(Icons.Outlined.AccountBalanceWallet, "Wallet", tint = Color.White, modifier = Modifier.size(20.dp)) }
     }
 }
 
-@Composable private fun NoPlanHero(onFindPlan: () -> Unit) {
+@Composable private fun NoPlanHero(hasSavedPlan:Boolean,onFindPlan: () -> Unit,onResumePlan:()->Unit,onWallet:()->Unit) {
     Surface(Modifier.fillMaxWidth().padding(horizontal = 18.dp), color = Color.White, shape = RoundedCornerShape(20.dp), shadowElevation = 3.dp) {
         Column(Modifier.padding(17.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             FunnyStateIllustration(PrototypeState.NO_PROVIDERS, Modifier.size(128.dp))
             Text("No active meal plan yet", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
             Text("Choose a nearby kitchen, personalize your weekly menu and let us handle the daily cooking.", color = Muted, fontSize = 10.sp, lineHeight = 14.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-            Spacer(Modifier.height(13.dp)); Button(onClick = onFindPlan, modifier = Modifier.fillMaxWidth().height(50.dp), shape = RoundedCornerShape(15.dp), colors = ButtonDefaults.buttonColors(containerColor = BrandDark)) { Icon(Icons.Outlined.Search, null, modifier = Modifier.size(17.dp)); Spacer(Modifier.width(7.dp)); Text("Find a Meal Plan", fontSize = 11.sp, fontWeight = FontWeight.ExtraBold) }
+            Spacer(Modifier.height(13.dp)); Button(onClick = if(hasSavedPlan)onResumePlan else onFindPlan, modifier = Modifier.fillMaxWidth().height(50.dp), shape = RoundedCornerShape(15.dp), colors = ButtonDefaults.buttonColors(containerColor = BrandDark)) { Icon(if(hasSavedPlan)Icons.Outlined.PlayArrow else Icons.Outlined.Search, null, modifier = Modifier.size(17.dp)); Spacer(Modifier.width(7.dp)); Text(if(hasSavedPlan)"Continue Saved Subscription" else "Find a Meal Plan", fontSize = 11.sp, fontWeight = FontWeight.ExtraBold) }
+            Spacer(Modifier.height(8.dp));OutlinedButton(onClick=onWallet,modifier=Modifier.fillMaxWidth().height(48.dp),shape=RoundedCornerShape(15.dp)){Icon(Icons.Outlined.AccountBalanceWallet,null,tint=BrandDark,modifier=Modifier.size(17.dp));Spacer(Modifier.width(7.dp));Text("Recharge Wallet",color=BrandDark,fontSize=11.sp,fontWeight=FontWeight.ExtraBold)}
+            if(hasSavedPlan)Text("Your provider, menu, address and preferred start date are saved. No subscription is active until payment succeeds.",color=Muted,fontSize=9.sp,lineHeight=13.sp,textAlign=androidx.compose.ui.text.style.TextAlign.Center,modifier=Modifier.padding(top=9.dp))
         }
     }
 }
@@ -2769,6 +2888,7 @@ private fun NoSubscriptionHomeScreen(onFindPlan: () -> Unit, onLogout: () -> Uni
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun PaymentScreen(
     provider: Provider,
@@ -2780,7 +2900,9 @@ private fun PaymentScreen(
     deliveryFee: Int,
     discount: Int,
     total: Int,
+    initialStartDateIso:String?=null,
     onBack: () -> Unit,
+    onPayLater:()->Unit,
     onGoHome: () -> Unit
 ) {
     val context = LocalContext.current
@@ -2800,6 +2922,22 @@ private fun PaymentScreen(
     var paymentLoading by remember { mutableStateOf(false) }
     var paymentError by remember { mutableStateOf<String?>(null) }
     var verifiedPaymentId by remember { mutableStateOf("") }
+    var quotedTotal by remember { mutableStateOf<Long?>(null) }
+    var advanceText by rememberSaveable(plan.id) { mutableStateOf("") }
+    var selectedStartMillis by rememberSaveable(plan.id) { mutableLongStateOf(subscriptionStartMillis(initialStartDateIso)) }
+    var showStartDatePicker by remember { mutableStateOf(false) }
+    val selectedStartIso=subscriptionStartIso(selectedStartMillis)
+    val advancePaise = advanceAmountPaise(advanceText)
+    val validPayment = quotedTotal?.let { validAdvance(advancePaise, it) } == true
+    var paidPaise by remember { mutableLongStateOf(0L) }
+
+    LaunchedEffect(plan.id) {
+        paymentRepository.paymentQuote(plan.id) { quote, error ->
+            quotedTotal = quote?.optLong("plan_total_paise")?.takeIf { it > 0L }
+            if (quotedTotal == null) paymentError = error ?: "Could not load the current plan price. Go back and try again."
+            else if (advanceText.isBlank()) advanceText = paiseText(minOf(quotedTotal!!, 1000000L))
+        }
+    }
 
     fun checkoutAddress()=JSONObject().apply{
         put("house",CustomerProfileStore.house);put("street",CustomerProfileStore.street)
@@ -2811,26 +2949,40 @@ private fun PaymentScreen(
         put("dinner",JSONObject(dinnerSelections.mapKeys{it.key.toString()}))
         put("preference",when(provider.category){DietFilter.VEG->"VEG";DietFilter.NON_VEG->"NON_VEG";else->"BOTH"})
     }
-    LaunchedEffect(provider.id,plan.id) {
-        val payload=JSONObject().apply{
+    fun checkoutDraftPayload()=JSONObject().apply{
             put("provider",JSONObject().put("id",provider.id).put("name",provider.name).put("locality",provider.locality).put("diet",provider.diet).put("dietary_type",provider.category.name).put("description",provider.description).put("photo_path",provider.primaryPhotoPath).put("weekly_menu",JSONArray(provider.weeklyMenu)))
-            put("package",JSONObject().put("id",plan.id).put("kind",plan.kind).put("title",plan.title).put("meals",plan.meals).put("price",plan.price))
+            put("package",JSONObject().put("id",plan.id).put("kind",plan.kind).put("title",plan.title).put("meals",plan.meals).put("price",plan.price).put("duration_days",plan.durationDays))
             put("delivery_address",checkoutAddress());put("weekly_menu",checkoutMenu())
             put("base_price",basePrice);put("platform_fee",platformFee);put("delivery_fee",deliveryFee);put("discount",discount);put("total",total)
-            put("start_date",subscriptionStartIso());put("first_meal",if(plan.kind=="DINNER_ONLY")"DINNER" else "LUNCH")
+            put("start_date",selectedStartIso);put("first_meal",if(plan.kind=="DINNER_ONLY")"DINNER" else "LUNCH")
+    }
+    LaunchedEffect(provider.id,plan.id,selectedStartIso) {
+        paymentRepository.saveCheckoutDraft(provider.id,plan.id,checkoutDraftPayload()){error->if(error!=null)paymentError="Checkout could not be saved: $error"}
+    }
+
+    fun saveAndPayLater(){
+        paymentLoading=true;paymentError=null
+        paymentRepository.saveCheckoutDraft(provider.id,plan.id,checkoutDraftPayload()){error->
+            paymentLoading=false
+            if(error!=null)paymentError="Your plan could not be saved: $error" else onPayLater()
         }
-        paymentRepository.saveCheckoutDraft(provider.id,plan.id,payload){error->if(error!=null)paymentError="Checkout could not be saved: $error"}
     }
 
     fun beginPayment() {
+        if (!validPayment) { paymentError = "Enter ₹5–₹10,000, no more than the plan total."; return }
         if(activity==null){paymentError="Payment checkout requires an Android Activity";return}
         paymentLoading=true;paymentError=null;RazorpayCoordinator.result=null
         paymentRepository.createRazorpayOrder(
-            plan.id,checkoutAddress(),checkoutMenu(),subscriptionStartIso(),if(plan.kind=="DINNER_ONLY")"DINNER" else "LUNCH"
+            plan.id,checkoutAddress(),checkoutMenu(),selectedStartIso,if(plan.kind=="DINNER_ONLY")"DINNER" else "LUNCH",advancePaise!!,quotedTotal!!
         ){order,error->
             if(error!=null||order==null){paymentLoading=false;paymentError=error?:"Could not start payment";return@createRazorpayOrder}
             RazorpayCoordinator.pendingOrder=order
+            paidPaise=order.amountPaise
             runCatching{
+                // Razorpay displays its SDK compatibility report automatically in
+                // debuggable APKs. The checks still run; suppress only that
+                // developer-facing dialog so customers reach Checkout directly.
+                OpinionatedSoln.alertShownForStatus = true
                 Checkout().apply{setKeyID(order.keyId)}.open(activity,JSONObject().apply{
                     put("name","Zomeal");put("description","${provider.name} · ${plan.title}")
                     put("image","");put("order_id",order.razorpayOrderId);put("currency",order.currency);put("amount",order.amountPaise)
@@ -2857,7 +3009,9 @@ private fun PaymentScreen(
                                 paymentRepository.clearCheckoutDraft{}
                                 paymentComplete=true
                             }
-                        } else paymentComplete=true
+                        } else {
+                            paymentError="Payment is awaiting capture or plan activation. Do not pay again; reopen the app shortly to check your plan."
+                        }
                     }
                     RazorpayCoordinator.result=null
                 }
@@ -2868,17 +3022,32 @@ private fun PaymentScreen(
     }
 
     if (paymentComplete) {
+        // Show the actual advance charged, never the full plan quote as paid.
+        Column(Modifier.fillMaxSize()) {
+            Surface(color = Mist, modifier = Modifier.fillMaxWidth().statusBarsPadding()) {
+                Text("Paid now: ₹${paiseText(paidPaise)} · Remaining plan balance: ₹${paiseText(((quotedTotal ?: paidPaise) - paidPaise).coerceAtLeast(0L))}", modifier = Modifier.padding(16.dp), fontSize = 15.sp, color = BrandDark)
+            }
         PaymentSuccessScreen(
             provider = provider,
             plan = plan,
-            total = total,
+            total = paidPaise,
             paymentMethod = methods[selectedMethod].title,
             gatewayPaymentId = verifiedPaymentId,
             lunchSelections = lunchSelections,
             dinnerSelections = dinnerSelections,
             onGoHome = onGoHome
         )
+        }
         return
+    }
+
+    if(showStartDatePicker){
+        val earliest=subscriptionStartMillis(null)
+        val latest=Calendar.getInstance().apply{timeInMillis=earliest;add(Calendar.DAY_OF_MONTH,60)}.timeInMillis
+        val pickerState=rememberDatePickerState(initialSelectedDateMillis=selectedStartMillis,selectableDates=object:SelectableDates{
+            override fun isSelectableDate(utcTimeMillis:Long)=utcTimeMillis in earliest..latest
+        })
+        DatePickerDialog(onDismissRequest={showStartDatePicker=false},confirmButton={TextButton(onClick={pickerState.selectedDateMillis?.let{selectedStartMillis=it};showStartDatePicker=false}){Text("Use this date",color=BrandDark,fontWeight=FontWeight.Bold)}},dismissButton={TextButton(onClick={showStartDatePicker=false}){Text("Cancel")}}){DatePicker(state=pickerState,showModeToggle=false,title={Text("When should meals begin?",Modifier.padding(24.dp,18.dp,0.dp,8.dp),fontWeight=FontWeight.ExtraBold)},headline={Text("Choose a date within the next 60 days",Modifier.padding(horizontal=24.dp),fontSize=13.sp)})}
     }
 
     Scaffold(
@@ -2888,14 +3057,14 @@ private fun PaymentScreen(
                 Column {
                     Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.width(112.dp)) {
-                            Text("Total amount", color = Muted, fontSize = 10.sp)
-                            Text(formatRupees(total), color = BrandDark, fontSize = 20.sp, fontWeight = FontWeight.Black)
-                            Text("Inclusive of taxes", color = Muted, fontSize = 9.sp)
+                            Text("Pay now", color = Muted, fontSize = 14.sp)
+                            Text("₹${advancePaise?.let(::paiseText) ?: "—"}", color = BrandDark, fontSize = 20.sp, fontWeight = FontWeight.Black)
+                            Text("Plan advance", color = Muted, fontSize = 13.sp)
                         }
                         Button(
                             onClick = { beginPayment() },
-                            enabled = !paymentLoading,
-                            modifier = Modifier.weight(1f).height(54.dp),
+                            enabled = !paymentLoading && validPayment,
+                            modifier = Modifier.weight(1f).heightIn(min = 54.dp),
                             shape = RoundedCornerShape(17.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = Brand)
                         ) {
@@ -2904,6 +3073,9 @@ private fun PaymentScreen(
                             Text(if(paymentLoading)"Opening secure checkout…" else "Pay securely", fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.weight(1f))
                             Icon(Icons.Filled.ArrowForward, null, modifier = Modifier.size(17.dp))
                         }
+                    }
+                    TextButton(onClick={saveAndPayLater()},enabled=!paymentLoading,modifier=Modifier.fillMaxWidth().padding(horizontal=18.dp)){
+                        Icon(Icons.Outlined.BookmarkAdd,null,tint=BrandDark,modifier=Modifier.size(18.dp));Spacer(Modifier.width(7.dp));Text("Save details and pay later",color=BrandDark,fontSize=12.sp,fontWeight=FontWeight.ExtraBold)
                     }
                     HorizontalDivider(color = Border)
                     Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
@@ -2921,7 +3093,28 @@ private fun PaymentScreen(
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             item { PaymentHeader(onBack) }
-            item { CompactPaymentOverview(provider, plan, basePrice, platformFee, deliveryFee, discount, total) }
+            item {
+                Surface(Modifier.fillMaxWidth().padding(horizontal=18.dp).clickable(enabled=!paymentLoading){showStartDatePicker=true},color=Color.White,shape=RoundedCornerShape(18.dp),border=androidx.compose.foundation.BorderStroke(1.dp,Border),shadowElevation=1.dp){
+                    Row(Modifier.padding(16.dp),verticalAlignment=Alignment.CenterVertically){Surface(color=Mist,shape=CircleShape){Icon(Icons.Outlined.EventAvailable,null,tint=Brand,modifier=Modifier.padding(10.dp).size(21.dp))};Spacer(Modifier.width(11.dp));Column(Modifier.weight(1f)){Text("Subscription start date",color=Ink,fontSize=14.sp,fontWeight=FontWeight.ExtraBold);Text(subscriptionStartLabel(selectedStartMillis),color=BrandDark,fontSize=16.sp,fontWeight=FontWeight.Bold);Text("Meals begin only after successful payment",color=Muted,fontSize=10.sp)};Icon(Icons.Filled.ChevronRight,"Choose start date",tint=Brand)}
+                }
+            }
+            item {
+                Surface(Modifier.fillMaxWidth().padding(horizontal = 18.dp), color = Mist, shape = RoundedCornerShape(18.dp)) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text("Choose how much to pay now", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Ink)
+                        Text("For testing, pay an advance from ₹5 to ₹10,000. You do not need to pay the whole week or month today. The rest remains due on your plan.", fontSize = 15.sp, color = Muted)
+                        Text(quotedTotal?.let { "Full plan total: ₹${paiseText(it)}" } ?: "Loading current plan price…", fontSize = 16.sp, color = Ink)
+                        OutlinedTextField(value = advanceText, onValueChange = { if (it.length <= 8 && it.all { c -> c.isDigit() || c == '.' }) advanceText = it },
+                            enabled = !paymentLoading && quotedTotal != null, label = { Text("Pay now — tap to edit") }, prefix = { Text("₹") },
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 60.dp), singleLine = true,
+                            textStyle = LocalTextStyle.current.copy(fontSize = 20.sp), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            isError = quotedTotal != null && !validPayment,
+                            supportingText = { Text("Temporary test minimum ₹5. Maximum ₹10,000 or your plan total, whichever is lower.", fontSize = 13.sp) })
+                        if (validPayment) Text("Remaining after this payment: ₹${paiseText(quotedTotal!! - advancePaise!!)}", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = BrandDark)
+                    }
+                }
+            }
+            item { Text("${provider.name} · ${plan.title}", modifier = Modifier.padding(horizontal = 20.dp), fontSize = 16.sp, color = Ink) }
             item {
                 Column(Modifier.padding(horizontal = 20.dp, vertical = 4.dp)) {
                     Text("Choose Payment Method", color = Ink, fontSize = 17.sp, fontWeight = FontWeight.ExtraBold)
@@ -3065,7 +3258,7 @@ private fun PaymentPlanSummary(provider: Provider, plan: MealPackage) {
             Spacer(Modifier.height(14.dp))
             Surface(color = Mist, shape = RoundedCornerShape(15.dp)) {
                 Row(Modifier.fillMaxWidth().padding(vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-                    ReviewPlanFact(Icons.Outlined.CalendarMonth, "Monthly package", "30 days plan", Modifier.weight(1f))
+                    ReviewPlanFact(Icons.Outlined.CalendarMonth, if(plan.durationDays==7)"Weekly trial" else "Monthly package", "${plan.durationDays} days plan", Modifier.weight(1f))
                     ReviewDivider()
                     ReviewPlanFact(plan.icon, plan.title, plan.meals, Modifier.weight(1f))
                     ReviewDivider()
@@ -3146,7 +3339,7 @@ private fun SecurityMiniFact(icon: ImageVector, label: String) {
 private fun PaymentSuccessScreen(
     provider: Provider,
     plan: MealPackage,
-    total: Int,
+    total: Long,
     paymentMethod: String,
     gatewayPaymentId: String,
     lunchSelections: Map<Int, String>,
@@ -3219,10 +3412,10 @@ private fun PaymentSuccessScreen(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
                     Text(provider.name, color = Ink, fontWeight = FontWeight.Bold)
-                    Text("${plan.title} · ${plan.meals} · 30 days", color = Muted, fontSize = 12.sp)
+                    Text("${plan.title} · ${plan.meals} · ${plan.durationDays} days", color = Muted, fontSize = 12.sp)
                     Text("$startDate – $endDate", color = BrandDark, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     Text("First meal: $firstSlot · $firstMeal", color = Muted, fontSize = 11.sp)
-                    Text("Paid ${formatRupees(total)} using $paymentMethod", color = Muted, fontSize = 11.sp)
+                    Text("Paid ₹${paiseText(total)} using $paymentMethod", color = Muted, fontSize = 14.sp)
                 }
             },
             confirmButton = { TextButton(onClick = { showPlanDetails = false }) { Text("Done", color = BrandDark) } }
@@ -3390,7 +3583,7 @@ private fun SuccessPlanDetails(plan: MealPackage, startDate: String, endDate: St
                 Spacer(Modifier.width(7.dp))
                 Column(Modifier.weight(1f)) {
                     Text(plan.title, color = Ink, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold)
-                    Text("${plan.meals} · 30 days", color = Muted, fontSize = 8.sp)
+                    Text("${plan.meals} · ${plan.durationDays} days", color = Muted, fontSize = 8.sp)
                 }
                 Box(Modifier.width(1.dp).height(34.dp).background(Border))
                 Spacer(Modifier.width(9.dp))
@@ -3406,14 +3599,14 @@ private fun SuccessPlanDetails(plan: MealPackage, startDate: String, endDate: St
 }
 
 @Composable
-private fun PaymentConfirmedCard(total: Int, paymentMethod: String, orderId: String) {
+private fun PaymentConfirmedCard(total: Long, paymentMethod: String, orderId: String) {
     Surface(Modifier.fillMaxWidth().padding(horizontal = 20.dp), color = Mist, shape = RoundedCornerShape(17.dp)) {
         Row(Modifier.padding(15.dp), verticalAlignment = Alignment.CenterVertically) {
             Surface(color = Brand, shape = CircleShape) { Icon(Icons.Filled.Check, null, tint = Color.White, modifier = Modifier.padding(11.dp).size(20.dp)) }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text("Payment Successful!", color = BrandDark, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold)
-                Text("We've received your payment of ${formatRupees(total)}.", color = Muted, fontSize = 10.sp)
+                Text("We've received your payment of ₹${paiseText(total)}.", color = Muted, fontSize = 14.sp)
                 Text("Paid using $paymentMethod  ·  Order $orderId", color = Muted, fontSize = 9.sp)
             }
             Icon(Icons.Outlined.ReceiptLong, null, tint = Brand, modifier = Modifier.size(20.dp))
@@ -3531,6 +3724,7 @@ private fun ActiveSubscriberHome(provider: Provider, onBrowseProviders: () -> Un
     var showPauseScreen by remember { mutableStateOf(false) }
     var showFullWeeklyMenu by remember { mutableStateOf(false) }
     var showSubscribedProviderDetails by remember { mutableStateOf(false) }
+    var showBalancePayment by remember { mutableStateOf(false) }
     val todayIndex = remember { (Calendar.getInstance().get(Calendar.DAY_OF_WEEK) + 5) % 7 }
     val tomorrowIndex = (todayIndex + 1) % 7
     val persistedSubscription = CustomerSubscriptionStore.current
@@ -3674,7 +3868,8 @@ private fun ActiveSubscriberHome(provider: Provider, onBrowseProviders: () -> Un
         return
     }
     when (selectedNav) {
-        1 -> { MyPlanScreen(provider, onNav = { selectedNav = it }, onSupport = { showSupportScreen = true }, onWeeklyMenu = { showFullWeeklyMenu = true }, onProviderDetails={showSubscribedProviderDetails=true}, onBrowseProviders = onBrowseProviders); return }
+        1 -> { if(showBalancePayment) BalancePaymentScreen(onBack={showBalancePayment=false},onPaid={repository.activeSubscription{subscription,_->if(subscription!=null)CustomerSubscriptionStore.current=subscription;showBalancePayment=false}})
+            else MyPlanScreen(provider, onNav = { selectedNav = it }, onSupport = { showSupportScreen = true }, onWeeklyMenu = { showFullWeeklyMenu = true }, onProviderDetails={showSubscribedProviderDetails=true}, onBrowseProviders = onBrowseProviders,onPayBalance={showBalancePayment=true}); return }
         2 -> { OrdersScreen(provider, onNav = { selectedNav = it }, onSupport = { showSupportScreen = true }); return }
         3 -> {
             ProfileScreen(
@@ -3719,8 +3914,8 @@ private fun ActiveSubscriberHome(provider: Provider, onBrowseProviders: () -> Un
                             onInfo = { selectedMeal = "Lunch"; dialog = "meal_info" },
                             onCancel = {
                                 selectedMeal = "Lunch"
-                                if (showingTomorrowMenu || homeHour < 7) dialog = "cancel"
-                                else pauseSummary = "Lunch cancellation closed at 7:00 AM. Today's lunch is already finalized."
+                                if (showingTomorrowMenu || homeHour < 8) dialog = "cancel"
+                                else pauseSummary = "Lunch cancellation closed at 8:00 AM. Today's lunch is already finalized."
                             },
                             onChange = { selectedMeal = "Lunch"; showDailyMenuChange = true },
                             modifier = Modifier.weight(1f)
@@ -3931,7 +4126,7 @@ private fun HomeActionDialog(
                 }
                 "wallet" -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Available balance", color = Muted, fontSize = 10.sp)
-                    Text("₹1,250", color = BrandDark, fontSize = 24.sp, fontWeight = FontWeight.Black)
+                    Text("Open your wallet to view the live balance", color = BrandDark, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                     Text("Wallet credits are automatically applied to eligible renewals and refunds.", color = Muted, fontSize = 10.sp)
                 }
                 "profile" -> Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
@@ -4001,7 +4196,7 @@ private fun PauseOptionsContent(startMillis: Long?, days: Int, slot: String, onD
 }
 
 private data class ZomealNotification(
-    val id: Int,
+    val id: String,
     val category: String,
     val title: String,
     val message: String,
@@ -4013,17 +4208,20 @@ private data class ZomealNotification(
 
 @Composable
 private fun NotificationCentreScreen(onBack: () -> Unit, onDestination: (String) -> Unit) {
-    val notifications = remember {
-        mutableStateListOf(
-            ZomealNotification(1, "Delivery", "Lunch is being prepared", "Swaad Ghar has started preparing Paneer Butter Masala. Track its progress.", "2 min ago", "orders", Icons.Outlined.LocalShipping),
-            ZomealNotification(2, "Payment", "Wallet refund received", "₹300 has been credited to your Zomeal Wallet for a paused meal.", "24 min ago", "wallet", Icons.Outlined.AccountBalanceWallet),
-            ZomealNotification(3, "Menu", "Tomorrow’s menu closes soon", "Change tomorrow’s lunch or dinner before the 8:00 PM cut-off.", "1 hr ago", "weekly_menu", Icons.Outlined.RestaurantMenu),
-            ZomealNotification(4, "Plan", "Your plan has 18 days left", "Review your plan, upcoming menus and renewal information.", "Today · 9:10 AM", "plan", Icons.Outlined.CalendarMonth, true),
-            ZomealNotification(5, "Support", "Support ticket updated", "Our team replied to ticket ZM-1084 about your meal quality report.", "Yesterday", "support", Icons.Outlined.SupportAgent, true),
-            ZomealNotification(6, "Reward", "You earned a referral reward", "₹150 is ready in your wallet after your friend’s first subscription.", "10 Aug", "wallet", Icons.Outlined.CardGiftcard, true),
-            ZomealNotification(7, "Account", "Delivery address saved", "Your serviceable Home address was securely added to your profile.", "9 Aug", "profile", Icons.Outlined.LocationOn, true)
-        )
-    }
+    val context=LocalContext.current
+    val repository=remember(context){SupabaseCustomerRepository(context.applicationContext)}
+    val notifications=remember{mutableStateListOf<ZomealNotification>()}
+    var loading by remember{mutableStateOf(true)}
+    var loadError by remember{mutableStateOf<String?>(null)}
+    LaunchedEffect(Unit){repository.notificationFeed{rows,error->
+        loading=false;loadError=error
+        if(rows!=null){notifications.clear();for(index in 0 until rows.length()){
+            val row=rows.optJSONObject(index)?:continue
+            val category=row.optString("category","Account")
+            val icon=when(category){"Payment","Reward"->Icons.Outlined.AccountBalanceWallet;"Delivery"->Icons.Outlined.LocalShipping;"Menu"->Icons.Outlined.RestaurantMenu;else->Icons.Outlined.Notifications}
+            notifications.add(ZomealNotification(row.optString("id"),category,row.optString("title"),row.optString("message"),row.optString("created_at").replace("T"," · ").take(19),row.optString("destination","home"),icon,row.optBoolean("read")))
+        }}
+    }}
     var filter by remember { mutableStateOf("All") }
     val visible = notifications.filter { filter == "All" || !it.read }
     val unread = notifications.count { !it.read }
@@ -4035,7 +4233,7 @@ private fun NotificationCentreScreen(onBack: () -> Unit, onDestination: (String)
             contentPadding = PaddingValues(bottom = 22.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            item { NotificationHeader(unread, onBack) { notifications.indices.forEach { index -> notifications[index] = notifications[index].copy(read = true) } } }
+            item { NotificationHeader(unread, onBack) { notifications.indices.forEach { index -> notifications[index] = notifications[index].copy(read = true) };repository.markNotificationsRead() } }
             item {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf("All", "Unread").forEach { option ->
@@ -4043,7 +4241,9 @@ private fun NotificationCentreScreen(onBack: () -> Unit, onDestination: (String)
                     }
                 }
             }
-            if (visible.isEmpty()) item { NotificationEmptyState() }
+            if(loading)item{Text("Loading notifications…",color=Muted,fontSize=11.sp,modifier=Modifier.padding(horizontal=18.dp))}
+            loadError?.let{message->item{Text(message,color=Color(0xFFB3261E),fontSize=10.sp,modifier=Modifier.padding(horizontal=18.dp))}}
+            if (!loading&&visible.isEmpty()) item { NotificationEmptyState() }
             visible.forEachIndexed { index, notification ->
                 if (index == 0 || notification.time.startsWith("Yesterday") || notification.time.startsWith("10 ")) item { Text(if (index == 0) "Recent" else "Earlier", color = Ink, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(start = 18.dp, top = 3.dp)) }
                 item(key = notification.id) {
@@ -4052,11 +4252,13 @@ private fun NotificationCentreScreen(onBack: () -> Unit, onDestination: (String)
                         onClick = {
                             val actualIndex = notifications.indexOfFirst { it.id == notification.id }
                             if (actualIndex >= 0) notifications[actualIndex] = notification.copy(read = true)
+                            repository.markNotificationsRead(notification.id,true)
                             onDestination(notification.destination)
                         },
                         onReadToggle = {
                             val actualIndex = notifications.indexOfFirst { it.id == notification.id }
                             if (actualIndex >= 0) notifications[actualIndex] = notification.copy(read = !notification.read)
+                            repository.markNotificationsRead(notification.id,!notification.read)
                         }
                     )
                 }
@@ -4113,6 +4315,7 @@ private fun NotificationItem(notification: ZomealNotification, onClick: () -> Un
 @Composable
 private fun WalletScreen(onBack: () -> Unit) {
     val context = LocalContext.current
+    val activityHost = context as? Activity
     val repository = remember(context) { SupabaseCustomerRepository(context.applicationContext) }
     var balance by remember { mutableIntStateOf(0) }
     var showAddMoney by remember { mutableStateOf(false) }
@@ -4128,7 +4331,12 @@ private fun WalletScreen(onBack: () -> Unit) {
     var rewardLimit by remember { mutableIntStateOf(1000) }
     var activity by remember { mutableStateOf(JSONArray()) }
     var loading by remember { mutableStateOf(true) }
-    LaunchedEffect(Unit) {
+    var rechargeLoading by remember { mutableStateOf(false) }
+    var rechargeAmount by rememberSaveable { mutableStateOf("5") }
+    var dashboardReload by remember { mutableIntStateOf(0) }
+    val rechargePaise = advanceAmountPaise(rechargeAmount)
+    val rechargeValid = rechargePaise != null && rechargePaise in 500L..1000000L
+    LaunchedEffect(dashboardReload) {
         repository.referralDashboard { data, error ->
             loading = false
             if (data != null) {
@@ -4143,6 +4351,40 @@ private fun WalletScreen(onBack: () -> Unit) {
                 rewardLimit = (data.optLong("cycle_cap_paise") / 100).toInt()
                 activity = data.optJSONArray("activity") ?: JSONArray()
             } else walletMessage = error ?: "Could not load your wallet. Please try again."
+        }
+    }
+    fun startWalletRecharge() {
+        if (activityHost == null || !rechargeValid || rechargeLoading) return
+        rechargeLoading = true; walletMessage = null
+        repository.createWalletRechargeOrder(rechargePaise!!) { order, error ->
+            if (order == null) { rechargeLoading = false; walletMessage = error ?: "Could not start wallet recharge"; return@createWalletRechargeOrder }
+            RazorpayCoordinator.pendingOrder = order
+            runCatching {
+                Checkout().apply { setKeyID(order.keyId) }.open(activityHost, JSONObject().apply {
+                    put("name", if (order.testMode) "Zomeal Test" else "Zomeal")
+                    put("description", if (order.testMode) "TEST MODE · no real money or wallet credit" else "Add money to Zomeal Wallet")
+                    put("order_id", order.razorpayOrderId); put("currency", order.currency); put("amount", order.amountPaise)
+                    put("theme", JSONObject().put("color", "#078A45")); put("retry", JSONObject().put("enabled", true).put("max_count", 2))
+                })
+            }.onFailure { rechargeLoading = false; walletMessage = it.message ?: "Could not open Razorpay" }
+        }
+    }
+    LaunchedEffect(RazorpayCoordinator.result) {
+        when (val result = RazorpayCoordinator.result) {
+            is RazorpayAppResult.Success -> {
+                val order = RazorpayCoordinator.pendingOrder
+                if (order == null) { rechargeLoading = false; walletMessage = "Payment context was lost" }
+                else repository.verifyRazorpayPayment(order.paymentOrderId, result.orderId.ifBlank { order.razorpayOrderId }, result.paymentId, result.signature) { value, error ->
+                    rechargeLoading = false
+                    if (error == null && value?.optBoolean("verified") == true && value.optBoolean("captured") && value.optBoolean("wallet_credited")) {
+                        showAddMoney = false; walletMessage = "₹${paiseText(order.amountPaise)} added successfully."; dashboardReload++
+                    } else walletMessage = error ?: value?.optString("activation_note")?.takeIf { it.isNotBlank() }
+                        ?: "Payment was not captured and your wallet was not credited. Do not retry until you check Razorpay status."
+                }
+                RazorpayCoordinator.result = null
+            }
+            is RazorpayAppResult.Failure -> { rechargeLoading = false; walletMessage = result.message; RazorpayCoordinator.result = null }
+            null -> Unit
         }
     }
     fun shareReferral(channel: String) {
@@ -4190,19 +4432,31 @@ private fun WalletScreen(onBack: () -> Unit) {
 
     if (showAddMoney) {
         AlertDialog(
-            onDismissRequest = { showAddMoney = false },
+            onDismissRequest = { if (!rechargeLoading) showAddMoney = false },
             icon = { Icon(Icons.Outlined.AccountBalanceWallet, null, tint = Brand) },
             title = { Text("Add Money", fontWeight = FontWeight.ExtraBold) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(11.dp)) {
-                    Text("Wallet recharge is coming soon.", color = Ink, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    Text("For safety, only verified Razorpay payments and referral rewards can change this balance. No demo money will be added.", color = Muted, fontSize = 10.sp)
+                    Text("Testing limit: add ₹5–₹10,000 securely through Razorpay.", color = Ink, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    OutlinedTextField(
+                        value = rechargeAmount,
+                        onValueChange = { if (it.length <= 8 && it.all { c -> c.isDigit() || c == '.' }) rechargeAmount = it },
+                        enabled = !rechargeLoading, label = { Text("Recharge amount") }, prefix = { Text("₹") }, singleLine = true,
+                        isError = rechargeAmount.isNotBlank() && !rechargeValid,
+                        supportingText = { Text("Temporary test minimum ₹5 · Maximum ₹10,000") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        textStyle = LocalTextStyle.current.copy(fontSize = 19.sp), modifier = Modifier.fillMaxWidth()
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf("5", "10", "50").forEach { value -> AssistChip(onClick = { rechargeAmount = value }, label = { Text("₹$value") }, enabled = !rechargeLoading) }
+                    }
+                    Text("Money is credited only after Razorpay confirms a captured payment.", color = Muted, fontSize = 12.sp)
                 }
             },
             confirmButton = {
-                Button(onClick = { showAddMoney = false }, colors = ButtonDefaults.buttonColors(containerColor = Brand), shape = RoundedCornerShape(12.dp)) { Text("Got it", fontWeight = FontWeight.Bold) }
+                Button(onClick = ::startWalletRecharge, enabled = rechargeValid && !rechargeLoading, colors = ButtonDefaults.buttonColors(containerColor = Brand), shape = RoundedCornerShape(12.dp)) { Text(if (rechargeLoading) "Please wait…" else "Pay securely", fontWeight = FontWeight.Bold) }
             },
-            dismissButton = { TextButton(onClick = { showAddMoney = false }) { Text("Cancel", color = Muted) } }
+            dismissButton = { TextButton(onClick = { showAddMoney = false }, enabled = !rechargeLoading) { Text("Cancel", color = Muted) } }
         )
     }
 }
@@ -4342,7 +4596,8 @@ private fun WalletTransactions(activity: JSONArray, loading: Boolean) {
                     else -> (0 until activity.length()).forEach { index ->
                         val entry = activity.optJSONObject(index) ?: JSONObject()
                         val amount = (entry.optLong("amount_paise") / 100).toInt()
-                        WalletTransaction(Icons.Outlined.CardGiftcard, if (entry.optString("type").startsWith("REFERR")) "Referral reward" else "Wallet activity", entry.optString("description", "Verified Zomeal activity"), "${if (amount >= 0) "+" else "−"} ₹${kotlin.math.abs(amount)}", if (amount >= 0) BrandDark else Ink)
+                        val type = entry.optString("type")
+                        WalletTransaction(when(type){"RECHARGE"->Icons.Outlined.AddCard;"SUBSCRIPTION_DEBIT"->Icons.Outlined.Restaurant;else->Icons.Outlined.CardGiftcard}, when { type == "RECHARGE" -> "Money added"; type == "SUBSCRIPTION_DEBIT" -> "Meal payment"; type.startsWith("REFERR") -> "Referral reward"; else -> "Wallet activity" }, entry.optString("description", "Verified Zomeal activity"), "${if (amount >= 0) "+" else "−"} ₹${kotlin.math.abs(amount)}", if (amount >= 0) BrandDark else Color(0xFFB3261E))
                         if (index < activity.length() - 1) HorizontalDivider(color = Border)
                     }
                 }
@@ -4388,7 +4643,49 @@ private fun AppSectionHeader(title: String, subtitle: String, icon: ImageVector,
 }
 
 @Composable
-private fun MyPlanScreen(provider: Provider, onNav: (Int) -> Unit, onSupport: () -> Unit, onWeeklyMenu: () -> Unit, onProviderDetails:()->Unit, onBrowseProviders: () -> Unit) {
+private fun BalancePaymentScreen(onBack:()->Unit,onPaid:()->Unit){
+    val context=LocalContext.current;val activity=context as? Activity
+    val repository=remember(context.applicationContext){SupabaseCustomerRepository(context.applicationContext)}
+    val subscriptionId=CustomerSubscriptionStore.current?.id.orEmpty()
+    var quote by remember{mutableStateOf<JSONObject?>(null)};var amountText by rememberSaveable{mutableStateOf("")}
+    var loading by remember{mutableStateOf(true)};var error by remember{mutableStateOf<String?>(null)}
+    val amount=advanceAmountPaise(amountText);val minimum=quote?.optLong("minimum_paise")?:Long.MAX_VALUE
+    val maximum=quote?.optLong("maximum_paise")?:0L;val valid=amount!=null&&amount in minimum..maximum
+    LaunchedEffect(subscriptionId){RazorpayCoordinator.result=null;RazorpayCoordinator.pendingOrder=null
+        repository.balancePaymentQuote(subscriptionId){value,message->loading=false;quote=value;error=message
+            if(value!=null)amountText=paiseText(value.optLong("maximum_paise"))}}
+    fun start(){if(activity==null||!valid)return;loading=true;error=null
+        repository.createBalanceRazorpayOrder(subscriptionId,amount!!){order,message->
+            if(order==null){loading=false;error=message?:"Could not start payment";return@createBalanceRazorpayOrder}
+            RazorpayCoordinator.pendingOrder=order
+            runCatching{Checkout().apply{setKeyID(order.keyId)}.open(activity,JSONObject().apply{
+                put("name","Zomeal");put("description","Plan balance payment");put("order_id",order.razorpayOrderId);put("currency",order.currency);put("amount",order.amountPaise)
+                put("theme",JSONObject().put("color","#078A45"));put("retry",JSONObject().put("enabled",true).put("max_count",2))
+            })}.onFailure{loading=false;error=it.message?:"Could not open Razorpay"}
+        }
+    }
+    LaunchedEffect(RazorpayCoordinator.result){when(val result=RazorpayCoordinator.result){
+        is RazorpayAppResult.Success->{val order=RazorpayCoordinator.pendingOrder
+            if(order==null){loading=false;error="Payment context was lost"}else repository.verifyRazorpayPayment(order.paymentOrderId,result.orderId.ifBlank{order.razorpayOrderId},result.paymentId,result.signature){value,message->
+                loading=false;if(message==null&&value?.optBoolean("verified")==true&&value.optBoolean("captured"))onPaid() else error=message?:"Payment is awaiting capture. Do not pay again."}
+            RazorpayCoordinator.result=null}
+        is RazorpayAppResult.Failure->{loading=false;error=result.message;RazorpayCoordinator.result=null};null->Unit}}
+    Scaffold(containerColor=Color(0xFFFAFCFA),topBar={Row(Modifier.fillMaxWidth().statusBarsPadding().padding(12.dp),verticalAlignment=Alignment.CenterVertically){IconButton(onClick=onBack){Icon(Icons.Filled.ArrowBack,"Back")};Text("Pay plan balance",fontSize=21.sp,fontWeight=FontWeight.Bold)}}){padding->
+        Column(Modifier.fillMaxSize().padding(padding).padding(20.dp).verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(14.dp)){
+            Text("Complete your selected plan",fontSize=24.sp,fontWeight=FontWeight.ExtraBold,color=Ink)
+            Text("This payment reduces your outstanding plan balance. It does not add money to your wallet.",fontSize=15.sp,color=Muted)
+            quote?.let{Text("Paid ₹${paiseText(it.optLong("paid_paise"))} of ₹${paiseText(it.optLong("plan_total_paise"))}",fontSize=17.sp,color=Ink);Text("Remaining ₹${paiseText(it.optLong("remaining_paise"))}",fontSize=20.sp,fontWeight=FontWeight.Bold,color=BrandDark)}
+            OutlinedTextField(value=amountText,onValueChange={if(it.length<=8&&it.all{c->c.isDigit()||c=='.'})amountText=it},enabled=!loading&&quote!=null,
+                label={Text("Amount to pay now")},prefix={Text("₹")},singleLine=true,isError=quote!=null&&!valid,modifier=Modifier.fillMaxWidth().heightIn(min=60.dp),textStyle=LocalTextStyle.current.copy(fontSize=20.sp),keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Decimal),
+                supportingText={if(quote!=null)Text("Allowed: ₹${paiseText(minimum)}–₹${paiseText(maximum)}",fontSize=13.sp)})
+            error?.let{Text(it,color=Color(0xFFD64545),fontSize=14.sp)}
+            Button(onClick={start()},enabled=valid&&!loading,modifier=Modifier.fillMaxWidth().heightIn(min=54.dp),colors=ButtonDefaults.buttonColors(containerColor=Brand)){Text(if(loading)"Please wait…" else "Pay securely with Razorpay",fontSize=16.sp,fontWeight=FontWeight.Bold)}
+            Text("Your payment is credited only after Razorpay verifies it. Never close the app while verification is in progress.",fontSize=13.sp,color=Muted)
+        }}
+}
+
+@Composable
+private fun MyPlanScreen(provider: Provider, onNav: (Int) -> Unit, onSupport: () -> Unit, onWeeklyMenu: () -> Unit, onProviderDetails:()->Unit, onBrowseProviders: () -> Unit,onPayBalance:()->Unit) {
     val context = LocalContext.current.applicationContext
     val repository = remember(context) { SupabaseCustomerRepository(context) }
     var message by remember { mutableStateOf<String?>(null) }
@@ -4400,6 +4697,20 @@ private fun MyPlanScreen(provider: Provider, onNav: (Int) -> Unit, onSupport: ()
             item { AppSectionHeader("My Plan", "Manage your active meal subscription", Icons.Outlined.CalendarMonth) { onNav(0) } }
             message?.let { item { WalletMessageBanner(it) { message = null } } }
             item { MyPlanHero(provider,onProviderDetails) }
+            item {
+                CustomerSubscriptionStore.current?.payment?.takeIf { it.has("remaining_paise") }?.let { payment ->
+                    Surface(Modifier.fillMaxWidth().padding(horizontal = 18.dp), color = Mist, shape = RoundedCornerShape(16.dp)) {
+                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("Your plan payments", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Ink)
+                            Text("Plan total: ₹${paiseText(payment.optLong("plan_total_paise"))}", fontSize = 16.sp)
+                            Text("Paid: ₹${paiseText(payment.optLong("paid_paise"))}", fontSize = 16.sp)
+                            Text("Remaining: ₹${paiseText(payment.optLong("remaining_paise"))}", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = BrandDark)
+                            Text("This is your plan balance, not wallet credit.", fontSize = 13.sp, color = Muted)
+                            if(payment.optLong("remaining_paise")>0) Button(onClick=onPayBalance,modifier=Modifier.fillMaxWidth().heightIn(min=48.dp),colors=ButtonDefaults.buttonColors(containerColor=Brand)) { Text("Pay remaining balance",fontSize=15.sp,fontWeight=FontWeight.Bold) }
+                        }
+                    }
+                }
+            }
             item { PlanTimelineCard() }
             item { Text("Weekly Menu", color = Ink, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(horizontal = 18.dp)) }
             item { MyPlanWeekPreview(onWeeklyMenu) }
@@ -4482,8 +4793,13 @@ private fun PlanManagementActions(onPause: () -> Unit, onChangeProvider: () -> U
 
 @Composable
 private fun PlanPaymentSummary() {
+    val payment = CustomerSubscriptionStore.current?.payment ?: return
     Surface(Modifier.fillMaxWidth().padding(horizontal = 18.dp), color = Color.White, shape = RoundedCornerShape(17.dp), border = androidx.compose.foundation.BorderStroke(1.dp, Border)) {
-        Row(Modifier.padding(13.dp), verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Outlined.ReceiptLong, null, tint = Brand, modifier = Modifier.size(21.dp)); Spacer(Modifier.width(9.dp)); Column(Modifier.weight(1f)) { Text("Last payment", color = Ink, fontSize = 11.sp, fontWeight = FontWeight.Bold); Text("₹6,394 · UPI · ZM29722124", color = Muted, fontSize = 9.sp) }; Surface(color = Mist, shape = RoundedCornerShape(9.dp)) { Text("Paid", color = BrandDark, fontSize = 8.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)) } }
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("Last payment", color = Ink, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            Text("₹${paiseText(payment.optLong("amount_paise"))} · ${payment.optString("status")}", color = BrandDark, fontSize = 16.sp)
+            Text(payment.optString("gateway_payment_id"), color = Muted, fontSize = 13.sp)
+        }
     }
 }
 
@@ -5320,7 +5636,7 @@ private fun ProfileScreen(
             item { AppSectionHeader("Profile", "Your account, preferences and security", Icons.Outlined.Person) { onNav(0) } }
             item { ProfileIdentityCard { dialog = "Edit profile" } }
             item { SectionTitle("Account") }
-            item { ProfileMenuCard(listOf(Triple(Icons.Outlined.LocationOn, "Saved addresses", if (CustomerProfileStore.addressSaved) "Home · ${CustomerProfileStore.locality}" else "Add your delivery address"), Triple(Icons.Outlined.AccountBalanceWallet, "Zomeal Wallet", "₹1,250 available"), Triple(Icons.Outlined.Payment, "Payment methods", "UPI and cards"))) { label -> when (label) { "Zomeal Wallet" -> onWallet(); "Saved addresses" -> editAddress = true; else -> dialog = label } } }
+            item { ProfileMenuCard(listOf(Triple(Icons.Outlined.LocationOn, "Saved addresses", if (CustomerProfileStore.addressSaved) "Home · ${CustomerProfileStore.locality}" else "Add your delivery address"), Triple(Icons.Outlined.AccountBalanceWallet, "Zomeal Wallet", "View live balance"), Triple(Icons.Outlined.Payment, "Payment methods", "UPI and cards"))) { label -> when (label) { "Zomeal Wallet" -> onWallet(); "Saved addresses" -> editAddress = true; else -> dialog = label } } }
             item { SectionTitle("Meal preferences") }
             item { PreferenceCard { dialog = it } }
             requestSubmitted?.let { message ->
@@ -5472,7 +5788,7 @@ private fun SubscriberHeader(provider: Provider, onNotifications: () -> Unit, on
         }
         Row(Modifier.padding(end = 16.dp, top = 24.dp).align(Alignment.TopEnd), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             HomeHeaderAction(Icons.Outlined.Notifications, "Notifications", onNotifications, badge = "3", caption = "Alerts")
-            HomeHeaderAction(Icons.Outlined.AccountBalanceWallet, "Wallet", onWallet, caption = "₹1,250")
+            HomeHeaderAction(Icons.Outlined.AccountBalanceWallet, "Wallet", onWallet, caption = "Open")
         }
         Box(Modifier.align(Alignment.BottomCenter)) { ActivePlanCard(provider) }
     }

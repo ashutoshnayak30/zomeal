@@ -53,6 +53,9 @@ verify_jwt = false
 [functions.verify-razorpay-payment]
 verify_jwt = false
 
+[functions.razorpay-webhook]
+verify_jwt = false
+
 [functions.website-provider-search]
 verify_jwt = false
 
@@ -60,6 +63,9 @@ verify_jwt = false
 verify_jwt = true
 
 [functions.admin-account-cleanup]
+verify_jwt = true
+
+[functions.send-fcm-notification]
 verify_jwt = true
 
 [functions.msg91-send-sms]

@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "1061587331635",
+    "project_id": "zomeal20-04e30a3d",
+    "storage_bucket": "zomeal20-04e30a3d.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1061587331635:android:784421c1c5968cbb761146",
+        "android_client_info": {
+          "package_name": "com.zomeal.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD1BA0XU6oKi8DtlZkB7s2QdVUILIC_J9g"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1061587331635:android:63e77846c91357c9761146",
+        "android_client_info": {
+          "package_name": "com.zomeal.provider"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD1BA0XU6oKi8DtlZkB7s2QdVUILIC_J9g"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

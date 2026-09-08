@@ -36,9 +36,9 @@ fun ManageBusinessScreen(
     onSubmitAll: () -> Unit
 ) {
     val enabledPackages = buildList {
-        if (ProviderDraft.lunchEnabled) add("Lunch ₹${ProviderDraft.lunchPrice}")
-        if (ProviderDraft.dinnerEnabled) add("Dinner ₹${ProviderDraft.dinnerPrice}")
-        if (ProviderDraft.bothEnabled) add("Lunch + Dinner ₹${ProviderDraft.bothPrice}")
+        if (ProviderDraft.lunchEnabled) add("Lunch ₹${ProviderDraft.weeklyLunchPrice}/week · ₹${ProviderDraft.lunchPrice}/month")
+        if (ProviderDraft.dinnerEnabled) add("Dinner ₹${ProviderDraft.weeklyDinnerPrice}/week · ₹${ProviderDraft.dinnerPrice}/month")
+        if (ProviderDraft.bothEnabled) add("Lunch + Dinner ₹${ProviderDraft.weeklyBothPrice}/week · ₹${ProviderDraft.bothPrice}/month")
     }
     val totalDishes = ProviderDraft.menus.sumOf { day ->
         day.lunch.count { it.name.isNotBlank() } + day.dinner.count { it.name.isNotBlank() }

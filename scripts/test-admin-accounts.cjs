@@ -20,7 +20,11 @@ async function main() {
     // Legacy pg_get_functiondef text surgery depends on server pretty-printing.
     // It changes onboarding only and is superseded by later function definitions.
     if(file==='202608140007_fix_mobile_submission_block.sql') continue;
-    const sql=fs.readFileSync(path.join(migrations,file),'utf8').replace(/create extension if not exists pgcrypto;/gi,'');
+    const sql=fs.readFileSync(path.join(migrations,file),'utf8')
+      .replace(/create extension if not exists pgcrypto;/gi,'')
+      // PGlite has no pg_cron. The scheduled function itself remains covered;
+      // only Supabase's external five-minute job registration is omitted here.
+      .replace(/create extension if not exists pg_cron with schema extensions;\s*do \$\$[\s\S]*?end \$\$;/gi,'');
     try { await db.exec(sql); } catch(e) {throw new Error(`Migration ${file}: ${e.message}`, {cause:e});}
   }
   const superId='10000000-0000-4000-8000-000000000001';
@@ -72,6 +76,32 @@ async function main() {
   assert.equal(provider.members.length,1);
   assert.ok(Array.isArray(provider.menus));
   // Refuse blocked transactions and retain every dependent row.
+  await db.exec(`begin;
+    insert into packages(id,provider_id,name,kind,dietary_type,duration_days) values('30000000-0000-4000-8000-000000000009','${providerId}','Advance test','LUNCH_ONLY','VEG',7);
+    insert into customer_subscriptions(id,customer_id,provider_id,package_id,status,start_date,end_date,total_paid_paise,package_price_paise)
+      values('40000000-0000-4000-8000-000000000009','${userId}','${providerId}','30000000-0000-4000-8000-000000000009','ACTIVE',current_date,current_date+6,50000,100000);
+    insert into payment_orders(customer_id,provider_id,package_id,subscription_id,receipt,package_amount_paise,amount_paise,plan_total_paise,status,checkout_payload,gateway_payment_id)
+      values('${userId}','${providerId}','30000000-0000-4000-8000-000000000009','40000000-0000-4000-8000-000000000009','advance-fixture',50000,50000,116575,'CAPTURED',
+        '{"purpose":"PLAN_BALANCE","subscription_id":"40000000-0000-4000-8000-000000000009"}','pay_advance_fixture');`);
+  await asUser(userId);
+  const advanceBalance=await rpc('customer_plan_balance',[]);
+  assert.equal(advanceBalance.plan_total_paise,116575);
+  assert.equal(advanceBalance.paid_paise,50000);
+  assert.equal(advanceBalance.remaining_paise,66575);
+  const advanceState=await rpc('customer_active_subscription_state',[]);
+  assert.equal(advanceState.payment.remaining_paise,66575);
+  assert.equal(advanceState.payment.plan_package_paise,100000);
+  const advanceOrderId=(await db.query("select id from payment_orders where receipt='advance-fixture'")).rows[0].id;
+  const applied=await rpc('apply_captured_payment',[advanceOrderId,userId]);
+  assert.equal(applied.wallet_balance_paise,50000);
+  assert.equal((await rpc('customer_plan_balance',[])).remaining_paise,16575);
+  assert.equal((await db.query("select total_paid_paise from customer_subscriptions where id='40000000-0000-4000-8000-000000000009'")).rows[0].total_paid_paise,100000);
+  assert.equal((await db.query("select count(*)::int n from finance_journal_entries where source_type='payment_order' and source_id=$1",[advanceOrderId])).rows[0].n,1);
+  assert.equal((await rpc('apply_captured_payment',[advanceOrderId,userId])).already_applied,true);
+  await asUser(adminId);
+  assert.equal(await rpc('customer_plan_balance',[]),null);
+  await db.exec('rollback');
+  await asUser(superId);
   await db.exec(`begin; insert into packages(id,provider_id,name,kind,dietary_type,duration_days) values('30000000-0000-4000-8000-000000000001','${providerId}','Weekly lunch','LUNCH_ONLY','VEG',7);
     insert into payment_orders(customer_id,provider_id,package_id,receipt,package_amount_paise,amount_paise,test_mode,status)
     values('${userId}','${providerId}','30000000-0000-4000-8000-000000000001','real-test-fixture',100,100,false,'CREATED');`);

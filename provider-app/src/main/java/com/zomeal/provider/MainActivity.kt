@@ -1,6 +1,8 @@
 package com.zomeal.provider
 
 import android.os.Bundle
+import android.os.Build
+import android.Manifest
 import androidx.activity.compose.BackHandler
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -44,6 +46,10 @@ private val Mist = Color(0xFFF1F7F2)
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        ProviderPushNotifications.initialize(applicationContext)
+        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 4201)
+        }
         setContent { ProviderTheme { ProviderApp() } }
     }
 }
@@ -54,9 +60,9 @@ private fun draftResumeScreen(): Screen = when {
     ProviderDraft.businessName.isBlank() || ProviderDraft.contactName.isBlank() || ProviderDraft.address.isBlank() -> Screen.Business
     ProviderDraft.servicePincodes.none { it.verified } -> Screen.Service
     !(ProviderDraft.lunchEnabled || ProviderDraft.dinnerEnabled || ProviderDraft.bothEnabled) ||
-        (ProviderDraft.lunchEnabled && ProviderDraft.lunchPrice.isBlank()) ||
-        (ProviderDraft.dinnerEnabled && ProviderDraft.dinnerPrice.isBlank()) ||
-        (ProviderDraft.bothEnabled && (ProviderDraft.bothPrice.isBlank() || ProviderDraft.bothLunchDailyPrice.isBlank())) -> Screen.Packages
+        (ProviderDraft.lunchEnabled && (ProviderDraft.weeklyLunchPrice.isBlank() || ProviderDraft.lunchPrice.isBlank())) ||
+        (ProviderDraft.dinnerEnabled && (ProviderDraft.weeklyDinnerPrice.isBlank() || ProviderDraft.dinnerPrice.isBlank())) ||
+        (ProviderDraft.bothEnabled && (ProviderDraft.weeklyBothPrice.isBlank() || ProviderDraft.bothPrice.isBlank() || ProviderDraft.bothLunchDailyPrice.isBlank())) -> Screen.Packages
     ProviderDraft.savedMenuDays.any { !it } -> Screen.Menu
     ProviderDraft.deliveryPhone.length != 10 -> Screen.Operations
     else -> Screen.Review
