@@ -1226,13 +1226,13 @@ private fun DietChip(option: DietFilter, selected: Boolean, modifier: Modifier =
 @Composable
 private fun ProviderCard(provider: Provider, onClick: () -> Unit) {
     Surface(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp).clickable(onClick = onClick),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp).height(184.dp).clickable(onClick = onClick),
         shape = RoundedCornerShape(22.dp),
         color = Color.White,
         shadowElevation = 5.dp,
         border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFF0F3F1))
     ) {
-        Row(Modifier.heightIn(min = 168.dp).padding(10.dp)) {
+        Row(Modifier.fillMaxSize().padding(10.dp)) {
             Box(Modifier.width(124.dp).fillMaxHeight().clip(RoundedCornerShape(17.dp)).background(provider.tint)) {
                 ApprovedProviderImage(provider, Modifier.fillMaxSize())
                 Surface(Modifier.padding(8.dp), color = Color.White.copy(alpha = .92f), shape = RoundedCornerShape(14.dp)) {
@@ -1772,8 +1772,8 @@ private fun AboutProvider(provider: Provider) {
 @Composable
 private fun ProviderKitchenCard(provider:Provider){
     Surface(Modifier.fillMaxWidth().padding(horizontal=18.dp),color=Mist,shape=RoundedCornerShape(18.dp)){
-        Row(Modifier.heightIn(min=112.dp),verticalAlignment=Alignment.CenterVertically){
-            ApprovedMediaImage(provider.kitchenPhotoPath,"${provider.name} kitchen",Modifier.width(150.dp).fillMaxHeight().clip(RoundedCornerShape(topStart=18.dp,bottomStart=18.dp))){
+        Row(Modifier.fillMaxWidth().height(132.dp),verticalAlignment=Alignment.CenterVertically){
+            ApprovedMediaImage(provider.kitchenPhotoPath,"${provider.name} kitchen",Modifier.width(150.dp).height(132.dp).clip(RoundedCornerShape(topStart=18.dp,bottomStart=18.dp))){
                 Box(Modifier.fillMaxSize().background(provider.tint),contentAlignment=Alignment.Center){Icon(Icons.Outlined.SoupKitchen,null,tint=Brand,modifier=Modifier.size(38.dp))}
             }
             Column(Modifier.weight(1f).padding(14.dp)){Text("Inside the kitchen",color=Ink,fontSize = CustomerTypeScale.BodyLarge,fontWeight=FontWeight.ExtraBold);Spacer(Modifier.height(5.dp));Text("An approved photo shared by this provider and verified by Zomeal.",color=Muted,fontSize = CustomerTypeScale.Caption,lineHeight=15.sp)}
@@ -1823,13 +1823,13 @@ private fun QualityBadges() {
 @Composable
 private fun DeliveryCard(provider:Provider) {
     Surface(Modifier.fillMaxWidth().padding(horizontal = 18.dp), color = Mist, shape = RoundedCornerShape(18.dp)) {
-        Row(Modifier.heightIn(min = 112.dp).padding(start = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().height(124.dp).padding(start = 16.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1.2f)) {
                 Text("Meal Delivery", color = Ink, fontSize = CustomerTypeScale.BodyLarge, fontWeight = FontWeight.ExtraBold)
                 Spacer(Modifier.height(7.dp))
                 Text("Meals are delivered daily in stainless-steel tiffins for freshness and hygiene.", color = Muted, fontSize = CustomerTypeScale.Compact, lineHeight = 17.sp)
             }
-            Box(Modifier.weight(.8f).fillMaxHeight().clip(RoundedCornerShape(topEnd=18.dp,bottomEnd=18.dp))){
+            Box(Modifier.weight(.8f).height(124.dp).clip(RoundedCornerShape(topEnd=18.dp,bottomEnd=18.dp))){
                 ApprovedMediaImage(provider.mealPhotoPath,"${provider.name} complete meal",Modifier.fillMaxSize()){TiffinArt(Modifier.fillMaxSize())}
             }
         }
@@ -2314,15 +2314,15 @@ private fun MealSlotEditor(
 @Composable
 private fun MenuChoiceCard(choice: MenuChoice, selected: Boolean, accent: Color, onClick: () -> Unit, modifier: Modifier = Modifier) {
     Surface(
-        modifier = modifier.heightIn(min = 148.dp).clickable(onClick = onClick),
+        modifier = modifier.height(148.dp).clickable(onClick = onClick),
         color = if (selected) accent.copy(alpha = .05f) else Color.White,
         shape = RoundedCornerShape(15.dp),
         border = androidx.compose.foundation.BorderStroke(if (selected) 2.dp else 1.dp, if (selected) accent else Border)
     ) {
         Box {
             Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
-                ApprovedDishImage(choice, Modifier.fillMaxWidth().weight(1f))
-                Text(choice.name, color = Ink, fontSize = CustomerTypeScale.Caption, lineHeight = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp), maxLines = 2, overflow = TextOverflow.Ellipsis)
+                ApprovedDishImage(choice, Modifier.fillMaxWidth().height(102.dp))
+                Text(choice.name, color = Ink, fontSize = CustomerTypeScale.Caption, lineHeight = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 7.dp), maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
             if (choice.dietaryType.isNotBlank()) {
                 val label = when (choice.dietaryType) {
