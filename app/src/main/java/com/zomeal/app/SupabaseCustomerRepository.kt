@@ -61,6 +61,8 @@ internal class SupabaseCustomerRepository(context:Context) {
     val configured get()=baseUrl.startsWith("https://")&&anonKey.isNotBlank()
     val isAuthenticated:Boolean get()=!prefs.getBoolean("signed_out",false)&&!prefs.getString("access_token",null).isNullOrBlank()
     val savedPincode:String get()=prefs.getString("pincode","").orEmpty()
+    val savedFullName:String get()=prefs.getString("full_name","").orEmpty()
+    val savedPhone:String get()=prefs.getString("phone","").orEmpty()
     /** Only customer JWTs are stored here. Service-role credentials must never enter the app. */
     private fun saveSession(json:JSONObject){
         customerAccessToken=json.optString("access_token").trim()
@@ -353,7 +355,14 @@ internal class SupabaseCustomerRepository(context:Context) {
         if(customerAccessToken.isBlank()){callback("Customer authentication is required");return}
         rpc("customer_save_registration_profile",JSONObject().apply{
             put("target_full_name",fullName.trim());put("target_phone",phone)
-        }){_,error->callback(error)}
+        }){_,error->
+            if(error==null){
+                val edit=prefs.edit().putString("phone",phone)
+                if(fullName.isNotBlank())edit.putString("full_name",fullName.trim())
+                edit.apply()
+            }
+            callback(error)
+        }
     }
 
     fun verifyRazorpayPayment(paymentOrderId:String,razorpayOrderId:String,paymentId:String,signature:String,callback:(JSONObject?,String?)->Unit){

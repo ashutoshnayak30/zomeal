@@ -259,7 +259,7 @@ private fun ProviderApp() {
             dashboardMessage = "All changes were submitted together for Zomeal review. Your approved listing remains live until a decision is made."
             screen = Screen.Dashboard
         }
-        Screen.DailyOrders -> ProviderDailyOrdersScreen(repository, onDashboard = { screen = Screen.Dashboard })
+        Screen.DailyOrders -> ProviderDailyOrdersScreen(repository, onDashboard = { screen = Screen.Dashboard }, onProfile = { screen = Screen.Profile })
         Screen.Earnings -> ProviderEarningsScreen(repository, onDashboard = { screen = Screen.Dashboard }, onOrders = { screen = Screen.DailyOrders }, onProfile = { screen = Screen.Profile })
         Screen.Profile -> ProviderProfileScreen(repository, onBack = { screen = Screen.Dashboard }, onUploadedData = { screen = Screen.UploadedData }, onManageBusiness = { openActiveEditor(Screen.ManageBusiness) }, onEarnings = { screen = Screen.Earnings }, onPayoutDetails = { screen = Screen.PayoutDetails }) { repository.signOut(); screen = Screen.Login }
         Screen.UploadedData -> ProviderUploadedDataScreen(repository, onBack = { screen = Screen.Profile })

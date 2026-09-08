@@ -671,7 +671,6 @@ fun OperationsScreen(onBack: () -> Unit, onNext: () -> Unit, activeEdit: Boolean
             if (ProviderDraft.deliveryPhone.isNotBlank() && !ProviderDraft.deliveryPhone.matches(Regex("[6-9][0-9]{9}"))) {
                 Text("Enter a valid Indian mobile number beginning with 6, 7, 8 or 9.", color = MaterialTheme.colorScheme.error, fontSize = 11.sp)
             }
-            TextButton(onClick = { }) { Icon(Icons.Outlined.PersonAdd, null); Text("Add another delivery person later") }
         }
     }
 }

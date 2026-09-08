@@ -38,7 +38,7 @@ private val OMuted = Color(0xFF68736D)
 private val OMist = Color(0xFFF0F7F2)
 
 @Composable
-fun ProviderDailyOrdersScreen(repository: SupabaseProviderRepository, onDashboard: () -> Unit) {
+fun ProviderDailyOrdersScreen(repository: SupabaseProviderRepository, onDashboard: () -> Unit, onProfile: () -> Unit) {
     val context = LocalContext.current
     val isoDate = remember { SimpleDateFormat("yyyy-MM-dd", Locale.US).apply { isLenient = false } }
     val friendlyDate = remember { SimpleDateFormat("EEE, dd MMM yyyy", Locale.ENGLISH) }
@@ -122,7 +122,7 @@ fun ProviderDailyOrdersScreen(repository: SupabaseProviderRepository, onDashboar
                 }
             }
         },
-        bottomBar = { OrdersBottomBar(onDashboard) }
+        bottomBar = { OrdersBottomBar(onDashboard, onProfile) }
     ) { padding ->
         LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(15.dp), verticalArrangement = Arrangement.spacedBy(11.dp)) {
             item {
@@ -146,14 +146,11 @@ fun ProviderDailyOrdersScreen(repository: SupabaseProviderRepository, onDashboar
             if (loading) item { Box(Modifier.fillMaxWidth().height(180.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = OBrand) } }
             error?.let { item { OrderNotice(it, true) } }
             if (!loading && !isFinal && !preview) item { OrderNotice("Customer details for $selectedDate will unlock after ${if (slot == "LUNCH") "7:00 AM" else "4:00 PM"} IST. Until then, choices may still change.", false) }
-            if (!loading && preview) item { OrderNotice("Preview mode: sample records stay on this device and do not represent real customers. Preview access does not bypass the real customer-data cutoff.", false) }
+            if (!loading && preview) item { OrderNotice("Preview mode is active. Customer details remain hidden until the production cutoff.", false) }
             if(!loading&&dashboard!=null){
                 item{OrderBusinessSummary(slot,metrics,commission)}
                 if(packageBreakdown.isNotEmpty())item{OrderPackageBreakdown(packageBreakdown)}
                 if(choices.isNotEmpty())item{OrderPreparationSummary(choices)}
-            }
-            if (!loading && preview && manifest.isEmpty()) item {
-                OutlinedButton(onClick = { manifest = sampleOrders(slot) }, modifier = Modifier.fillMaxWidth().height(48.dp)) { Icon(Icons.Outlined.Science, null); Spacer(Modifier.width(7.dp)); Text("Load sample customer manifest") }
             }
             if (!loading && unlockedForTesting && manifest.isNotEmpty()) {
                 item {
@@ -322,16 +319,10 @@ private fun formatRate(value:Double):String=if(value%1.0==0.0)value.toInt().toSt
 
 @Composable private fun OrderNotice(text: String, error: Boolean) { Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(if(error) Color(0xFFFFECEA) else Color(0xFFEAF5EC)).padding(13.dp)) { Icon(if(error) Icons.Outlined.ErrorOutline else Icons.Outlined.LockClock,null,tint=if(error) Color(0xFFB23A32) else OBrand); Spacer(Modifier.width(8.dp)); Text(text,color=if(error) Color(0xFF8D302A) else Color(0xFF345C43),fontSize=11.sp,lineHeight=16.sp) } }
 
-@Composable private fun OrdersBottomBar(onDashboard: () -> Unit) { NavigationBar(containerColor=Color.White,modifier=Modifier.height(64.dp)) { NavigationBarItem(false,onDashboard,{Icon(Icons.Outlined.Dashboard,null)},label={Text("Dashboard",fontSize=9.sp)}); NavigationBarItem(true,{}, {Icon(Icons.Outlined.ReceiptLong,null)},label={Text("Orders",fontSize=9.sp)},colors=NavigationBarItemDefaults.colors(selectedIconColor=OBrand,selectedTextColor=OBrand,indicatorColor=OMist)); NavigationBarItem(false,{}, {Icon(Icons.Outlined.Inventory,null)},label={Text("Capacity",fontSize=9.sp)}); NavigationBarItem(false,{}, {Icon(Icons.Outlined.AccountCircle,null)},label={Text("Profile",fontSize=9.sp)}) } }
+@Composable private fun OrdersBottomBar(onDashboard: () -> Unit, onProfile: () -> Unit) { NavigationBar(containerColor=Color.White,modifier=Modifier.height(64.dp)) { NavigationBarItem(false,onDashboard,{Icon(Icons.Outlined.Dashboard,null)},label={Text("Dashboard",fontSize=9.sp)}); NavigationBarItem(true,{}, {Icon(Icons.Outlined.ReceiptLong,null)},label={Text("Orders",fontSize=9.sp)},colors=NavigationBarItemDefaults.colors(selectedIconColor=OBrand,selectedTextColor=OBrand,indicatorColor=OMist)); NavigationBarItem(false,onProfile, {Icon(Icons.Outlined.AccountCircle,null)},label={Text("Profile",fontSize=9.sp)}) } }
 
 private fun jsonObjects(array: JSONArray?): List<JSONObject> = if(array==null) emptyList() else (0 until array.length()).mapNotNull(array::optJSONObject)
 private fun addressText(address: JSONObject?): String = if(address==null) "Address unavailable" else listOf(address.optString("house_number"),address.optString("address_line"),address.optString("locality"),address.optString("city"),address.optString("pincode")).filter{it.isNotBlank()}.joinToString(", ").ifBlank{address.toString()}
-private fun sampleOrders(slot: String): List<JSONObject> = listOf(
-    JSONObject().put("meal_id","sample-1").put("customer_name","Ananya Das").put("phone","9876543210").put("meal_type",slot).put("main_course","Paneer Butter Masala").put("status","SCHEDULED").put("delivery_person_id","sample-rider-1").put("delivery_person","Ashu").put("delivery_person_phone","7205586281").put("address",JSONObject().put("house_number","Plot 123").put("address_line","Near Jagamara Square").put("locality","Khandagiri").put("city","Bhubaneswar").put("pincode","751030")),
-    JSONObject().put("meal_id","sample-2").put("customer_name","Rahul Nayak").put("phone","9123456780").put("meal_type",slot).put("main_course","Seasonal Mix Veg").put("status","SCHEDULED").put("delivery_person_id","sample-rider-2").put("delivery_person","Rakesh").put("delivery_person_phone","9876501234").put("address",JSONObject().put("house_number","House 42").put("address_line","KIIT Road").put("locality","Patia").put("city","Bhubaneswar").put("pincode","751024")),
-    JSONObject().put("meal_id","sample-3").put("customer_name","Priya Sahu").put("phone","9988776655").put("meal_type",slot).put("main_course","Dal Tadka").put("status","OUT_FOR_DELIVERY").put("delivery_person_id","sample-rider-1").put("delivery_person","Ashu").put("delivery_person_phone","7205586281").put("address",JSONObject().put("house_number","Flat 3B").put("address_line","Arya Village").put("locality","Khandagiri").put("city","Bhubaneswar").put("pincode","751030"))
-)
-
 private fun routeLabel(address: JSONObject?): String = listOf(address?.optString("locality").orEmpty(), address?.optString("pincode").orEmpty()).filter { it.isNotBlank() }.joinToString(" ").ifBlank { "Other" }
 
 private fun indianPhoneDisplay(raw: String): String {

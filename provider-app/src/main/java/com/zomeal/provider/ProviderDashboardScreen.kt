@@ -55,32 +55,6 @@ fun ProviderDashboardScreen(repository: SupabaseProviderRepository, bannerMessag
     val previewMode = data?.optBoolean("preview_mode") == true
     // Kept behind one flag so the post-MVP live tracking workflow can be restored without a rewrite.
     val liveOrderStatusEnabled = false
-    fun loadSamplePreview() {
-        val copy = JSONObject(data.toString())
-        val sampleMetrics = copy.optJSONObject("metrics") ?: JSONObject().also { copy.put("metrics", it) }
-        val sampleActive = if (slot == "LUNCH") 130 else 142
-        val packageBreakdown = if (slot == "LUNCH") {
-            JSONArray()
-                .put(JSONObject().put("package_kind", "LUNCH_ONLY").put("label", "Lunch-only customers").put("customers", 50).put("average_value_paise", 6_000L).put("gross_paise", 300_000L))
-                .put(JSONObject().put("package_kind", "LUNCH_AND_DINNER").put("label", "Both package · lunch share").put("customers", 80).put("average_value_paise", 5_500L).put("gross_paise", 440_000L))
-        } else {
-            JSONArray()
-                .put(JSONObject().put("package_kind", "DINNER_ONLY").put("label", "Dinner-only customers").put("customers", 62).put("average_value_paise", 5_000L).put("gross_paise", 310_000L))
-                .put(JSONObject().put("package_kind", "LUNCH_AND_DINNER").put("label", "Both package · dinner share").put("customers", 80).put("average_value_paise", 4_500L).put("gross_paise", 360_000L))
-        }
-        val sampleGrossPaise = (0 until packageBreakdown.length()).sumOf { packageBreakdown.optJSONObject(it)?.optLong("gross_paise") ?: 0L }
-        val firstChoice = if (slot == "LUNCH") 78 else 82
-        sampleMetrics.put("active", sampleActive).put("capacity", 150).put("remaining", 150 - sampleActive)
-            .put("paused", if (slot == "LUNCH") 7 else 5).put("cancelled", 2).put("areas", 6)
-            .put("preparing", sampleActive).put("packing", 0).put("ready", 0)
-            .put("out_for_delivery", 0).put("delivered", 0).put("unassigned_delivery", 0)
-            .put("gross_paise", sampleGrossPaise)
-        copy.put("package_breakdown", packageBreakdown)
-        copy.put("choices", JSONArray().put(JSONObject().put("name", "Main course 1").put("count", firstChoice))
-            .put(JSONObject().put("name", "Main course 2").put("count", sampleActive - firstChoice)))
-        data = copy
-        updateMessage = "Sample preview loaded: $sampleActive ${slot.lowercase()} meals across single-meal and both packages. These numbers are not saved."
-    }
     fun updateTracking(status: String) {
         if (previewMode) {
             val copy = JSONObject(data.toString())
@@ -208,11 +182,6 @@ fun ProviderDashboardScreen(repository: SupabaseProviderRepository, bannerMessag
                         Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
                             DashboardMetric("Remaining", metrics.optInt("remaining").toString(), Icons.Outlined.EventAvailable, Modifier.weight(1f))
                             DashboardMetric("Service areas", metrics.optInt("areas").toString(), Icons.Outlined.LocationOn, Modifier.weight(1f))
-                        }
-                        if (previewMode && active == 0) {
-                            OutlinedButton(onClick = { loadSamplePreview() }, modifier = Modifier.fillMaxWidth()) {
-                                Icon(Icons.Outlined.Science, null); Spacer(Modifier.width(7.dp)); Text("Load sample data for testing")
-                            }
                         }
                     }
                 }

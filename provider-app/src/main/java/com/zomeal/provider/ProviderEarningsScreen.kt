@@ -42,10 +42,9 @@ fun ProviderEarningsScreen(
     var showRequest by remember { mutableStateOf(false) }
     var showAdvance by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
-    var sampleMode by remember { mutableStateOf(false) }
     fun load() {
         loading = true; error = null
-        repository.loadEarningsSummary { result, problem -> data = result; error = problem; loading = false; sampleMode = false }
+        repository.loadEarningsSummary { result, problem -> data = result; error = problem; loading = false }
     }
     LaunchedEffect(Unit) { load() }
 
@@ -58,9 +57,7 @@ fun ProviderEarningsScreen(
             onDismiss = { showRequest = false },
             onSubmit = { amount, method, note ->
                 loading = true; message = null
-                if (sampleMode) {
-                    loading = false; showRequest = false; message = "Sample preview cannot create a real payout. Refresh and use real delivered earnings, or create an audited test cycle from Zomeal Admin."
-                } else repository.requestPayout(amount, method, note) { result ->
+                repository.requestPayout(amount, method, note) { result ->
                     loading = false; showRequest = false; message = result.message
                     if (result.success) load()
                 }
@@ -69,8 +66,7 @@ fun ProviderEarningsScreen(
     }
     if (showAdvance) AdvanceRequestDialog(loading, { showAdvance = false }) { amount, purpose ->
         loading = true; message = null
-        if (sampleMode) { loading = false; showAdvance = false; message = "Sample advance request created on this device only." }
-        else repository.requestAdvance(amount, purpose) { result -> loading = false; showAdvance = false; message = result.message; if (result.success) load() }
+        repository.requestAdvance(amount, purpose) { result -> loading = false; showAdvance = false; message = result.message; if (result.success) load() }
     }
 
     Scaffold(
@@ -99,7 +95,6 @@ fun ProviderEarningsScreen(
             error?.let { item { EarningsNotice(it, true) } }
             message?.let { item { EarningsNotice(it, false) } }
             if (!loading && data != null) {
-                if (sampleMode) item { EarningsNotice("SAMPLE PREVIEW — figures on this screen are not stored in Supabase and cannot create an admin payout request.", true) }
                 item {
                     Surface(color = EBrand, shape = RoundedCornerShape(20.dp)) {
                         Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -110,7 +105,7 @@ fun ProviderEarningsScreen(
                             Text(money(available), color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.ExtraBold)
                             Text("Delivered earnings become available after ${summary.optInt("payout_hold_hours",48)} hours", color = Color.White.copy(alpha = .78f), fontSize = 10.sp)
                             Button(
-                                onClick = { if(sampleMode) message="Sample preview cannot request a payout. Refresh to load real earnings." else showRequest = true }, enabled = available > 0 && !loading,
+                                onClick = { showRequest = true }, enabled = available > 0 && !loading,
                                 modifier = Modifier.fillMaxWidth().height(48.dp), shape = RoundedCornerShape(13.dp),
                                 colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = EBrand)
                             ) { Icon(Icons.Outlined.Payments, null); Spacer(Modifier.width(7.dp)); Text("Request payout", fontWeight = FontWeight.Bold) }
@@ -130,11 +125,6 @@ fun ProviderEarningsScreen(
                         val advanceRequests = jsonList(summary.optJSONArray("advance_requests"))
                         if (advanceRequests.isEmpty()) Text("No advance requests yet.", color = EMuted, fontSize = 10.sp)
                         advanceRequests.take(3).forEach { AdvanceRequestCard(it) }
-                    }
-                }
-                if (!sampleMode && summary.optLong("gross_paise") == 0L) item {
-                    OutlinedButton(onClick = { data = sampleEarnings(); sampleMode = true; message = "Sample preview only—no money or payout request is real." }, modifier = Modifier.fillMaxWidth().height(48.dp)) {
-                        Icon(Icons.Outlined.Science, null); Spacer(Modifier.width(7.dp)); Text("Load sample earnings")
                     }
                 }
                 item {
@@ -250,12 +240,3 @@ private fun money(paise: Long): String = NumberFormat.getCurrencyInstance(Locale
 private fun shortDate(value: String): String = value.take(10).ifBlank { "Today" }
 private fun formatRate(value: Double): String = if (value % 1.0 == 0.0) value.toInt().toString() else String.format(Locale.US,"%.2f",value).trimEnd('0').trimEnd('.')
 private fun jsonList(array: JSONArray?): List<JSONObject> = if (array == null) emptyList() else (0 until array.length()).mapNotNull(array::optJSONObject)
-private fun sampleEarnings(): JSONObject = JSONObject()
-    .put("gross_paise", 1_410_000L).put("commission_paise", 197_400L).put("provider_net_paise", 1_212_600L)
-    .put("available_paise", 745_000L).put("pending_48h_paise", 367_600L).put("reserved_paise", 100_000L).put("payout_hold_hours",48).put("advance_outstanding_paise",150_000L)
-    .put("advance_requests",JSONArray().put(JSONObject().put("id","sample-advance").put("amount_paise",200_000L).put("recovered_paise",50_000L).put("purpose","Purchase additional steel tiffin boxes").put("status","DISBURSED")))
-    .put("by_slot", JSONArray().put(JSONObject().put("slot", "LUNCH").put("net_paise", 636_400L)).put(JSONObject().put("slot", "DINNER").put("net_paise", 576_200L)))
-    .put("payout_requests", JSONArray().put(JSONObject().put("id", "sample-payout-1").put("amount_paise", 100_000L).put("preferred_method", "UPI").put("status", "PROCESSING").put("requested_at", "2026-08-15T10:30:00Z")))
-    .put("recent_entries", JSONArray()
-        .put(JSONObject().put("id", "sample-entry-1").put("entry_type", "MEAL_EARNING").put("meal_slot", "LUNCH").put("service_date", "2026-08-15").put("provider_net_paise", 5_160L))
-        .put(JSONObject().put("id", "sample-entry-2").put("entry_type", "MEAL_EARNING").put("meal_slot", "DINNER").put("service_date", "2026-08-15").put("provider_net_paise", 4_300L)))
