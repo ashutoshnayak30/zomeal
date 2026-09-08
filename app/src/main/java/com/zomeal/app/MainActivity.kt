@@ -83,16 +83,16 @@ private val Border = Color(0xFFDCE8E0)
  * one-off sizes, so accessibility font scaling remains predictable.
  */
 private object CustomerTypeScale {
-    val Compact = 11.sp
-    val Caption = 12.sp
-    val Body = 14.sp
-    val BodyLarge = 16.sp
-    val Title = 18.sp
-    val Heading = 20.sp
-    val Headline = 24.sp
-    val Display = 28.sp
-    val Brand = 34.sp
-    val Illustration = 56.sp
+    val Compact = 10.sp
+    val Caption = 11.sp
+    val Body = 13.sp
+    val BodyLarge = 14.sp
+    val Title = 17.sp
+    val Heading = 19.sp
+    val Headline = 22.sp
+    val Display = 26.sp
+    val Brand = 31.sp
+    val Illustration = 52.sp
 }
 
 private object CustomerProfileStore {
@@ -378,23 +378,23 @@ private fun ZomealTheme(content: @Composable () -> Unit) {
     val density = LocalDensity.current
     val baseTypography = Typography()
     val appTypography = Typography(
-        displayLarge = baseTypography.displayLarge.copy(fontSize = 34.sp, lineHeight = 40.sp, fontWeight = FontWeight.Black),
-        displayMedium = baseTypography.displayMedium.copy(fontSize = 30.sp, lineHeight = 36.sp, fontWeight = FontWeight.Black),
-        displaySmall = baseTypography.displaySmall.copy(fontSize = 27.sp, lineHeight = 33.sp, fontWeight = FontWeight.ExtraBold),
-        headlineLarge = baseTypography.headlineLarge.copy(fontSize = 26.sp, lineHeight = 32.sp, fontWeight = FontWeight.ExtraBold),
-        headlineMedium = baseTypography.headlineMedium.copy(fontSize = 23.sp, lineHeight = 29.sp, fontWeight = FontWeight.ExtraBold),
-        headlineSmall = baseTypography.headlineSmall.copy(fontSize = 20.sp, lineHeight = 26.sp, fontWeight = FontWeight.Bold),
-        titleLarge = baseTypography.titleLarge.copy(fontSize = 19.sp, lineHeight = 25.sp, fontWeight = FontWeight.Bold),
-        titleMedium = baseTypography.titleMedium.copy(fontSize = 17.sp, lineHeight = 23.sp, fontWeight = FontWeight.Bold),
-        titleSmall = baseTypography.titleSmall.copy(fontSize = 15.sp, lineHeight = 21.sp, fontWeight = FontWeight.Bold),
-        bodyLarge = baseTypography.bodyLarge.copy(fontSize = 15.sp, lineHeight = 22.sp),
-        bodyMedium = baseTypography.bodyMedium.copy(fontSize = 14.sp, lineHeight = 20.sp),
-        bodySmall = baseTypography.bodySmall.copy(fontSize = 12.sp, lineHeight = 17.sp),
-        labelLarge = baseTypography.labelLarge.copy(fontSize = 14.sp, lineHeight = 19.sp, fontWeight = FontWeight.Bold),
-        labelMedium = baseTypography.labelMedium.copy(fontSize = 12.sp, lineHeight = 17.sp, fontWeight = FontWeight.Bold),
-        labelSmall = baseTypography.labelSmall.copy(fontSize = 11.sp, lineHeight = 15.sp, fontWeight = FontWeight.Medium)
+        displayLarge = baseTypography.displayLarge.copy(fontSize = 31.sp, lineHeight = 37.sp, fontWeight = FontWeight.Black),
+        displayMedium = baseTypography.displayMedium.copy(fontSize = 27.sp, lineHeight = 33.sp, fontWeight = FontWeight.Black),
+        displaySmall = baseTypography.displaySmall.copy(fontSize = 24.sp, lineHeight = 30.sp, fontWeight = FontWeight.ExtraBold),
+        headlineLarge = baseTypography.headlineLarge.copy(fontSize = 23.sp, lineHeight = 29.sp, fontWeight = FontWeight.ExtraBold),
+        headlineMedium = baseTypography.headlineMedium.copy(fontSize = 21.sp, lineHeight = 27.sp, fontWeight = FontWeight.ExtraBold),
+        headlineSmall = baseTypography.headlineSmall.copy(fontSize = 19.sp, lineHeight = 25.sp, fontWeight = FontWeight.Bold),
+        titleLarge = baseTypography.titleLarge.copy(fontSize = 18.sp, lineHeight = 24.sp, fontWeight = FontWeight.Bold),
+        titleMedium = baseTypography.titleMedium.copy(fontSize = 16.sp, lineHeight = 22.sp, fontWeight = FontWeight.Bold),
+        titleSmall = baseTypography.titleSmall.copy(fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.Bold),
+        bodyLarge = baseTypography.bodyLarge.copy(fontSize = 14.sp, lineHeight = 21.sp),
+        bodyMedium = baseTypography.bodyMedium.copy(fontSize = 13.sp, lineHeight = 19.sp),
+        bodySmall = baseTypography.bodySmall.copy(fontSize = 11.sp, lineHeight = 16.sp),
+        labelLarge = baseTypography.labelLarge.copy(fontSize = 13.sp, lineHeight = 18.sp, fontWeight = FontWeight.Bold),
+        labelMedium = baseTypography.labelMedium.copy(fontSize = 11.sp, lineHeight = 16.sp, fontWeight = FontWeight.Bold),
+        labelSmall = baseTypography.labelSmall.copy(fontSize = 10.sp, lineHeight = 14.sp, fontWeight = FontWeight.Medium)
     )
-    CompositionLocalProvider(LocalDensity provides Density(density.density, density.fontScale * 1.10f)) {
+    CompositionLocalProvider(LocalDensity provides Density(density.density, density.fontScale)) {
         MaterialTheme(
             colorScheme = lightColorScheme(primary = Brand, background = Color.White, surface = Color.White),
             typography = appTypography,
@@ -5023,7 +5023,7 @@ private fun PauseMealsScreen(onBack: () -> Unit, onConfirm: (List<String>,String
 
 @Composable private fun PauseQuickDuration(selectedDays: MutableList<Int>) {
     Surface(Modifier.fillMaxWidth().padding(horizontal = 18.dp), color = Mist, shape = RoundedCornerShape(16.dp)) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { Text("Quick selection", color = Ink, fontSize = CustomerTypeScale.Compact, fontWeight = FontWeight.ExtraBold); Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { listOf(1, 3, 5, 7).forEach { count -> FilterChip(selected = selectedDays.size == count && selectedDays.sorted() == (1..count).toList(), onClick = { selectedDays.clear(); selectedDays.addAll(1..count) }, label = { Text(if (count == 1) "Tomorrow" else "$count days", fontSize = CustomerTypeScale.Caption) }, modifier = Modifier.weight(1f)) } }; Text("Or select individual dates below.", color = Muted, fontSize = CustomerTypeScale.Caption) }
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { Text("Quick selection", color = Ink, fontSize = CustomerTypeScale.Compact, fontWeight = FontWeight.ExtraBold); LazyRow(horizontalArrangement = Arrangement.spacedBy(7.dp)) { items(listOf(1, 3, 5, 7)) { count -> FilterChip(selected = selectedDays.size == count && selectedDays.sorted() == (1..count).toList(), onClick = { selectedDays.clear(); selectedDays.addAll(1..count) }, label = { Text(if (count == 1) "Tomorrow" else "$count days", fontSize = CustomerTypeScale.Caption, maxLines = 1) }) } }; Text("Or select individual dates below.", color = Muted, fontSize = CustomerTypeScale.Caption) }
     }
 }
 
@@ -5567,9 +5567,9 @@ private fun OrdersScreen(provider: Provider, onNav: (Int) -> Unit, onSupport: ()
             item { AppSectionHeader("Orders", "View upcoming and past meals", Icons.Outlined.ReceiptLong) { onNav(0) } }
             item { OrderSummaryStrip(allMeals) }
             item {
-                Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    listOf("Upcoming", "Delivered", "Paused", "Cancelled").forEach { value ->
-                        FilterChip(selected = filter == value, onClick = { filter = value }, label = { Text(value, fontSize = CustomerTypeScale.Caption) }, modifier = Modifier.weight(1f))
+                LazyRow(Modifier.fillMaxWidth(), contentPadding = PaddingValues(horizontal = 18.dp), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                    items(listOf("Upcoming", "Delivered", "Paused", "Cancelled")) { value ->
+                        FilterChip(selected = filter == value, onClick = { filter = value }, label = { Text(value, fontSize = CustomerTypeScale.Caption, maxLines = 1) })
                     }
                 }
             }
