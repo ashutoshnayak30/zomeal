@@ -8,6 +8,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -153,7 +154,6 @@ class MainActivity : ComponentActivity(), PaymentResultWithDataListener {
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 4101)
         }
-        Checkout.preload(applicationContext)
         setContent { ZomealTheme { ZomealApp() } }
     }
 
@@ -3085,10 +3085,9 @@ private fun PaymentScreen(
             RazorpayCoordinator.pendingOrder=order
             paidPaise=order.amountPaise
             runCatching{
-                // Razorpay displays its SDK compatibility report automatically in
-                // debuggable APKs. The checks still run; suppress only that
-                // developer-facing dialog so customers reach Checkout directly.
-                OpinionatedSoln.alertShownForStatus = true
+                // Suppress Razorpay's developer-only SDK diagnostic in local
+                // builds. Release builds never show it because DEBUG is false.
+                OpinionatedSoln.alertShownForStatus=true
                 Checkout().apply{setKeyID(order.keyId)}.open(activity,JSONObject().apply{
                     put("name","Zomeal");put("description","${provider.name} · ${plan.title}")
                     put("image","");put("order_id",order.razorpayOrderId);put("currency",order.currency);put("amount",order.amountPaise)
@@ -3831,6 +3830,9 @@ private fun ActiveSubscriberHome(provider: Provider, onBrowseProviders: () -> Un
     var showFullWeeklyMenu by remember { mutableStateOf(false) }
     var showSubscribedProviderDetails by remember { mutableStateOf(false) }
     var showBalancePayment by remember { mutableStateOf(false) }
+    var mealExperiences by remember { mutableStateOf<List<CustomerMealExperience>>(emptyList()) }
+    var mealExperienceError by remember { mutableStateOf<String?>(null) }
+    var selectedReviewMeal by remember { mutableStateOf<CustomerMealExperience?>(null) }
     val todayIndex = remember { (Calendar.getInstance().get(Calendar.DAY_OF_WEEK) + 5) % 7 }
     val tomorrowIndex = (todayIndex + 1) % 7
     val persistedSubscription = CustomerSubscriptionStore.current
@@ -3878,6 +3880,23 @@ private fun ActiveSubscriberHome(provider: Provider, onBrowseProviders: () -> Un
     val homeMinute = remember { Calendar.getInstance().get(Calendar.MINUTE) }
     val showingTomorrowMenu = homeHour >= 22 || (homeHour == 0 && homeMinute == 0)
     val homeMenuDate = remember(showingTomorrowMenu) { SimpleDateFormat("EEEE, dd MMM yyyy", Locale.ENGLISH).format(Calendar.getInstance().apply { if (showingTomorrowMenu) add(Calendar.DAY_OF_YEAR, 1) }.time) }
+
+    fun refreshMealExperiences(){
+        repository.mealExperiences { rows,error -> mealExperiences=rows;mealExperienceError=error }
+    }
+    LaunchedEffect(persistedSubscription?.id){refreshMealExperiences()}
+    val reviewableMeal=mealExperiences.firstOrNull{it.status=="DELIVERED"&&it.rating==null}
+    val displayedDelivery=mealExperiences.firstOrNull{
+        it.serviceDate==todayIso&&it.deliveryPersonName.isNotBlank()&&it.status !in setOf("PAUSED","CANCELLED")
+    }
+
+    selectedReviewMeal?.let { meal ->
+        RatingReviewScreen(
+            provider=provider,meal=meal,onBack={selectedReviewMeal=null},onSupport={selectedReviewMeal=null;showSupportScreen=true},
+            onSubmitted={selectedReviewMeal=null;refreshMealExperiences()}
+        )
+        return
+    }
 
     BackHandler(enabled = showSubscribedProviderDetails) { showSubscribedProviderDetails = false }
     if(showSubscribedProviderDetails){
@@ -4032,10 +4051,15 @@ private fun ActiveSubscriberHome(provider: Provider, onBrowseProviders: () -> Un
             item {
                 SubscriberQuickActions(
                     onPause = { showPauseScreen = true },
-                    onPlan = { selectedNav = 1 },
-                    onOrders = { selectedNav = 2 },
-                    onSupport = { showSupportScreen = true }
+                    reviewMeal = reviewableMeal,
+                    onReview = { selectedReviewMeal=reviewableMeal }
                 )
+            }
+            displayedDelivery?.let { assignment ->
+                item { DeliveryPartnerCard(assignment) }
+            }
+            mealExperienceError?.let { error ->
+                item { Text("Live meal details could not refresh: $error",color=Muted,fontSize=CustomerTypeScale.Caption,modifier=Modifier.padding(horizontal=18.dp)) }
             }
         }
     }
@@ -5281,17 +5305,24 @@ private fun LiveOrderTrackingScreen(provider: Provider, onBack: () -> Unit, onSu
 }
 
 @Composable
-private fun RatingReviewScreen(provider: Provider, meal: String, initialRating: Int = 0, onBack: () -> Unit, onSupport: () -> Unit, onSubmitted: () -> Unit) {
-    var overallRating by remember { mutableIntStateOf(initialRating) }
+private fun RatingReviewScreen(provider: Provider, meal: CustomerMealExperience, onBack: () -> Unit, onSupport: () -> Unit, onSubmitted: () -> Unit) {
+    val context=LocalContext.current.applicationContext
+    val repository=remember(context){SupabaseCustomerRepository(context)}
+    var overallRating by remember { mutableIntStateOf(meal.rating?:0) }
     val categoryRatings = remember { mutableStateMapOf("Taste" to 0, "Quantity" to 0, "Packaging" to 0, "Hygiene" to 0, "Delivery" to 0) }
     val selectedTags = remember { mutableStateListOf<String>() }
-    var feedback by remember { mutableStateOf("") }
-    var photoAttached by remember { mutableStateOf(false) }
-    var anonymous by remember { mutableStateOf(false) }
+    var feedback by remember { mutableStateOf(meal.reviewText) }
+    var anonymous by remember { mutableStateOf(meal.anonymous) }
     var showSuccess by remember { mutableStateOf(false) }
     var showIssueReport by remember { mutableStateOf(false) }
+    var submitting by remember { mutableStateOf(false) }
+    var submitError by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(meal.mealId){
+        meal.categoryRatings.keys().forEach{key->categoryRatings[key]=meal.categoryRatings.optInt(key)}
+        selectedTags.clear();selectedTags.addAll(meal.tags)
+    }
     if (showIssueReport) {
-        MealIssueRefundScreen(provider = provider, meal = meal, onBack = { showIssueReport = false }, onContactSupport = onSupport)
+        MealIssueRefundScreen(provider = provider, meal = meal.itemName, onBack = { showIssueReport = false }, onContactSupport = onSupport)
         return
     }
     BackHandler(onBack = onBack)
@@ -5300,7 +5331,15 @@ private fun RatingReviewScreen(provider: Provider, meal: String, initialRating: 
         containerColor = Color(0xFFFAFCFA),
         bottomBar = {
             Surface(modifier = Modifier.navigationBarsPadding(), color = Color.White, shadowElevation = 9.dp) {
-                Button(onClick = { showSuccess = true }, enabled = overallRating > 0, modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 10.dp).height(50.dp), shape = RoundedCornerShape(15.dp), colors = ButtonDefaults.buttonColors(containerColor = BrandDark)) { Icon(Icons.Outlined.RateReview, null, modifier = Modifier.size(17.dp)); Spacer(Modifier.width(7.dp)); Text("Submit Review", fontSize = CustomerTypeScale.Caption, fontWeight = FontWeight.ExtraBold) }
+                Button(onClick = {
+                    submitting=true;submitError=null
+                    val categories=JSONObject();categoryRatings.filterValues{it>0}.forEach{(key,value)->categories.put(key,value)}
+                    repository.submitMealReview(meal.mealId,overallRating,categories,selectedTags.toList(),feedback,anonymous){result,error->
+                        submitting=false
+                        if(error!=null||result?.optBoolean("saved")!=true)submitError=error?:"Review could not be saved"
+                        else showSuccess=true
+                    }
+                }, enabled = overallRating > 0&&!submitting, modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 10.dp).height(50.dp), shape = RoundedCornerShape(15.dp), colors = ButtonDefaults.buttonColors(containerColor = BrandDark)) { if(submitting)CircularProgressIndicator(Modifier.size(17.dp),strokeWidth=2.dp,color=Color.White) else Icon(Icons.Outlined.RateReview, null, modifier = Modifier.size(17.dp)); Spacer(Modifier.width(7.dp)); Text(if(submitting)"Saving…" else "Submit Review", fontSize = CustomerTypeScale.Caption, fontWeight = FontWeight.ExtraBold) }
             }
         }
     ) { padding ->
@@ -5311,9 +5350,9 @@ private fun RatingReviewScreen(provider: Provider, meal: String, initialRating: 
             item { CategoryRatingsCard(categoryRatings) { category, rating -> categoryRatings[category] = rating } }
             item { FeedbackTagsCard(selectedTags) }
             item { ReviewCommentCard(feedback) { feedback = it.take(500) } }
-            item { ReviewPhotoCard(photoAttached) { photoAttached = !photoAttached } }
             item { AnonymousReviewCard(anonymous) { anonymous = it } }
             item { SeriousIssueCard { showIssueReport = true } }
+            submitError?.let{message->item{Text(message,color=Color(0xFFB83131),fontSize=CustomerTypeScale.Caption,fontWeight=FontWeight.Bold,modifier=Modifier.padding(horizontal=22.dp))}}
             item { ReviewPrivacyNote() }
         }
     }
@@ -5321,7 +5360,7 @@ private fun RatingReviewScreen(provider: Provider, meal: String, initialRating: 
     if (showSuccess) AlertDialog(
         onDismissRequest = { }, icon = { Icon(Icons.Filled.CheckCircle, null, tint = Brand, modifier = Modifier.size(30.dp)) },
         title = { Text("Thank you for your feedback!", fontWeight = FontWeight.ExtraBold) },
-        text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { Text("Your $overallRating-star review for $meal has been submitted${if (anonymous) " anonymously" else ""}.", color = Muted, fontSize = CustomerTypeScale.Compact); Surface(color = Mist, shape = RoundedCornerShape(10.dp)) { Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Outlined.Favorite, null, tint = Brand, modifier = Modifier.size(17.dp)); Spacer(Modifier.width(7.dp)); Text("Your feedback helps Zomeal and the kitchen improve future meals.", color = BrandDark, fontSize = CustomerTypeScale.Caption, fontWeight = FontWeight.Bold) } } } },
+        text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { Text("Your $overallRating-star review for ${meal.itemName.ifBlank{"this meal"}} has been saved${if (anonymous) " anonymously" else ""}.", color = Muted, fontSize = CustomerTypeScale.Compact); Surface(color = Mist, shape = RoundedCornerShape(10.dp)) { Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Outlined.Favorite, null, tint = Brand, modifier = Modifier.size(17.dp)); Spacer(Modifier.width(7.dp)); Text("Your feedback helps Zomeal and the kitchen improve future meals.", color = BrandDark, fontSize = CustomerTypeScale.Caption, fontWeight = FontWeight.Bold) } } } },
         confirmButton = { Button(onClick = { showSuccess = false; onSubmitted() }, colors = ButtonDefaults.buttonColors(containerColor = BrandDark)) { Text("Back to Orders") } }
     )
 }
@@ -5334,9 +5373,9 @@ private fun RatingReviewScreen(provider: Provider, meal: String, initialRating: 
     }
 }
 
-@Composable private fun ReviewMealSummary(provider: Provider, meal: String) {
+@Composable private fun ReviewMealSummary(provider: Provider, meal: CustomerMealExperience) {
     Surface(Modifier.fillMaxWidth().padding(horizontal = 18.dp), color = Color.White, shape = RoundedCornerShape(18.dp), shadowElevation = 2.dp) {
-        Row(Modifier.padding(13.dp), verticalAlignment = Alignment.CenterVertically) { Box(Modifier.size(67.dp).clip(RoundedCornerShape(13.dp)).background(provider.tint)) { DishArt(lunchChoices.first(), Modifier.fillMaxSize()) }; Spacer(Modifier.width(10.dp)); Column(Modifier.weight(1f)) { Text("Delivered · Lunch", color = BrandDark, fontSize = CustomerTypeScale.Caption, fontWeight = FontWeight.Bold); Text(meal, color = Ink, fontSize = CustomerTypeScale.Body, fontWeight = FontWeight.ExtraBold); Text("Rice · Dal · Salad · Achar", color = Muted, fontSize = CustomerTypeScale.Caption); Text("${provider.name} · 23 Aug 2026", color = Muted, fontSize = CustomerTypeScale.Caption, modifier = Modifier.padding(top = 4.dp)) }; Surface(color = Mist, shape = RoundedCornerShape(9.dp)) { Text("ZM-2386", color = BrandDark, fontSize = CustomerTypeScale.Compact, fontWeight = FontWeight.Bold, modifier = Modifier.padding(7.dp)) } }
+        Row(Modifier.padding(13.dp), verticalAlignment = Alignment.CenterVertically) { Box(Modifier.size(67.dp).clip(RoundedCornerShape(13.dp)).background(provider.tint)) { DishArt(lunchChoices.first(), Modifier.fillMaxSize()) }; Spacer(Modifier.width(10.dp)); Column(Modifier.weight(1f)) { Text("Delivered · ${meal.mealSlot.lowercase().replaceFirstChar{it.uppercase()}}", color = BrandDark, fontSize = CustomerTypeScale.Caption, fontWeight = FontWeight.Bold); Text(meal.itemName.ifBlank{"Meal"}, color = Ink, fontSize = CustomerTypeScale.Body, fontWeight = FontWeight.ExtraBold); if(meal.description.isNotBlank())Text(meal.description, color = Muted, fontSize = CustomerTypeScale.Caption,maxLines=2,overflow=TextOverflow.Ellipsis); Text("${meal.providerName.ifBlank{provider.name}} · ${formatIsoDate(meal.serviceDate)}", color = Muted, fontSize = CustomerTypeScale.Caption, modifier = Modifier.padding(top = 4.dp)) }; Surface(color = Mist, shape = RoundedCornerShape(9.dp)) { Text(meal.mealId.take(8).uppercase(), color = BrandDark, fontSize = CustomerTypeScale.Compact, fontWeight = FontWeight.Bold, modifier = Modifier.padding(7.dp)) } }
     }
 }
 
@@ -6047,22 +6086,40 @@ private fun NutritionOverview(onDetails: () -> Unit) {
 }
 
 @Composable
-private fun SubscriberQuickActions(onPause: () -> Unit, onPlan: () -> Unit, onOrders: () -> Unit, onSupport: () -> Unit) {
+private fun SubscriberQuickActions(onPause: () -> Unit, reviewMeal:CustomerMealExperience?, onReview: () -> Unit) {
     val actions = listOf(
-        Triple(Icons.Outlined.PauseCircle, "Pause Plan", "Pause meals"),
-        Triple(Icons.Outlined.CalendarMonth, "My Plan", "View details"),
-        Triple(Icons.Outlined.ShoppingBag, "Order History", "Past orders"),
-        Triple(Icons.Outlined.SupportAgent, "Support", "We're here")
+        Triple(Icons.Outlined.PauseCircle, "Pause Plan", "Skip eligible meals"),
+        Triple(Icons.Outlined.RateReview, "Rate this food", if(reviewMeal==null)"Available after delivery" else "${reviewMeal.mealSlot.lowercase().replaceFirstChar{it.uppercase()}} · ${formatIsoDate(reviewMeal.serviceDate)}")
     )
     Surface(Modifier.fillMaxWidth().padding(horizontal = 18.dp), color = Color.White, shape = RoundedCornerShape(18.dp)) {
         Row(Modifier.padding(vertical = 15.dp)) {
             actions.forEachIndexed { index, action ->
-                val onClick = listOf(onPause, onPlan, onOrders, onSupport)[index]
-                Column(Modifier.weight(1f).clickable(onClick = onClick).padding(vertical = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Surface(color = Mist, shape = CircleShape) { Icon(action.first, null, tint = Brand, modifier = Modifier.padding(9.dp).size(17.dp)) }
-                    Text(action.second, color = Ink, fontSize = CustomerTypeScale.Caption, fontWeight = FontWeight.Bold, maxLines = 1)
+                val enabled=index==0||reviewMeal!=null
+                val onClick=if(index==0)onPause else onReview
+                Column(Modifier.weight(1f).clickable(enabled=enabled,onClick = onClick).padding(vertical = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Surface(color = Mist, shape = CircleShape) { Icon(action.first, null, tint = if(enabled)Brand else Muted.copy(alpha=.55f), modifier = Modifier.padding(9.dp).size(17.dp)) }
+                    Text(action.second, color = if(enabled)Ink else Muted, fontSize = CustomerTypeScale.Caption, fontWeight = FontWeight.Bold, maxLines = 1)
                     Text(action.third, color = Muted, fontSize = CustomerTypeScale.Compact, maxLines = 1)
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DeliveryPartnerCard(meal:CustomerMealExperience){
+    val context=LocalContext.current
+    Surface(Modifier.fillMaxWidth().padding(horizontal=18.dp),color=Mist,shape=RoundedCornerShape(18.dp),border=androidx.compose.foundation.BorderStroke(1.dp,Border)){
+        Row(Modifier.padding(14.dp),verticalAlignment=Alignment.CenterVertically){
+            Surface(color=Brand,shape=CircleShape){Icon(Icons.Outlined.DeliveryDining,null,tint=Color.White,modifier=Modifier.padding(10.dp).size(19.dp))}
+            Spacer(Modifier.width(11.dp))
+            Column(Modifier.weight(1f)){
+                Text(if(meal.status=="OUT_FOR_DELIVERY")"Your meal is on the way" else "Delivery partner assigned",color=BrandDark,fontSize=CustomerTypeScale.Caption,fontWeight=FontWeight.Bold)
+                Text(meal.deliveryPersonName,color=Ink,fontSize=CustomerTypeScale.Body,fontWeight=FontWeight.ExtraBold)
+                Text("${meal.mealSlot.lowercase().replaceFirstChar{it.uppercase()}} · ${meal.deliveryPersonPhone}",color=Muted,fontSize=CustomerTypeScale.Caption)
+            }
+            OutlinedButton(onClick={context.startActivity(Intent(Intent.ACTION_DIAL,Uri.parse("tel:${meal.deliveryPersonPhone}")))},shape=RoundedCornerShape(12.dp),contentPadding=PaddingValues(horizontal=12.dp)){
+                Icon(Icons.Outlined.Phone,"Call delivery partner",modifier=Modifier.size(15.dp));Spacer(Modifier.width(5.dp));Text("Call",fontSize=CustomerTypeScale.Caption,fontWeight=FontWeight.Bold)
             }
         }
     }

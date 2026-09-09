@@ -34,6 +34,14 @@ internal data class PersistedDailyMeal(
     val itemId:String,val itemName:String,val dietaryType:String,val description:String
 )
 
+internal data class CustomerMealExperience(
+    val mealId:String,val subscriptionId:String,val providerId:String,val providerName:String,
+    val serviceDate:String,val mealSlot:String,val status:String,val itemId:String,val itemName:String,
+    val description:String,val deliveryPersonName:String,val deliveryPersonPhone:String,
+    val rating:Int?,val categoryRatings:JSONObject,val tags:List<String>,val reviewText:String,
+    val anonymous:Boolean,val reviewedAt:String
+)
+
 internal data class PersistedSubscription(
     val id:String,val status:String,val providerId:String,val providerName:String,
     val packageId:String,val packageName:String,val packageKind:String,
@@ -322,6 +330,34 @@ internal class SupabaseCustomerRepository(context:Context) {
     }
     fun changeDailyMeal(mealId:String,itemId:String,callback:(JSONObject?,String?)->Unit){rpc("customer_select_daily_meal",JSONObject().put("target_meal_id",mealId).put("target_item_id",itemId),callback)}
     fun pauseMeals(subscriptionId:String,dates:List<String>,slot:String,callback:(JSONObject?,String?)->Unit){rpc("customer_pause_subscription_meals",JSONObject().put("target_subscription",subscriptionId).put("target_dates",JSONArray(dates)).put("target_slot",slot.uppercase()),callback)}
+
+    fun mealExperiences(callback:(List<CustomerMealExperience>,String?)->Unit){
+        rpc("customer_meal_experience_feed",JSONObject().put("target_limit",60)){json,error->
+            if(error!=null||json==null){callback(emptyList(),error);return@rpc}
+            runCatching{
+                val rows=json.optJSONArray("items")?:JSONArray()
+                buildList{for(index in 0 until rows.length()){
+                    val row=rows.optJSONObject(index)?:continue
+                    val tagsJson=row.optJSONArray("tags")?:JSONArray()
+                    val tags=buildList{for(tagIndex in 0 until tagsJson.length())add(tagsJson.optString(tagIndex))}
+                    add(CustomerMealExperience(
+                        row.optString("meal_id"),row.optString("subscription_id"),row.optString("provider_id"),row.optString("provider_name"),
+                        row.optString("service_date"),row.optString("meal_slot"),row.optString("status"),row.optString("item_id"),row.optString("item_name"),
+                        row.optString("description"),row.optString("delivery_person_name"),row.optString("delivery_person_phone"),
+                        if(row.isNull("rating"))null else row.optInt("rating"),row.optJSONObject("category_ratings")?:JSONObject(),tags,
+                        row.optString("review_text"),row.optBoolean("is_anonymous"),row.optString("reviewed_at")
+                    ))
+                }}
+            }.fold(onSuccess={callback(it,null)},onFailure={callback(emptyList(),it.message?:"Could not read meal history")})
+        }
+    }
+
+    fun submitMealReview(mealId:String,rating:Int,categoryRatings:JSONObject,tags:List<String>,reviewText:String,anonymous:Boolean,callback:(JSONObject?,String?)->Unit){
+        rpc("customer_submit_meal_review",JSONObject().apply{
+            put("target_meal_id",mealId);put("target_rating",rating);put("target_category_ratings",categoryRatings)
+            put("target_tags",JSONArray(tags));put("target_review_text",reviewText.trim());put("target_is_anonymous",anonymous)
+        },callback)
+    }
 
     fun approvedMedia(path:String,callback:(Bitmap?)->Unit){
         val requestedPath=path.trim()
