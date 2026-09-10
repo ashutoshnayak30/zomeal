@@ -22,7 +22,7 @@ const tick = () => new Promise(resolve=>setImmediate(resolve));
 (async()=>{
   for (const element of d.querySelectorAll('[src],link[href]')) {
     const ref=element.getAttribute('src')||element.getAttribute('href');
-    if (!/^https?:/.test(ref)) assert.ok(fs.existsSync(path.join(root,ref)),`Missing ${ref}`);
+    if (!/^https?:/.test(ref)) assert.ok(fs.existsSync(path.join(root,ref.split('?')[0])),`Missing ${ref}`);
   }
   const ids=[...d.querySelectorAll('[id]')].map(e=>e.id); assert.equal(new Set(ids).size,ids.length,'Duplicate IDs');
   for (const a of d.querySelectorAll('a[href^="#"]')) if(a.hash) assert.ok(d.getElementById(a.hash.slice(1)),`Missing ${a.hash}`);
