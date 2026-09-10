@@ -103,7 +103,7 @@ $('#lead-form').addEventListener('submit', async e => {
 
 // The tiffin opens once as the visitor scrolls; its button can always replay it.
 const visual = $('#tiffin-visual'), toggle = $('#tiffin-toggle'), motion = matchMedia('(prefers-reduced-motion: reduce)');
-let openness = 0, target = 0, animation = 0, manual = false, revealed = false;
+let openness = 0, target = 0, animation = 0, manual = false;
 function setOpen(open) {
   target = open ? 1 : 0; visual.dataset.state = open ? 'open' : 'closed'; toggle.setAttribute('aria-expanded', String(open));
   $('.toggle-icon',toggle).textContent = open ? '−' : '+';
@@ -117,7 +117,23 @@ function setOpen(open) {
   animation=requestAnimationFrame(frame);
 }
 toggle.addEventListener('click', () => { manual = true; setOpen(target < .5); });
-window.addEventListener('scroll', () => { if (!manual && !revealed && window.scrollY > 75 && !motion.matches) { revealed = true; setOpen(true); } }, {passive:true});
+// motion.js drives the scroll reveal; manual toggling takes precedence.
+window.zomealTiffin = {
+  scrub(value) {
+    if (manual || motion.matches) return;
+    cancelAnimationFrame(animation);
+    openness = Math.max(0, Math.min(1, value));
+    target = openness >= .5 ? 1 : 0;
+    visual.style.setProperty('--open', openness);
+    visual.dataset.state = target ? 'open' : 'closed';
+    toggle.setAttribute('aria-expanded', String(Boolean(target)));
+    $('.toggle-icon',toggle).textContent = target ? '−' : '+';
+    $('.toggle-copy b',toggle).textContent = target ? 'Close the tiffin' : 'Open today’s tiffin';
+    $('#tiffin-state-label').textContent = target ? 'A little of everything you love' : 'Ready when you are';
+    $('.tiffin-open').setAttribute('aria-hidden',String(!target));
+    $('.tiffin-closed').setAttribute('aria-hidden',String(Boolean(target)));
+  }
+};
 motion.addEventListener('change', () => setOpen(target > .5));
 setOpen(false);
 const menuToggle = $('.menu-toggle'), navigation = $('#main-navigation');

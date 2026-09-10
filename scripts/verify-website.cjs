@@ -17,6 +17,7 @@ w.fetch = async (url,options) => {
 };
 w.eval(fs.readFileSync(path.join(root,'config.js'),'utf8'));
 w.eval(fs.readFileSync(path.join(root,'app.js'),'utf8'));
+w.eval(fs.readFileSync(path.join(root,'motion.js'),'utf8'));
 const tick = () => new Promise(resolve=>setImmediate(resolve));
 (async()=>{
   for (const element of d.querySelectorAll('[src],link[href]')) {
@@ -27,6 +28,7 @@ const tick = () => new Promise(resolve=>setImmediate(resolve));
   for (const a of d.querySelectorAll('a[href^="#"]')) if(a.hash) assert.ok(d.getElementById(a.hash.slice(1)),`Missing ${a.hash}`);
   d.querySelector('#tiffin-toggle').click(); assert.equal(d.querySelector('#tiffin-toggle').getAttribute('aria-expanded'),'true');
   assert.equal(d.querySelector('#tiffin-visual').style.getPropertyValue('--open'),'1');
+  assert.ok(d.querySelector('.motion-toggle').disabled, 'Reduced motion must disable automatic animation');
   d.querySelector('#tiffin-toggle').click(); assert.equal(d.querySelector('#tiffin-visual').style.getPropertyValue('--open'),'0');
   d.querySelector('.menu-toggle').click(); assert.ok(d.querySelector('nav').hasAttribute('data-open'));
   d.querySelector('nav a').click(); assert.ok(!d.querySelector('nav').hasAttribute('data-open'));
