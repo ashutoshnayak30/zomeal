@@ -136,17 +136,18 @@
 
         <section id="referralsView" class="view hidden">
           <div class="staff-heading"><div><h2>Referral programme</h2><p class="muted">Set customer rewards and monitor verified referral conversions.</p></div><button id="refreshReferrals" class="edit-provider-button">↻ Refresh</button></div>
-          <div id="referralAdminNotice" class="staff-note">Rewards are issued only after the referred customer’s first captured subscription. Installs or unverified accounts never create wallet money.</div>
+          <div id="referralAdminNotice" class="staff-note">The first reward is issued after verified phone signup—not from an anonymous APK install. The second reward is issued after the first captured subscription.</div>
           <div id="referralStats" class="stat-grid referral-stats"></div>
           <form id="referralSettingsForm" class="panel referral-settings">
             <div class="panel-head"><div><h3>Reward controls</h3><p>Only the Super Administrator can save these values.</p></div><label class="referral-toggle"><input id="referralEnabled" type="checkbox"> Programme enabled</label></div>
             <div class="referral-fields">
-              <label>Inviter reward (₹)<input id="referrerReward" type="number" min="0" step="1" required></label>
-              <label>New customer reward (₹)<input id="referredReward" type="number" min="0" step="1" required></label>
-              <label>Inviter cap per cycle (₹)<input id="referralCap" type="number" min="0" step="1" required></label>
+              <label>Inviter · verified signup (₹)<small>Added when the friend verifies their phone and applies the code.</small><input id="verifiedReferrerReward" type="number" min="0" max="10000" step="1" required></label>
+              <label>New customer · verified signup (₹)<small>Welcome wallet credit after verified registration.</small><input id="verifiedReferredReward" type="number" min="0" max="10000" step="1" required></label>
+              <label>Inviter · first paid plan (₹)<small>Additional bonus after the friend’s first captured subscription.</small><input id="subscriptionReferrerReward" type="number" min="0" max="10000" step="1" required></label>
+              <label>Inviter cap per cycle (₹)<input id="referralCap" type="number" min="0" max="100000" step="1" required></label>
               <label>Reward cycle (days)<input id="referralCycleDays" type="number" min="1" max="365" step="1" required></label>
             </div>
-            <div class="referral-actions"><p>Changes apply to referrals qualifying after the new setting becomes effective.</p><button id="saveReferralSettings" class="primary" type="submit">Save referral settings</button></div>
+            <div class="referral-actions"><p>Changes affect future verified signups and subscriptions. Every credit is written once to the customer wallet ledger.</p><button id="saveReferralSettings" class="primary" type="submit">Save referral settings</button></div>
           </form>
         </section>
 

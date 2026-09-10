@@ -4334,8 +4334,9 @@ private fun WalletScreen(onBack: () -> Unit) {
     var friendsRewarded by remember { mutableIntStateOf(0) }
     var referralCode by remember { mutableStateOf("") }
     var shareLink by remember { mutableStateOf("https://zomeal.in") }
-    var referrerReward by remember { mutableIntStateOf(0) }
-    var referredReward by remember { mutableIntStateOf(0) }
+    var verifiedInviterReward by remember { mutableIntStateOf(0) }
+    var verifiedNewCustomerReward by remember { mutableIntStateOf(0) }
+    var subscriptionInviterReward by remember { mutableIntStateOf(0) }
     var rewardLimit by remember { mutableIntStateOf(1000) }
     var activity by remember { mutableStateOf(JSONArray()) }
     var loading by remember { mutableStateOf(true) }
@@ -4354,8 +4355,9 @@ private fun WalletScreen(onBack: () -> Unit) {
                 friendsRewarded = data.optInt("friends_rewarded")
                 referralCode = data.optString("referral_code")
                 shareLink = data.optString("share_link", "https://zomeal.in/?ref=$referralCode")
-                referrerReward = (data.optLong("referrer_reward_paise") / 100).toInt()
-                referredReward = (data.optLong("referred_reward_paise") / 100).toInt()
+                verifiedInviterReward = (data.optLong("verified_referrer_reward_paise") / 100).toInt()
+                verifiedNewCustomerReward = (data.optLong("verified_referred_reward_paise") / 100).toInt()
+                subscriptionInviterReward = (data.optLong("first_subscription_referrer_reward_paise") / 100).toInt()
                 rewardLimit = (data.optLong("cycle_cap_paise") / 100).toInt()
                 activity = data.optJSONArray("activity") ?: JSONArray()
             } else walletMessage = error ?: "Could not load your wallet. Please try again."
@@ -4397,7 +4399,8 @@ private fun WalletScreen(onBack: () -> Unit) {
     }
     fun shareReferral(channel: String) {
         if (referralCode.isBlank()) { walletMessage = "Your referral code is still loading."; return }
-        val text = "Join Zomeal for home-style meals. Use my referral code $referralCode. You can earn ₹$referredReward after your first successful paid subscription: $shareLink"
+        val signupMessage=if(verifiedNewCustomerReward>0)" Get ₹$verifiedNewCustomerReward in your meal wallet after verified signup." else ""
+        val text = "Join Zomeal for home-style meals. Use my referral code $referralCode.$signupMessage $shareLink"
         context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply { type = "text/plain"; putExtra(Intent.EXTRA_TEXT, text) }, "Share Zomeal via $channel"))
         sharedChannels[channel] = true
     }
@@ -4427,7 +4430,7 @@ private fun WalletScreen(onBack: () -> Unit) {
             item { WalletHeader(balance, onBack, onAddMoney = { showAddMoney = true }) }
             walletMessage?.let { message -> item { WalletMessageBanner(message) { walletMessage = null } } }
             item { WalletQuickFacts(referralEarned, rewardLimit, friendsJoined) }
-            item { ReferAndEarnCard(sharedChannels, referralCode, referrerReward, referredReward, rewardLimit, referralEarned, friendsRewarded, onCopy = {
+            item { ReferAndEarnCard(sharedChannels, referralCode, verifiedInviterReward, verifiedNewCustomerReward, subscriptionInviterReward, rewardLimit, referralEarned, friendsRewarded, onCopy = {
                 if (referralCode.isNotBlank()) {
                     (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("Zomeal referral code", referralCode))
                     walletMessage = "Referral code copied."
@@ -4537,7 +4540,7 @@ private fun WalletFactCard(icon: ImageVector, label: String, value: String, modi
 }
 
 @Composable
-private fun ReferAndEarnCard(sharedChannels: Map<String, Boolean>, referralCode: String, referrerReward: Int, referredReward: Int, rewardLimit: Int, earned: Int, friendsRewarded: Int, onCopy: () -> Unit, onShare: (String) -> Unit) {
+private fun ReferAndEarnCard(sharedChannels: Map<String, Boolean>, referralCode: String, verifiedInviterReward: Int, verifiedNewCustomerReward: Int, subscriptionInviterReward: Int, rewardLimit: Int, earned: Int, friendsRewarded: Int, onCopy: () -> Unit, onShare: (String) -> Unit) {
     Surface(Modifier.fillMaxWidth().padding(horizontal = 18.dp), color = Color(0xFFF1FAEE), shape = RoundedCornerShape(20.dp), border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFCFE7C7))) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(11.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -4545,7 +4548,8 @@ private fun ReferAndEarnCard(sharedChannels: Map<String, Boolean>, referralCode:
                 Spacer(Modifier.width(11.dp))
                 Column(Modifier.weight(1f)) {
                     Text("Refer & Earn up to ₹${"%,d".format(rewardLimit)}", color = BrandDark, fontSize = CustomerTypeScale.BodyLarge, fontWeight = FontWeight.Black)
-                    Text("You get ₹$referrerReward and your friend gets ₹$referredReward after their first successful paid subscription.", color = Muted, fontSize = CustomerTypeScale.Caption, lineHeight = 13.sp)
+                    Text("Verified signup: you get ₹$verifiedInviterReward and your friend gets ₹$verifiedNewCustomerReward.", color = Muted, fontSize = CustomerTypeScale.Caption, lineHeight = 13.sp)
+                    Text("First paid plan: you get another ₹$subscriptionInviterReward.", color = BrandDark, fontSize = CustomerTypeScale.Caption, fontWeight = FontWeight.Bold)
                 }
                 Icon(Icons.Outlined.Savings, null, tint = Color(0xFFFFA000), modifier = Modifier.size(34.dp))
             }
@@ -6395,7 +6399,7 @@ private fun SignupScreen(onContinue: (String, String, String, String) -> Unit, o
                                 Row(verticalAlignment=Alignment.CenterVertically) {
                                     Surface(color=Color.White,shape=CircleShape){ Icon(Icons.Outlined.CardGiftcard,null,tint=Brand,modifier=Modifier.padding(7.dp).size(17.dp)) }
                                     Spacer(Modifier.width(9.dp))
-                                    Column { Text("Have a referral code?",color=Ink,fontSize=if(compact)CustomerTypeScale.Compact else CustomerTypeScale.Caption,fontWeight=FontWeight.ExtraBold); Text("Optional — rewards apply after your first paid plan",color=Muted,fontSize=if(compact)CustomerTypeScale.Compact else CustomerTypeScale.Caption) }
+                                    Column { Text("Have a referral code?",color=Ink,fontSize=if(compact)CustomerTypeScale.Compact else CustomerTypeScale.Caption,fontWeight=FontWeight.ExtraBold); Text("Optional · verified-signup reward is added after OTP",color=Muted,fontSize=if(compact)CustomerTypeScale.Compact else CustomerTypeScale.Caption) }
                                 }
                                 Spacer(Modifier.height(7.dp))
                                 TextField(
