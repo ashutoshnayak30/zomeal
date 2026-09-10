@@ -35,7 +35,8 @@ internal data class RazorpayCheckoutOrder(
 
 internal data class PersistedDailyMeal(
     val id:String,val serviceDate:String,val mealSlot:String,val status:String,
-    val itemId:String,val itemName:String,val dietaryType:String,val description:String
+    val itemId:String,val itemName:String,val dietaryType:String,val description:String,
+    val photoPath:String=""
 )
 
 internal data class CustomerMealExperience(
@@ -52,7 +53,8 @@ internal data class PersistedSubscription(
     val durationDays:Int,
     val startDate:String,val endDate:String,val paymentReference:String,
     val address:JSONObject?,val weeklyMenu:JSONArray,val dailyMeals:List<PersistedDailyMeal>,
-    val payment:JSONObject?
+    val payment:JSONObject?,val primaryPhotoPath:String="",val kitchenPhotoPath:String="",
+    val mealPhotoPath:String="",val scheduledPackageChange:JSONObject?=null
 )
 
 internal data class CustomerAuthResult(val success:Boolean,val message:String?=null)
@@ -73,7 +75,9 @@ internal class SupabaseCustomerRepository(context:Context) {
     private val main=Handler(Looper.getMainLooper())
     private val baseUrl=BuildConfig.SUPABASE_URL.trimEnd('/')
     private val anonKey=BuildConfig.SUPABASE_ANON_KEY
-    private val approvedMediaCacheDir by lazy { File(appContext.cacheDir,"approved-provider-media").apply { mkdirs() } }
+    // Keep display-sized images between app restarts. The old cacheDir copies
+    // were routinely removed by Android, forcing multi-megabyte re-downloads.
+    private val approvedMediaCacheDir by lazy { File(appContext.filesDir,"approved-provider-media-v2").apply { mkdirs() } }
     val configured get()=baseUrl.startsWith("https://")&&anonKey.isNotBlank()
     val isAuthenticated:Boolean get()=!prefs.getBoolean("signed_out",false)&&!prefs.getString("access_token",null).isNullOrBlank()
     val savedPincode:String get()=prefs.getString("pincode","").orEmpty()
@@ -278,17 +282,30 @@ internal class SupabaseCustomerRepository(context:Context) {
                     val row=mealRows.getJSONObject(index)
                     add(PersistedDailyMeal(
                         row.optString("id"),row.optString("service_date"),row.optString("meal_slot"),row.optString("status"),
-                        row.optString("item_id"),row.optString("item_name"),row.optString("dietary_type"),row.optString("description")
+                        row.optString("item_id"),row.optString("item_name"),row.optString("dietary_type"),row.optString("description"),
+                        row.optString("photo_path").trim().takeUnless{it.equals("null",true)||it.equals("undefined",true)}.orEmpty()
                     ))
                 }}
                 PersistedSubscription(
                     subscription.getString("id"),subscription.optString("status"),subscription.optString("provider_id"),subscription.optString("provider_name"),
                     subscription.optString("package_id"),subscription.optString("package_name"),subscription.optString("package_kind"),subscription.optInt("duration_days",30),
                     subscription.optString("start_date"),subscription.optString("end_date"),subscription.optString("payment_reference"),
-                    json.optJSONObject("address"),json.optJSONArray("weekly_menu")?:JSONArray(),meals,json.optJSONObject("payment")
+                    json.optJSONObject("address"),json.optJSONArray("weekly_menu")?:JSONArray(),meals,json.optJSONObject("payment"),
+                    subscription.optString("primary_photo_path").trim().takeUnless{it.equals("null",true)}.orEmpty(),
+                    subscription.optString("kitchen_photo_path").trim().takeUnless{it.equals("null",true)}.orEmpty(),
+                    subscription.optString("meal_photo_path").trim().takeUnless{it.equals("null",true)}.orEmpty(),
+                    subscription.optJSONObject("scheduled_package_change")
                 )
-            }.fold(onSuccess={callback(it,null)},onFailure={callback(null,it.message?:"Could not read subscription")})
+            }.fold(onSuccess={prefetchSubscriptionMedia(it);callback(it,null)},onFailure={callback(null,it.message?:"Could not read subscription")})
         }
+    }
+
+    fun scheduleMonthlyUpgrade(subscriptionId:String,packageId:String,callback:(JSONObject?,String?)->Unit){
+        rpc("customer_schedule_monthly_upgrade",JSONObject().put("target_subscription",subscriptionId).put("target_package",packageId),callback)
+    }
+
+    fun cancelMonthlyUpgrade(subscriptionId:String,callback:(JSONObject?,String?)->Unit){
+        rpc("customer_cancel_monthly_upgrade",JSONObject().put("target_subscription",subscriptionId),callback)
     }
 
     fun requestSubscriptionChange(subscriptionId:String,action:String,replacementProviderId:String?=null,reason:String?=null,callback:(JSONObject?,String?)->Unit){
@@ -378,8 +395,13 @@ internal class SupabaseCustomerRepository(context:Context) {
         val bounds=BitmapFactory.Options().apply{inJustDecodeBounds=true}
         BitmapFactory.decodeByteArray(bytes,0,bytes.size,bounds)
         var sample=1
-        while(bounds.outWidth/sample>1280||bounds.outHeight/sample>1280)sample*=2
+        while(bounds.outWidth/sample>960||bounds.outHeight/sample>960)sample*=2
         return BitmapFactory.decodeByteArray(bytes,0,bytes.size,BitmapFactory.Options().apply{inSampleSize=sample})
+    }
+    private fun persistDisplayBitmap(file:File,bitmap:Bitmap){
+        val temporary=File(file.parentFile,"${file.name}.tmp")
+        temporary.outputStream().buffered().use{bitmap.compress(Bitmap.CompressFormat.JPEG,86,it)}
+        if(!temporary.renameTo(file)){file.delete();temporary.renameTo(file)}
     }
     private fun finishMediaRequest(cacheKey:String,bitmap:Bitmap?){
         if(bitmap!=null)approvedBitmapCache.put(cacheKey,bitmap)
@@ -424,8 +446,7 @@ internal class SupabaseCustomerRepository(context:Context) {
                 if(signed&&response.first !in 200..299)response=download(authenticatedUrl,true)
                 if(response.first==401&&refreshSessionBlocking())response=download(authenticatedUrl,true)
                 response.second?.let{bytes->
-                    runCatching{if(bytes.size<=20*1024*1024)diskFile.writeBytes(bytes)}
-                    decodeDisplayBitmap(bytes)
+                    decodeDisplayBitmap(bytes)?.also{decoded->runCatching{persistDisplayBitmap(diskFile,decoded)}}
                 }
             }.getOrNull()
             finishMediaRequest(objectPath,bitmap)
@@ -447,6 +468,15 @@ internal class SupabaseCustomerRepository(context:Context) {
             }
         }
         priority.forEach{approvedMedia(it){}}
+    }
+
+    private fun prefetchSubscriptionMedia(subscription:PersistedSubscription){
+        val priority=linkedSetOf(subscription.primaryPhotoPath,subscription.mealPhotoPath,subscription.kitchenPhotoPath)
+        subscription.dailyMeals.mapTo(priority){it.photoPath}
+        for(index in 0 until subscription.weeklyMenu.length()){
+            subscription.weeklyMenu.optJSONObject(index)?.optString("photo_path")?.let(priority::add)
+        }
+        priority.filter{it.isNotBlank()&&!it.equals("null",true)}.forEach{approvedMedia(it){}}
     }
 
     fun saveRegistrationProfile(fullName:String,phone:String,callback:(String?)->Unit){

@@ -114,7 +114,7 @@ private object CustomerProfileStore {
             .filterNotNull().filter { it.isNotBlank() }.joinToString(", ")
 }
 
-private data class SavedCustomerMeal(val mainCourse: String, val carb: String)
+private data class SavedCustomerMeal(val mainCourse: String, val carb: String, val photoPath: String = "")
 
 private object CustomerMenuStore {
     val lunches = mutableStateMapOf<Int, SavedCustomerMeal>()
@@ -452,7 +452,9 @@ private fun persistedSubscriptionToProvider(subscription:PersistedSubscription):
         diet="Subscribed plan",category=DietFilter.BOTH,rating=0.0,reviews=0,price=(amountPaise/100).toInt(),
         tint=Color(0xFFD5E9D1),accent=Color(0xFF4E944C),id=subscription.providerId,
         packageId=subscription.packageId,packageKind=subscription.packageKind,packages=listOf(packageRecord),
-        weeklyMenu=subscription.weeklyMenu.toString(),isLive=true,description="Your active Zomeal meal provider"
+        weeklyMenu=subscription.weeklyMenu.toString(),isLive=true,description="Your active Zomeal meal provider",
+        primaryPhotoPath=subscription.primaryPhotoPath,kitchenPhotoPath=subscription.kitchenPhotoPath,
+        mealPhotoPath=subscription.mealPhotoPath
     )
 }
 
@@ -3842,14 +3844,14 @@ private fun ActiveSubscriberHome(provider: Provider, onBrowseProviders: () -> Un
     val tomorrowIso = remember { SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR,1) }.time) }
     fun persistedMeal(date:String,slot:String):SavedCustomerMeal? = persistedSubscription?.dailyMeals
         ?.firstOrNull { it.serviceDate==date && it.mealSlot.equals(slot,true) && it.itemName.isNotBlank() }
-        ?.let { SavedCustomerMeal(it.itemName,"") }
+        ?.let { SavedCustomerMeal(it.itemName,"",it.photoPath) }
     fun persistedWeeklyMeal(dayIndex:Int,slot:String):SavedCustomerMeal? {
         val rows=persistedSubscription?.weeklyMenu?:return null
         for(index in 0 until rows.length()){
             val row=rows.optJSONObject(index)?:continue
             if(row.optInt("day_of_week")==dayIndex+1&&row.optString("meal_slot").equals(slot,true)){
                 val name=row.optString("item_name").trim()
-                if(name.isNotBlank())return SavedCustomerMeal(name,"")
+                if(name.isNotBlank())return SavedCustomerMeal(name,"",row.optString("photo_path"))
             }
         }
         return null
@@ -3861,9 +3863,10 @@ private fun ActiveSubscriberHome(provider: Provider, onBrowseProviders: () -> Un
     fun selectedChoice(menu: ProviderMealSlot, saved: SavedCustomerMeal?): MenuChoice =
         (menu.mainCourses.firstOrNull { it.name.equals(saved?.mainCourse,true) }
             ?: menu.mainCourses.firstOrNull()
-            ?: saved?.mainCourse?.takeIf { it.isNotBlank() }?.let { MenuChoice(it,Color(0xFFD8D7D2),Brand) }
+            ?: saved?.mainCourse?.takeIf { it.isNotBlank() }?.let { MenuChoice(it,Color(0xFFD8D7D2),Brand,photoPath=saved.photoPath) }
             ?: MenuChoice("Menu being updated", Color(0xFFD8D7D2), Brand)).let { choice ->
-                val fallback = provider.mealPhotoPath.takeUnless { it.equals("null", true) }.orEmpty()
+                val itemPhoto=saved?.photoPath.orEmpty().takeIf{saved?.mainCourse.equals(choice.name,true)}.orEmpty()
+                val fallback = itemPhoto.ifBlank{provider.mealPhotoPath.takeUnless { it.equals("null", true) }.orEmpty()}
                 if (choice.photoPath.isBlank() && fallback.isNotBlank()) choice.copy(photoPath = fallback) else choice
             }
     val savedTodayLunch = persistedMeal(todayIso,"LUNCH") ?: persistedWeeklyMeal(todayIndex,"LUNCH") ?: CustomerMenuStore.lunches[todayIndex]
@@ -4706,7 +4709,11 @@ private fun BalancePaymentScreen(onBack:()->Unit,onPaid:()->Unit){
 private fun MyPlanScreen(provider: Provider, onNav: (Int) -> Unit, onSupport: () -> Unit, onWeeklyMenu: () -> Unit, onProviderDetails:()->Unit, onBrowseProviders: () -> Unit,onPayBalance:()->Unit,onPause:()->Unit) {
     val context = LocalContext.current.applicationContext
     val repository = remember(context) { SupabaseCustomerRepository(context) }
+    val subscription = CustomerSubscriptionStore.current
+    val monthlyPackages = provider.packages.filter { it.durationDays == 30 }.sortedBy { it.pricePaise }
     var message by remember { mutableStateOf<String?>(null) }
+    var scheduledUpgrade by remember(subscription?.id,subscription?.scheduledPackageChange?.toString()) { mutableStateOf(subscription?.scheduledPackageChange) }
+    var showUpgradeDialog by remember { mutableStateOf(false) }
     var showCancelDialog by remember { mutableStateOf(false) }
     var confirmCancellation by remember { mutableStateOf(false) }
     var editAddress by remember { mutableStateOf(false) }
@@ -4731,6 +4738,14 @@ private fun MyPlanScreen(provider: Provider, onNav: (Int) -> Unit, onSupport: ()
                 }
             }
             item { PlanTimelineCard(CustomerSubscriptionStore.current) }
+            if(subscription?.durationDays==7||scheduledUpgrade!=null){
+                item {
+                    MonthlyUpgradeCard(scheduledUpgrade) {
+                        if(monthlyPackages.isEmpty())message="Monthly packages are still loading. Please retry in a moment."
+                        else showUpgradeDialog=true
+                    }
+                }
+            }
             item { Text("Weekly Menu", color = Ink, fontSize = CustomerTypeScale.BodyLarge, fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(horizontal = 18.dp)) }
             item { MyPlanWeekPreview(provider, onWeeklyMenu) }
             item { PlanDeliveryAddress { editAddress = true } }
@@ -4738,6 +4753,32 @@ private fun MyPlanScreen(provider: Provider, onNav: (Int) -> Unit, onSupport: ()
             item { PlanPaymentSummary() }
         }
     }
+    if(showUpgradeDialog&&subscription!=null) MonthlyUpgradeDialog(
+        packages=monthlyPackages,scheduled=scheduledUpgrade,effectiveDate=subscription.endDate,
+        onDismiss={showUpgradeDialog=false},
+        onSchedule={selected,done->
+            repository.scheduleMonthlyUpgrade(subscription.id,selected.id){result,error->
+                if(result!=null&&error==null){
+                    scheduledUpgrade=result
+                    CustomerSubscriptionStore.current=CustomerSubscriptionStore.current?.copy(scheduledPackageChange=result)
+                    message="Monthly upgrade scheduled for ${formatIsoDate(result.optString("effective_date"))}."
+                    showUpgradeDialog=false
+                }
+                done(error)
+            }
+        },
+        onCancel={done->
+            repository.cancelMonthlyUpgrade(subscription.id){_,error->
+                if(error==null){
+                    scheduledUpgrade=null
+                    CustomerSubscriptionStore.current=CustomerSubscriptionStore.current?.copy(scheduledPackageChange=null)
+                    message="The scheduled monthly upgrade was cancelled. Your weekly plan is unchanged."
+                    showUpgradeDialog=false
+                }
+                done(error)
+            }
+        }
+    )
     if (editAddress) ProfileAddressDialog { editAddress = false }
     if (showCancelDialog && !confirmCancellation) AlertDialog(
         onDismissRequest = { showCancelDialog = false },
@@ -5623,6 +5664,75 @@ private fun OrdersScreen(provider: Provider, onNav: (Int) -> Unit, onSupport: ()
         }
     }
     selected?.let { order -> AlertDialog(onDismissRequest = { selected = null }, icon = { Icon(Icons.Outlined.RestaurantMenu, null, tint = Brand) }, title = { Text(order.itemName.ifBlank { "Meal details" }, fontWeight = FontWeight.Bold) }, text = { Text("${order.mealSlot.lowercase().replaceFirstChar { it.uppercase() }} · ${formatIsoDate(order.serviceDate)}\nStatus: ${order.status.lowercase().replace('_',' ').replaceFirstChar { it.uppercase() }}", fontSize = CustomerTypeScale.Compact) }, confirmButton = { Button(onClick = { selected = null }) { Text("Done") } }, dismissButton = { TextButton(onClick = { selected = null; onSupport() }) { Text("Get help") } }) }
+}
+
+@Composable
+private fun MonthlyUpgradeCard(scheduled:JSONObject?,onClick:()->Unit){
+    val isScheduled=scheduled!=null
+    Surface(
+        Modifier.fillMaxWidth().padding(horizontal=18.dp).clickable(onClick=onClick),
+        color=if(isScheduled)Color(0xFFE8F6EC) else Color.White,
+        shape=RoundedCornerShape(17.dp),
+        border=androidx.compose.foundation.BorderStroke(1.dp,if(isScheduled)Brand.copy(alpha=.35f) else Border)
+    ){
+        Row(Modifier.padding(14.dp),verticalAlignment=Alignment.CenterVertically){
+            Surface(color=Brand.copy(alpha=.1f),shape=CircleShape){Icon(Icons.Outlined.CalendarMonth,null,tint=Brand,modifier=Modifier.padding(9.dp).size(21.dp))}
+            Spacer(Modifier.width(11.dp))
+            Column(Modifier.weight(1f)){
+                Text(if(isScheduled)"Monthly upgrade scheduled" else "Continue with a monthly plan",color=Ink,fontSize=CustomerTypeScale.BodyLarge,fontWeight=FontWeight.ExtraBold)
+                Text(if(isScheduled)"${scheduled?.optString("package_name")} · starts ${formatIsoDate(scheduled?.optString("effective_date"))}" else "Choose Lunch, Dinner or Both. It starts after this weekly trial.",color=Muted,fontSize=CustomerTypeScale.Caption)
+                Text("Your wallet is charged only for delivered meals.",color=BrandDark,fontSize=CustomerTypeScale.Caption,fontWeight=FontWeight.Bold)
+            }
+            Text(if(isScheduled)"Edit" else "Upgrade",color=Brand,fontSize=CustomerTypeScale.Caption,fontWeight=FontWeight.ExtraBold)
+        }
+    }
+}
+
+@Composable
+private fun MonthlyUpgradeDialog(
+    packages:List<MarketplacePackage>,scheduled:JSONObject?,effectiveDate:String,
+    onDismiss:()->Unit,onSchedule:(MarketplacePackage,(String?)->Unit)->Unit,onCancel:((String?)->Unit)->Unit
+){
+    var selectedId by remember(scheduled?.toString(),packages){mutableStateOf(scheduled?.optString("package_id")?.takeIf{it.isNotBlank()}?:packages.firstOrNull()?.id.orEmpty())}
+    var saving by remember{mutableStateOf(false)}
+    var error by remember{mutableStateOf<String?>(null)}
+    val selected=packages.firstOrNull{it.id==selectedId}
+    val starts=scheduled?.optString("effective_date")?.takeIf{it.isNotBlank()}?:runCatching{
+        val parser=SimpleDateFormat("yyyy-MM-dd",Locale.US)
+        val date=parser.parse(effectiveDate)?:return@runCatching effectiveDate
+        formatIsoDate(parser.format(Calendar.getInstance().apply{time=date;add(Calendar.DAY_OF_YEAR,1)}.time))
+    }.getOrDefault(effectiveDate)
+    AlertDialog(
+        onDismissRequest={if(!saving)onDismiss()},
+        icon={Icon(Icons.Outlined.CalendarMonth,null,tint=Brand)},
+        title={Text(if(scheduled==null)"Upgrade to monthly" else "Edit monthly upgrade",fontWeight=FontWeight.ExtraBold)},
+        text={
+            Column(verticalArrangement=Arrangement.spacedBy(9.dp)){
+                Text("Your weekly trial continues until it ends. The monthly plan starts $starts with no overlapping meals.",color=Muted,fontSize=CustomerTypeScale.Body)
+                packages.forEach{item->
+                    val chosen=item.id==selectedId
+                    Surface(
+                        Modifier.fillMaxWidth().clickable(enabled=!saving){selectedId=item.id;error=null},
+                        color=if(chosen)Brand.copy(alpha=.08f) else Color.White,
+                        shape=RoundedCornerShape(12.dp),
+                        border=androidx.compose.foundation.BorderStroke(if(chosen)2.dp else 1.dp,if(chosen)Brand else Border)
+                    ){
+                        Row(Modifier.padding(11.dp),verticalAlignment=Alignment.CenterVertically){
+                            Column(Modifier.weight(1f)){
+                                Text(when(item.kind){"LUNCH_ONLY"->"Lunch only";"DINNER_ONLY"->"Dinner only";else->"Lunch + Dinner"},color=Ink,fontSize=CustomerTypeScale.Body,fontWeight=FontWeight.Bold)
+                                Text("₹${paiseText(item.pricePaise)} · 30 days",color=Muted,fontSize=CustomerTypeScale.Caption)
+                            }
+                            if(chosen)Icon(Icons.Filled.CheckCircle,null,tint=Brand,modifier=Modifier.size(20.dp))
+                        }
+                    }
+                }
+                error?.let{Text(it,color=Color(0xFFD64545),fontSize=CustomerTypeScale.Caption)}
+                Text("You can change or cancel this choice before it starts.",color=BrandDark,fontSize=CustomerTypeScale.Caption,fontWeight=FontWeight.Bold)
+            }
+        },
+        confirmButton={Button(enabled=!saving&&selected!=null,onClick={selected?.let{choice->saving=true;error=null;onSchedule(choice){failure->saving=false;error=failure}}},colors=ButtonDefaults.buttonColors(containerColor=Brand)){Text(if(saving)"Saving…" else if(scheduled==null)"Schedule upgrade" else "Save change")}},
+        dismissButton={Row{if(scheduled!=null)TextButton(enabled=!saving,onClick={saving=true;error=null;onCancel{failure->saving=false;error=failure}}){Text("Cancel upgrade",color=Color(0xFFD64545))};TextButton(enabled=!saving,onClick=onDismiss){Text("Close")}}}
+    )
 }
 
 @Composable private fun OrderSummaryStrip(meals: List<PersistedDailyMeal>) {
