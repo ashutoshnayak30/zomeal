@@ -22,6 +22,7 @@
   <link rel="stylesheet" href="accounts.css" />
   <link rel="stylesheet" href="low-wallet.css" />
   <link rel="stylesheet" href="notifications.css" />
+  <link rel="stylesheet" href="provider-cleanup.css" />
 </head>
 <body>
   <div id="login" class="login-shell">
@@ -72,6 +73,7 @@
         <button class="active" data-view="overview"><span>⌂</span> Overview</button>
         <button data-view="staff"><span>♙</span> Admin users</button>
         <button id="accountsNav" data-view="accounts" class="hidden"><span aria-hidden="true">⌕</span> Users data</button>
+        <button id="providerCleanupNav" data-view="provider-cleanup" class="hidden"><span aria-hidden="true">♙</span> Provider cleanup</button>
         <button id="lowWalletNav" data-view="low-wallet" class="hidden"><span aria-hidden="true">₹</span> Low wallet follow-ups</button>
         <button id="notificationsNav" data-view="notifications" class="hidden"><span aria-hidden="true">♢</span> Push notifications</button>
         <button data-view="referrals"><span>⌁</span> Referral programme</button>
@@ -199,6 +201,6 @@
   <div id="toast" class="toast"></div>
   <div id="photoModal" class="photo-modal hidden"><button id="closePhoto">×</button><div class="modal-image" id="modalImage"></div><div><p class="eyebrow green">PHOTO REVIEW</p><h3 id="modalTitle">Meal photo</h3><p id="modalMeta" class="muted"></p><label>Admin note<textarea placeholder="Add a reason when requesting changes"></textarea></label><div><button class="reject-button">Request changes</button><button class="primary protected-action">Approve photo</button></div></div></div>
   <div id="manualProviderModal" class="manual-modal hidden"><div class="manual-dialog"><div class="manual-head"><div><p class="eyebrow green">MANUAL ONBOARDING</p><h2>Add a provider</h2><p>Enter information received by phone, WhatsApp or in person.</p></div><button id="closeManual">×</button></div><form id="manualProviderForm"><section><h3>Provider details</h3><div class="manual-grid"><label>Provider name *<input name="providerName" required placeholder="e.g. Maa Home Kitchen"></label><label>Contact person *<input required placeholder="Owner or manager"></label><label>Mobile number *<input required placeholder="10-digit number"></label><label>Dietary category *<select><option>Pure Veg</option><option>Non-Veg</option><option>Both</option></select></label><label class="wide">Business address *<input required placeholder="House/plot, street and locality"></label><label>City *<input value="Bhubaneswar"></label><label>State *<input value="Odisha"></label></div></section><section><h3>Serviceability & capacity</h3><div class="manual-grid"><label class="wide">Serviceable pincodes *<input required placeholder="751030, 751019"></label><label>Lunch capacity<input type="number"></label><label>Dinner capacity<input type="number"></label></div></section><section><h3>Package and pricing</h3><div class="package-entry"><label><input type="checkbox"> Lunch only</label><input type="number" placeholder="Price in rupees"><input placeholder="Delivery window"></div><div class="package-entry"><label><input type="checkbox"> Dinner only</label><input type="number" placeholder="Price in rupees"><input placeholder="Delivery window"></div><div class="package-entry"><label><input type="checkbox"> Lunch + Dinner</label><input type="number" placeholder="Price in rupees"><input placeholder="Plan duration"></div></section><section><div class="section-title"><div><h3>Monday–Sunday menu</h3><p>Main-course alternatives and fixed items can be edited later.</p></div><button type="button" id="copyMonday" class="link">Copy Monday to all</button></div><div id="manualWeek"></div></section><div class="manual-footer"><button type="submit" class="primary">Save provider & review →</button></div></form></div></div>
-  <script src="config.production.js"></script><script src="live.js"></script><script src="app.js"></script><script src="menu-builder.js"></script><script src="autosave.js"></script><script src="finance.js"></script><script src="changes.js"></script><script src="leads.js"></script><script src="accounts.js"></script><script src="low-wallet.js"></script><script src="notifications.js"></script>
+  <script src="config.production.js"></script><script src="live.js"></script><script src="app.js"></script><script src="menu-builder.js"></script><script src="autosave.js"></script><script src="finance.js"></script><script src="changes.js"></script><script src="leads.js"></script><script src="accounts.js"></script><script src="provider-cleanup.js"></script><script src="low-wallet.js"></script><script src="notifications.js"></script>
 </body>
 </html>
