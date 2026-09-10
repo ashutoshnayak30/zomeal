@@ -1,0 +1,213 @@
+{
+  "updated": "10 September 2026",
+  "policies": {
+    "terms": {
+      "title": "Terms & Conditions",
+      "sections": [
+        [
+          "Who operates Zomeal",
+          "Zomeal is operated by Memobox Techno Lab Pvt Ltd, registered at Rairangpur, Mayurbhanj, Odisha – 757043, India. These terms cover our website, customer app and marketplace services. Contact support@zomeal.in or +91 6370648872."
+        ],
+        [
+          "Accounts and eligibility",
+          "Use an account only if you are at least 18 and can enter a binding contract. Supply accurate contact and delivery details, protect your OTP and report unauthorised access. Do not impersonate others or misuse payments, referrals or reviews."
+        ],
+        [
+          "Our marketplace role",
+          "Independent providers prepare, pack and deliver meals and are responsible for food safety, quality, accurate menus and delivery fulfilment. Zomeal facilitates discovery, subscriptions, payments and complaints. Provider responsibility does not exclude Zomeal’s own obligations under applicable law or your consumer rights."
+        ],
+        [
+          "Plans and payments",
+          "Review the provider, meal slots, weekly or monthly duration, start date, price, fees and delivery address before confirming. The checkout amount is not necessarily the full plan price: an advance, meal-wallet credit and amounts already consumed are different. Your transaction record and chosen payment arrangement determine how money is applied; the same meal must not be charged twice. A saved unpaid selection is not an active subscription."
+        ],
+        [
+          "Wallet-funded meals",
+          "For wallet-funded service, eligible delivered lunch and dinner are charged at the applicable package rates. A balance insufficient for a meal can pause service until recharge and resumption. A low-balance warning is not a charge. Check your current schedule after recharging. Account history records payments and adjustments; report discrepancies to support."
+        ],
+        [
+          "Changes, pauses and refunds",
+          "Use the app’s displayed cutoffs for meal changes and cancellations. Eligible cancelled meals are not charged. Missed delivery, wrong food and substantiated food or service problems qualify for correction or refund under our Refund & Cancellation Policy; preparation cutoffs do not remove those rights."
+        ],
+        [
+          "Content and reviews",
+          "Submit genuine reviews and photos that you have permission to share. Do not upload unlawful, misleading or private information about others. You permit Zomeal to display submitted content for the service. We may moderate abuse but a negative review alone is not grounds to deny a refund."
+        ],
+        [
+          "Suspension, changes and disputes",
+          "We may restrict unsafe, fraudulent or unlawful use, with an explanation and review route where practicable. Restriction does not forfeit valid refunds. Material policy changes will be communicated through the service and will not retroactively remove accrued rights. Indian law applies; you retain access to competent consumer forums and other remedies. Contact the Zomeal Grievance Team first if you need help."
+        ]
+      ]
+    },
+    "privacy": {
+      "title": "Privacy Policy",
+      "sections": [
+        [
+          "Scope and contact",
+          "Memobox Techno Lab Pvt Ltd operates Zomeal’s website, customer app and provider app. For privacy questions contact the Zomeal Grievance Team at support@zomeal.in, +91 6370648872, or Rairangpur, Mayurbhanj, Odisha – 757043, India."
+        ],
+        [
+          "Data we handle",
+          "Depending on your use, we handle your name, phone number, delivery address and pincode, account identifiers, meal preferences, subscriptions, order and wallet records, payment references, referrals, reviews, support messages and notification device tokens. Provider records can include business and contact details, service areas, menu and kitchen photos, food licences and settlement information. Website enquiries include the information and consent you submit. Technical logs may include device, network and error information."
+        ],
+        [
+          "Purposes",
+          "We use relevant data to authenticate accounts, check serviceability, fulfil meals, process and reconcile payments, manage referrals, send service alerts, resolve complaints and prevent fraud. We use enquiry details for the availability and testing updates requested. Promotional contact choices can be withdrawn without withdrawing a valid refund request."
+        ],
+        [
+          "Who receives data",
+          "Authorised Zomeal staff and service partners receive data needed for their roles. Your selected provider and allocated delivery personnel receive the contact, address and order details needed to fulfil delivery. Our infrastructure and authentication services include Supabase and SMS delivery services; Firebase Cloud Messaging handles push delivery and Razorpay processes payments. We may disclose records when lawfully required. We do not sell personal information."
+        ],
+        [
+          "Payment and permissions",
+          "Do not send us OTPs, UPI PINs, card PINs or passwords. Payment credentials are entered through the payment provider. Notification permission is optional and can be changed in device settings; disabling it may mean you miss service alerts. Photos or other device permissions are used for features you choose. Entering an address does not require continuous location tracking."
+        ],
+        [
+          "Storage, cookies and security",
+          "The website and apps may use local storage or similar technology for sessions and preferences; hosting and service providers process technical requests. Third-party resources such as website fonts can receive network information. Access controls and other safeguards reduce risk but cannot guarantee absolute security. Service providers may process data outside India subject to applicable legal requirements."
+        ],
+        [
+          "Retention and your choices",
+          "We retain records only as needed for service, security, disputes and applicable legal obligations. Request access, correction, consent withdrawal or deletion through support using your registered contact. We may reasonably verify identity. Deletion may be limited for payment, tax, fraud or dispute records that must be retained; we will explain any relevant limits. Optional marketing can be stopped separately."
+        ],
+        [
+          "Children, deletion and changes",
+          "The service is intended for adult account holders. Contact us if a child’s information was supplied without appropriate authority. See Account Deletion for the request process. We will publish policy updates and communicate material changes where appropriate. This notice does not restrict rights available under applicable data-protection law."
+        ]
+      ]
+    },
+    "refund": {
+      "title": "Refund & Cancellation Policy",
+      "sections": [
+        [
+          "Unused wallet money",
+          "You can request withdrawal of unused customer-paid wallet money through support@zomeal.in or +91 6370648872. Provide your registered phone number and the amount requested. We will verify ownership and reconcile pending meal charges, then return the refundable unused amount within 3–7 working days of receiving a complete request. Working days exclude weekends and bank holidays. We will explain any missing information or delay and provide a payment reference."
+        ],
+        [
+          "Where refunds go",
+          "Refunds are returned to the original payment method where supported, or another verified account belonging to you where necessary. You will not be forced to accept wallet credit instead of a monetary refund due to you. Promotional or referral entries are identified separately from money you paid; contact support for their applicable campaign treatment. Do not share a UPI PIN or OTP to receive a refund."
+        ],
+        [
+          "Missed, wrong or unsafe meals",
+          "You will not have to pay for a missed delivery, wrong food or a substantiated food-safety or service failure affecting your meal. An incorrect debit will be reversed or refunded. For a missing part of a meal, support will assess the affected value; broader remedies remain available when the whole meal is unusable. Provider delivery responsibility does not prevent you from raising the issue with Zomeal."
+        ],
+        [
+          "How to report a problem",
+          "Contact support with the order or meal date, lunch/dinner slot, provider and a description. Photos may help if available but are not an automatic condition for a valid complaint. Report problems promptly so we can investigate; this is not a waiver of statutory rights. Do not consume food you suspect is unsafe, and seek medical assistance when needed."
+        ],
+        [
+          "Meal cancellations and pauses",
+          "Cancel or pause in the app before the cutoff displayed for that meal. Eligible cancelled meals are not charged. After-cutoff change-of-mind requests may be limited once preparation begins, but missed delivery, wrong food and safety complaints remain eligible for assessment. Check the confirmation and updated schedule."
+        ],
+        [
+          "Failed or duplicate payments",
+          "A failed or pending payment must not be treated as successful solely because checkout closed. If money was debited without the corresponding credit, or charged twice, send the payment reference to support. We will reconcile with the payment provider and arrange reversal of amounts due. Do not repeatedly retry an uncertain payment."
+        ],
+        [
+          "Escalation",
+          "The Zomeal Grievance Team acknowledges complaints within 48 hours and aims to resolve them within one month. The 3–7 working-day unused-wallet refund commitment above still applies. This policy does not limit compensation or other remedies under applicable law."
+        ]
+      ]
+    },
+    "pause": {
+      "title": "Subscription Pause Policy",
+      "sections": [
+        [
+          "Choose the affected meals",
+          "Use Pause Plan to select eligible dates and lunch, dinner or both. Submit the request and check the confirmation before relying on a changed schedule."
+        ],
+        [
+          "Cutoffs and charges",
+          "The cutoff shown in the app for the meal applies in Indian Standard Time. Meals successfully cancelled before that cutoff are not charged. A pause does not by itself promise to extend a plan’s end date; check the updated schedule and contact support about discrepancies."
+        ],
+        [
+          "Low balance and resuming",
+          "A wallet-funded subscription can pause when the balance cannot cover a meal. Recharge and check the next eligible delivery before assuming service has resumed. Previously cancelled or missed meals are not automatically delivered or charged retrospectively."
+        ],
+        [
+          "Help",
+          "For an incorrect charge, cancellation failure or resumption issue, contact support@zomeal.in or +91 6370648872. Refund rights for service failures are described in Refund & Cancellation."
+        ]
+      ]
+    },
+    "provider-terms": {
+      "title": "Provider Terms & Food Safety",
+      "sections": [
+        [
+          "Provider responsibilities",
+          "Providers independently prepare, package and deliver the meals they accept through Zomeal. Maintain accurate business, menu, dietary, ingredient, price, capacity, delivery and contact information. Only serve approved areas and submit customer-facing changes for approval where required."
+        ],
+        [
+          "FSSAI is mandatory",
+          "Maintain the valid FSSAI registration or licence applicable to your food business and premises, supply authentic details and renew before expiry. Do not supply food without required authorisation. Inform Zomeal immediately of expiry, suspension or a safety concern. These requirements do not substitute for Zomeal’s own regulatory obligations."
+        ],
+        [
+          "Food safety and truthful content",
+          "Follow applicable hygiene, storage, temperature, packaging and food-safety rules. Provide accurate dietary and allergen information; never promise allergen-free food unless you can support that claim. Use genuine authorised photos; illustrations must not be passed off as actual meal photographs. Notify affected customers and Zomeal promptly of a suspected unsafe batch."
+        ],
+        [
+          "Delivery and customer issues",
+          "Arrange responsible delivery personnel and fulfil confirmed meals. Keep allocation and contact details accurate. Report disruptions promptly and cooperate with complaints and refund investigations. Customers must not bear charges for missed deliveries, wrong food or substantiated service failures. Never mark an undelivered meal as delivered."
+        ],
+        [
+          "Commercial terms",
+          "Your approved commercial agreement and displayed settlement records govern pricing, commission, advances and payouts. This policy does not invent a new commission rate. Review discrepancies with support and do not collect a duplicate payment for a meal already paid through Zomeal."
+        ],
+        [
+          "Customer data",
+          "Use customer details only for fulfilment and legitimate service support. Limit access to authorised staff and delivery personnel. Do not sell customer data or use it for unrelated marketing. Protect records and report suspected misuse promptly."
+        ],
+        [
+          "Stopping service and enforcement",
+          "Give prompt notice of planned service changes and coordinate affected meals, refunds and outstanding settlements. Zomeal may restrict unsafe, unlicensed, fraudulent or misleading listings. You may contact the grievance team for review; earned lawful settlements and customer refund rights remain subject to reconciliation and applicable law."
+        ],
+        [
+          "Contact and scope",
+          "These provider terms supplement your commercial agreement and Zomeal’s Terms, Privacy and Refund policies. Contact Memobox Techno Lab Pvt Ltd, Zomeal Grievance Team, support@zomeal.in, +91 6370648872, Rairangpur, Mayurbhanj, Odisha – 757043."
+        ]
+      ]
+    },
+    "account-deletion": {
+      "title": "Account Deletion",
+      "sections": [
+        [
+          "Request deletion",
+          "Customers and providers can request account deletion without reinstalling the app. Email support@zomeal.in with subject ‘Zomeal account deletion’ from your contact email and include your registered phone number and whether it is a customer or provider account. You can also call +91 6370648872 for assistance."
+        ],
+        [
+          "Verification and outstanding service",
+          "We will verify account ownership through a suitable registered contact, explain any outstanding meals or settlements and help close service. Never send a password, OTP or UPI PIN by email. Request withdrawal of unused paid wallet money at the same time if needed."
+        ],
+        [
+          "What is removed and retained",
+          "We will delete or de-identify account and optional profile information that is no longer needed. Records necessary for payment reconciliation, legal obligations, fraud prevention or unresolved disputes may be retained with restricted access for the required period. We will explain any exception when responding; deletion does not erase obligations owed to you."
+        ],
+        [
+          "Other choices",
+          "You can request correction, stop promotional messages or change notification permissions without deleting the account. Contact the Zomeal Grievance Team for status or escalation."
+        ]
+      ]
+    },
+    "contact": {
+      "title": "Contact & Grievances",
+      "sections": [
+        [
+          "Business details",
+          "Zomeal is operated by Memobox Techno Lab Pvt Ltd. Registered address: Rairangpur, Mayurbhanj, Odisha – 757043, India."
+        ],
+        [
+          "Support and grievances",
+          "Contact: Zomeal Grievance Team. Email: support@zomeal.in. Phone: +91 6370648872. Use these contacts for orders, payments, wallet withdrawals, privacy, account deletion, provider issues and complaints."
+        ],
+        [
+          "What to include",
+          "Include your registered phone number, order or payment reference if relevant, the issue and the resolution requested. Do not send OTPs, passwords, UPI PINs or full card details."
+        ],
+        [
+          "Response and escalation",
+          "We acknowledge consumer grievances within 48 hours and aim to resolve them within one month. You may also approach the National Consumer Helpline at 1915 or consumerhelpline.gov.in and the competent consumer forum. You do not have to give up statutory remedies to use our support process."
+        ]
+      ]
+    }
+  }
+}
+
