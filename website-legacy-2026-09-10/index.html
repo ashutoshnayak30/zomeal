@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#087b43">
+  <meta name="description" content="Discover verified monthly lunch and dinner providers near you with Zomeal.">
+  <title>Zomeal — Monthly meals, made simple</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="nav shell">
+    <a class="wordmark" href="#top" aria-label="Zomeal home"><span class="heart">♥</span>zomeal</a>
+    <nav aria-label="Main navigation">
+      <a href="#how">How it works</a><a href="#why">Why Zomeal</a><a href="#providers">Providers</a>
+    </nav>
+    <button class="nav-cta" data-open-lead>Join early access</button>
+  </header>
+
+  <main id="top">
+    <section class="hero">
+      <div class="orb orb-one"></div><div class="orb orb-two"></div>
+      <div class="shell hero-grid">
+        <div class="hero-copy reveal">
+          <div class="eyebrow"><span></span> Coming soon on Android</div>
+          <h1>Homely meals.<br><em>Every day.</em></h1>
+          <p>Discover Zomeal-reviewed monthly meal providers in your neighbourhood. Choose lunch, dinner or both—and make every week yours.</p>
+          <form id="hero-search" class="pin-search">
+            <label class="sr-only" for="hero-pincode">Enter delivery pincode</label>
+            <span class="pin-icon">⌖</span>
+            <input id="hero-pincode" inputmode="numeric" maxlength="6" autocomplete="postal-code" placeholder="Enter your 6-digit pincode">
+            <button type="submit">Check my area <span>→</span></button>
+          </form>
+          <div class="trust-row"><span>✓ No booking on website</span><span>✓ Approved provider data</span><span>✓ Free area check</span></div>
+        </div>
+        <div class="hero-art reveal delay">
+          <div class="steam s1">⌇</div><div class="steam s2">⌇</div>
+          <div class="plate">
+            <div class="rice">••<br>•••</div><div class="curry">● ●<br> ●</div><div class="dal">•••</div>
+            <div class="roti"></div><div class="salad">● ● ●</div>
+          </div>
+          <div class="float-card card-a"><b>30-day plans</b><small>Meals made predictable</small></div>
+          <div class="float-card card-b"><b>Weekly choice</b><small>Your menu, your way</small></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="providers" class="search-section shell">
+      <div class="section-head">
+        <div><span class="kicker">NEAR YOU</span><h2>Find your everyday kitchen</h2><p>Enter a pincode to see currently approved providers and their real plans.</p></div>
+        <div id="result-count" class="result-count" hidden></div>
+      </div>
+      <div id="search-state" class="search-state intro-state">
+        <div class="mini-map"><span>⌖</span><i></i><i></i><i></i></div>
+        <h3>Your next favourite meal may be nearby</h3><p>Use the pincode search above to start exploring.</p>
+      </div>
+      <div id="provider-grid" class="provider-grid" aria-live="polite"></div>
+    </section>
+
+    <section id="how" class="how-section">
+      <div class="shell"><span class="kicker">HOW IT WORKS</span><h2>Three steps to simpler meals</h2>
+        <div class="steps">
+          <article><span class="step-no">01</span><div class="step-icon">⌖</div><h3>Check your pincode</h3><p>See approved kitchens delivering in your neighbourhood.</p></article>
+          <article><span class="step-no">02</span><div class="step-icon">☷</div><h3>Explore real plans</h3><p>Compare packages, meal choices and provider information.</p></article>
+          <article><span class="step-no">03</span><div class="step-icon">▣</div><h3>Get the Android app</h3><p>Subscriptions and payments will be available through the Zomeal app.</p></article>
+        </div>
+      </div>
+    </section>
+
+    <section id="why" class="why shell">
+      <div class="why-copy"><span class="kicker">BUILT AROUND TRUST</span><h2>More confidence in every tiffin</h2><p>Zomeal brings provider discovery, clear packages and flexible meal planning into one thoughtful experience.</p>
+        <div class="feature-list">
+          <div><b>✓ Moderated listings</b><span>Provider information and photos are reviewed before publishing.</span></div>
+          <div><b>✓ Menu transparency</b><span>See approved weekly choices before deciding.</span></div>
+          <div><b>✓ Flexible planning</b><span>Our app is designed for pauses and menu changes within cut-off times.</span></div>
+          <div><b>✓ Local discovery</b><span>Results are matched to approved serviceable pincodes.</span></div>
+        </div>
+      </div>
+      <div class="phone-card">
+        <div class="phone-top"><span>zomeal</span><i>Early access</i></div>
+        <div class="today">Today’s menu</div>
+        <div class="meal-tile lunch"><div class="food-dot">☀</div><div><b>Lunch</b><span>Homely main course · Dal · Rice</span></div></div>
+        <div class="meal-tile dinner"><div class="food-dot">☾</div><div><b>Dinner</b><span>Fresh main course · Roti · Salad</span></div></div>
+        <button data-open-lead>Notify me at launch →</button>
+      </div>
+    </section>
+
+    <section class="launch">
+      <div class="shell launch-inner"><div><span class="kicker light">COMING SOON</span><h2>Zomeal is preparing<br>something delicious.</h2><p>Join early access and we’ll let you know when Android downloads open in your area.</p></div><button data-open-lead>Join the launch list <span>→</span></button></div>
+    </section>
+  </main>
+
+  <footer class="footer shell">
+    <div><a class="wordmark" href="#top"><span class="heart">♥</span>zomeal</a><p>Monthly meals, made simple.</p></div>
+    <div><b>Explore</b><a href="#providers">Find providers</a><a href="#how">How it works</a><a href="#why">Why Zomeal</a></div>
+    <div><b>Company</b><a href="mailto:hello@zomeal.in">Contact us</a><a href="#" data-open-lead>Become a provider</a></div>
+    <div><b>Legal</b><a href="privacy.html">Privacy policy</a><a href="terms.html">Terms of use</a></div>
+    <small>© 2026 Zomeal. Bhubaneswar, Odisha.</small>
+  </footer>
+
+  <dialog id="provider-dialog"><button class="dialog-close" data-close-dialog aria-label="Close">×</button><div id="provider-detail"></div></dialog>
+  <dialog id="lead-dialog"><button class="dialog-close" data-close-dialog aria-label="Close">×</button>
+    <div class="lead-head"><span>🌱</span><div><h2>Join Zomeal early access</h2><p>Tell us where you are. We’ll contact you about launch availability.</p></div></div>
+    <form id="lead-form">
+      <label>Full name<input name="lead_name" required minlength="2" placeholder="Your name"></label>
+      <label>Mobile number<div class="phone-field"><span>+91</span><input name="lead_phone" required inputmode="numeric" maxlength="10" placeholder="10-digit mobile number"></div></label>
+      <div class="form-row"><label>Pincode<input name="lead_pincode" required inputmode="numeric" maxlength="6" placeholder="751030"></label><label>Locality <small>Optional</small><input name="lead_locality" placeholder="Khandagiri"></label></div>
+      <label>I’m interested in<select name="lead_interest"><option value="CUSTOMER">Finding monthly meals</option><option value="LAUNCH_ALERT">Launch notification only</option><option value="PROVIDER">Joining as a provider</option></select></label>
+      <label class="consent"><input type="checkbox" name="accepted_consent" required><span>I agree that Zomeal may contact me about availability and launch updates. See our <a href="privacy.html">Privacy Policy</a>.</span></label>
+      <button class="submit-lead" type="submit">Join early access <span>→</span></button><p id="lead-message" role="status"></p>
+    </form>
+  </dialog>
+  <script src="config.js"></script><script src="app.js"></script>
+</body>
+</html>

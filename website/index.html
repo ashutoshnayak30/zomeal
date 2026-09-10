@@ -3,114 +3,187 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="theme-color" content="#087b43">
-  <meta name="description" content="Discover verified monthly lunch and dinner providers near you with Zomeal.">
-  <title>Zomeal — Monthly meals, made simple</title>
+  <meta name="theme-color" content="#063c2b">
+  <meta name="description" content="Discover verified home-style lunch and dinner subscriptions near you with Zomeal.">
+  <title>Zomeal — Your everyday meal, sorted</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <header class="nav shell">
-    <a class="wordmark" href="#top" aria-label="Zomeal home"><span class="heart">♥</span>zomeal</a>
-    <nav aria-label="Main navigation">
-      <a href="#how">How it works</a><a href="#why">Why Zomeal</a><a href="#providers">Providers</a>
-    </nav>
-    <button class="nav-cta" data-open-lead>Join early access</button>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header" id="top">
+    <div class="shell nav">
+      <a class="wordmark" href="#top" aria-label="Zomeal home"><span class="wordmark-dot"></span>zomeal</a>
+      <button class="menu-toggle" type="button" aria-expanded="false" aria-controls="main-navigation"><span></span><span></span><span></span><span class="sr-only">Open menu</span></button>
+      <nav id="main-navigation" aria-label="Main navigation">
+        <a href="#plans">Meal plans</a>
+        <a href="#how">How it works</a>
+        <a href="#providers">Find a kitchen</a>
+        <a href="#for-providers">For providers</a>
+      </nav>
+      <button class="button button-dark nav-cta" type="button" data-open-lead>Get Zomeal</button>
+    </div>
   </header>
 
-  <main id="top">
+  <main id="main">
     <section class="hero">
-      <div class="orb orb-one"></div><div class="orb orb-two"></div>
+      <div class="hero-glow glow-one"></div><div class="hero-glow glow-two"></div>
       <div class="shell hero-grid">
         <div class="hero-copy reveal">
-          <div class="eyebrow"><span></span> Coming soon on Android</div>
-          <h1>Homely meals.<br><em>Every day.</em></h1>
-          <p>Discover Zomeal-reviewed monthly meal providers in your neighbourhood. Choose lunch, dinner or both—and make every week yours.</p>
-          <form id="hero-search" class="pin-search">
+          <div class="eyebrow"><span></span>Bhubaneswar pilot · Android</div>
+          <h1>Open up to<br><em>better everyday meals.</em></h1>
+          <p class="hero-intro">Home-style lunch and dinner from reviewed local kitchens—planned weekly, paid transparently and flexible when your day changes.</p>
+          <form id="hero-search" class="pin-search" novalidate>
             <label class="sr-only" for="hero-pincode">Enter delivery pincode</label>
-            <span class="pin-icon">⌖</span>
-            <input id="hero-pincode" inputmode="numeric" maxlength="6" autocomplete="postal-code" placeholder="Enter your 6-digit pincode">
-            <button type="submit">Check my area <span>→</span></button>
+            <span class="pin-icon" aria-hidden="true">⌖</span>
+            <input id="hero-pincode" inputmode="numeric" maxlength="6" autocomplete="postal-code" placeholder="Enter your 6-digit pincode" aria-describedby="pin-hint">
+            <button type="submit">Find meals <span aria-hidden="true">↗</span></button>
           </form>
-          <div class="trust-row"><span>✓ No booking on website</span><span>✓ Approved provider data</span><span>✓ Free area check</span></div>
-        </div>
-        <div class="hero-art reveal delay">
-          <div class="steam s1">⌇</div><div class="steam s2">⌇</div>
-          <div class="plate">
-            <div class="rice">••<br>•••</div><div class="curry">● ●<br> ●</div><div class="dal">•••</div>
-            <div class="roti"></div><div class="salad">● ● ●</div>
+          <p id="pin-hint" class="pin-hint">Check availability. No payment or booking on this website.</p>
+          <div class="hero-proof" aria-label="Zomeal benefits">
+            <div><b>Weekly or monthly</b><span>Start at your pace</span></div>
+            <div><b>Lunch, dinner or both</b><span>Choose what fits</span></div>
+            <div><b>Pause eligible meals</b><span>Before the cut-off</span></div>
           </div>
-          <div class="float-card card-a"><b>30-day plans</b><small>Meals made predictable</small></div>
-          <div class="float-card card-b"><b>Weekly choice</b><small>Your menu, your way</small></div>
+        </div>
+
+        <div class="tiffin-stage reveal delay" id="tiffin-stage">
+          <div class="stage-copy"><span>YOUR TIFFIN TODAY</span><b id="tiffin-state-label">Ready when you are</b></div>
+          <div class="tiffin-orbit" aria-hidden="true"><i></i><i></i><i></i></div>
+          <div class="tiffin-visual" id="tiffin-visual" data-state="closed">
+            <img class="tiffin-image tiffin-closed" src="assets/tiffin-closed.png" width="1254" height="1254" alt="Closed stainless-steel Zomeal tiffin">
+            <img class="tiffin-image tiffin-open" src="assets/tiffin-open.png" width="1254" height="1254" alt="Open stainless-steel tiffin filled with rice, roti, dal, curry, salad and pickle">
+            <span class="meal-label label-rice">Rice + roti</span>
+            <span class="meal-label label-dal">Dal</span>
+            <span class="meal-label label-main">Main course</span>
+            <span class="meal-label label-side">Salad + side</span>
+          </div>
+          <button class="tiffin-toggle" id="tiffin-toggle" type="button" aria-expanded="false">
+            <span class="toggle-icon">+</span><span class="toggle-copy"><b>Open today’s tiffin</b><small>See what a complete meal can include</small></span>
+          </button>
+        </div>
+      </div>
+      <div class="hero-marquee" aria-hidden="true"><div><span>HOME-STYLE</span><i>✦</i><span>FLEXIBLE PLANS</span><i>✦</i><span>LOCAL KITCHENS</span><i>✦</i><span>WEEKLY CHOICE</span><i>✦</i><span>HOME-STYLE</span><i>✦</i><span>FLEXIBLE PLANS</span><i>✦</i></div></div>
+    </section>
+
+    <section class="promise shell" aria-label="Why customers choose Zomeal">
+      <div class="promise-mark">z</div>
+      <p><strong>Not another one-off food order.</strong> Zomeal is designed around the meals you need every day, with local kitchens, visible plans and control when life changes.</p>
+      <a href="#how">See how it works <span>↓</span></a>
+    </section>
+
+    <section id="plans" class="plans-section">
+      <div class="shell">
+        <div class="section-heading split-heading">
+          <div><span class="kicker">CHOOSE YOUR RHYTHM</span><h2>Try a week.<br>Stay for the month.</h2></div>
+          <p>Choose lunch, dinner or both from an available provider. Begin with a seven-day trial or move into a monthly routine when you are ready.</p>
+        </div>
+        <div class="plan-showcase">
+          <article class="plan-card weekly-card">
+            <div class="plan-number">07</div>
+            <div class="plan-copy"><span class="plan-pill">Weekly trial</span><h3>A simple first taste</h3><p>Explore a provider’s menu and understand how Zomeal fits your week.</p></div>
+            <ul><li>7-day plan</li><li>Lunch, dinner or both</li><li>Menu selection in the app</li></ul>
+          </article>
+          <article class="plan-card monthly-card">
+            <div class="plan-number">30</div>
+            <div class="plan-copy"><span class="plan-pill">Monthly routine</span><h3>Your everyday meal plan</h3><p>Continue with a provider you enjoy and manage the plan from one place.</p></div>
+            <ul><li>30-day plan</li><li>Wallet-led meal charges</li><li>Eligible pause and menu controls</li></ul>
+          </article>
+          <div class="plan-note"><span>↗</span><b>Change your mind?</b><p>Eligible weekly customers can review available monthly options inside the Android app.</p></div>
         </div>
       </div>
     </section>
 
     <section id="providers" class="search-section shell">
-      <div class="section-head">
-        <div><span class="kicker">NEAR YOU</span><h2>Find your everyday kitchen</h2><p>Enter a pincode to see currently approved providers and their real plans.</p></div>
+      <div class="section-heading search-heading">
+        <div><span class="kicker">KITCHENS NEAR YOU</span><h2>See who serves your pincode.</h2><p>Results come from currently approved provider and service-area records.</p></div>
         <div id="result-count" class="result-count" hidden></div>
       </div>
+      <form id="provider-search" class="section-search" novalidate>
+        <label for="provider-pincode">Delivery pincode</label>
+        <div><span aria-hidden="true">⌖</span><input id="provider-pincode" inputmode="numeric" maxlength="6" autocomplete="postal-code" placeholder="e.g. 751030"><button type="submit">Search providers</button></div>
+      </form>
       <div id="search-state" class="search-state intro-state">
-        <div class="mini-map"><span>⌖</span><i></i><i></i><i></i></div>
-        <h3>Your next favourite meal may be nearby</h3><p>Use the pincode search above to start exploring.</p>
+        <div class="search-tiffin" aria-hidden="true">⌖</div>
+        <h3>Enter your pincode to begin</h3><p>We’ll show only approved kitchens whose service area includes your pincode.</p>
       </div>
       <div id="provider-grid" class="provider-grid" aria-live="polite"></div>
     </section>
 
     <section id="how" class="how-section">
-      <div class="shell"><span class="kicker">HOW IT WORKS</span><h2>Three steps to simpler meals</h2>
+      <div class="shell">
+        <div class="section-heading how-heading"><span class="kicker light">FROM HUNGRY TO SORTED</span><h2>Three steps. One dependable routine.</h2></div>
         <div class="steps">
-          <article><span class="step-no">01</span><div class="step-icon">⌖</div><h3>Check your pincode</h3><p>See approved kitchens delivering in your neighbourhood.</p></article>
-          <article><span class="step-no">02</span><div class="step-icon">☷</div><h3>Explore real plans</h3><p>Compare packages, meal choices and provider information.</p></article>
-          <article><span class="step-no">03</span><div class="step-icon">▣</div><h3>Get the Android app</h3><p>Subscriptions and payments will be available through the Zomeal app.</p></article>
+          <article><span class="step-no">01</span><div class="step-icon">⌖</div><h3>Find your kitchen</h3><p>Enter your delivery pincode and compare approved providers serving your area.</p></article>
+          <article><span class="step-no">02</span><div class="step-icon">☷</div><h3>Shape your plan</h3><p>Pick weekly or monthly, then choose lunch, dinner or both and set your menu.</p></article>
+          <article><span class="step-no">03</span><div class="step-icon">✓</div><h3>Stay in control</h3><p>Use the app for your wallet, upcoming meals, eligible pauses and changes.</p></article>
         </div>
       </div>
     </section>
 
-    <section id="why" class="why shell">
-      <div class="why-copy"><span class="kicker">BUILT AROUND TRUST</span><h2>More confidence in every tiffin</h2><p>Zomeal brings provider discovery, clear packages and flexible meal planning into one thoughtful experience.</p>
-        <div class="feature-list">
-          <div><b>✓ Moderated listings</b><span>Provider information and photos are reviewed before publishing.</span></div>
-          <div><b>✓ Menu transparency</b><span>See approved weekly choices before deciding.</span></div>
-          <div><b>✓ Flexible planning</b><span>Our app is designed for pauses and menu changes within cut-off times.</span></div>
-          <div><b>✓ Local discovery</b><span>Results are matched to approved serviceable pincodes.</span></div>
-        </div>
+    <section class="control-section shell">
+      <div class="control-copy">
+        <span class="kicker">YOUR PLAN, YOUR CALL</span>
+        <h2>Lunch should fit your calendar—not fight it.</h2>
+        <p>See tomorrow’s meals, review wallet activity and manage eligible changes from a customer experience built for recurring food.</p>
+        <div class="control-list"><div><span>01</span><p><b>See every meal</b>Lunch and dinner stay visible in one weekly view.</p></div><div><span>02</span><p><b>Know every charge</b>Wallet activity records money added and eligible meal deductions.</p></div><div><span>03</span><p><b>Pause when allowed</b>Skip eligible meals before their published cut-off.</p></div></div>
+        <button class="text-button" type="button" data-open-lead>Join Android testing <span>↗</span></button>
       </div>
-      <div class="phone-card">
-        <div class="phone-top"><span>zomeal</span><i>Early access</i></div>
-        <div class="today">Today’s menu</div>
-        <div class="meal-tile lunch"><div class="food-dot">☀</div><div><b>Lunch</b><span>Homely main course · Dal · Rice</span></div></div>
-        <div class="meal-tile dinner"><div class="food-dot">☾</div><div><b>Dinner</b><span>Fresh main course · Roti · Salad</span></div></div>
-        <button data-open-lead>Notify me at launch →</button>
+      <div class="app-preview" aria-label="Illustration of the Zomeal customer app">
+        <div class="app-status"><span>9:41</span><span>● ● ●</span></div>
+        <div class="app-head"><small>Good morning</small><b>Your meals</b><span>◌</span></div>
+        <div class="app-plan"><small>EXAMPLE PLAN</small><b>Lunch + Dinner</b><span>Your chosen kitchen · Weekly</span><i>Meal planning in the app</i></div>
+        <div class="app-label">TODAY’S TIFFIN</div>
+        <div class="app-meals"><div><span>☀</span><b>Lunch</b><small>Rice · dal · curry</small></div><div><span>☾</span><b>Dinner</b><small>Roti · dal · salad</small></div></div>
+        <div class="app-actions"><span>Pause</span><span>Wallet</span><span>Support</span></div>
+      </div>
+    </section>
+
+    <section id="for-providers" class="provider-cta">
+      <div class="shell provider-cta-inner">
+        <div><span class="kicker light">FOR HOME KITCHENS & TIFFIN SERVICES</span><h2>Cook with care.<br>Grow with a system.</h2><p>Bring your packages, menus and serviceable pincodes to Zomeal’s provider onboarding flow.</p></div>
+        <button class="button button-lime" type="button" data-open-provider-lead>Register as a provider <span>↗</span></button>
+      </div>
+    </section>
+
+    <section class="faq shell">
+      <div class="section-heading"><span class="kicker">GOOD TO KNOW</span><h2>Before your first tiffin.</h2></div>
+      <div class="faq-list">
+        <details><summary>Can I start with only one week?<span>+</span></summary><p>Yes. Where a provider offers a weekly plan, you can use it to try the service before reviewing longer options.</p></details>
+        <details><summary>Can I choose only lunch or dinner?<span>+</span></summary><p>Available options depend on the provider. A provider may offer lunch only, dinner only or a combined plan.</p></details>
+        <details><summary>Can I pause a meal?<span>+</span></summary><p>Eligible meals can be paused before the relevant cut-off shown in the app. Confirmed late meals may still be chargeable.</p></details>
+        <details><summary>Can I subscribe on this website?<span>+</span></summary><p>Not yet. The website helps you discover availability; subscriptions, wallets and meal management remain inside the Android app.</p></details>
       </div>
     </section>
 
     <section class="launch">
-      <div class="shell launch-inner"><div><span class="kicker light">COMING SOON</span><h2>Zomeal is preparing<br>something delicious.</h2><p>Join early access and we’ll let you know when Android downloads open in your area.</p></div><button data-open-lead>Join the launch list <span>→</span></button></div>
+      <div class="shell launch-inner">
+        <div><span class="kicker light">ZOMEAL IN BHUBANESWAR</span><h2>Ready to open<br>your next tiffin?</h2><p>Check your area or join the testing list for customer and provider updates.</p></div>
+        <button class="button button-lime" type="button" data-open-lead>Join early access <span>↗</span></button>
+      </div>
     </section>
   </main>
 
   <footer class="footer shell">
-    <div><a class="wordmark" href="#top"><span class="heart">♥</span>zomeal</a><p>Monthly meals, made simple.</p></div>
-    <div><b>Explore</b><a href="#providers">Find providers</a><a href="#how">How it works</a><a href="#why">Why Zomeal</a></div>
-    <div><b>Company</b><a href="mailto:hello@zomeal.in">Contact us</a><a href="#" data-open-lead>Become a provider</a></div>
-    <div><b>Legal</b><a href="privacy.html">Privacy policy</a><a href="terms.html">Terms of use</a></div>
-    <small>© 2026 Zomeal. Bhubaneswar, Odisha.</small>
+    <div class="footer-brand"><a class="wordmark" href="#top"><span class="wordmark-dot"></span>zomeal</a><p>Everyday meals, planned better.</p></div>
+    <div><b>Explore</b><a href="#plans">Meal plans</a><a href="#providers">Find providers</a><a href="#how">How it works</a></div>
+    <div><b>Partner</b><a href="#for-providers">For providers</a><a href="#" data-open-provider-lead>Register interest</a></div>
+    <div><b>Company</b><a href="mailto:hello@zomeal.in">Contact us</a><a href="privacy.html">Privacy policy</a><a href="terms.html">Terms of use</a></div>
+    <small>© 2026 Zomeal · Bhubaneswar, Odisha</small>
   </footer>
 
   <dialog id="provider-dialog"><button class="dialog-close" data-close-dialog aria-label="Close">×</button><div id="provider-detail"></div></dialog>
   <dialog id="lead-dialog"><button class="dialog-close" data-close-dialog aria-label="Close">×</button>
-    <div class="lead-head"><span>🌱</span><div><h2>Join Zomeal early access</h2><p>Tell us where you are. We’ll contact you about launch availability.</p></div></div>
+    <div class="lead-head"><span>z</span><div><h2>Join Zomeal early access</h2><p>Tell us where you are. We’ll contact you about testing availability.</p></div></div>
     <form id="lead-form">
       <label>Full name<input name="lead_name" required minlength="2" placeholder="Your name"></label>
       <label>Mobile number<div class="phone-field"><span>+91</span><input name="lead_phone" required inputmode="numeric" maxlength="10" placeholder="10-digit mobile number"></div></label>
       <div class="form-row"><label>Pincode<input name="lead_pincode" required inputmode="numeric" maxlength="6" placeholder="751030"></label><label>Locality <small>Optional</small><input name="lead_locality" placeholder="Khandagiri"></label></div>
-      <label>I’m interested in<select name="lead_interest"><option value="CUSTOMER">Finding monthly meals</option><option value="LAUNCH_ALERT">Launch notification only</option><option value="PROVIDER">Joining as a provider</option></select></label>
-      <label class="consent"><input type="checkbox" name="accepted_consent" required><span>I agree that Zomeal may contact me about availability and launch updates. See our <a href="privacy.html">Privacy Policy</a>.</span></label>
-      <button class="submit-lead" type="submit">Join early access <span>→</span></button><p id="lead-message" role="status"></p>
+      <label>I’m interested in<select name="lead_interest"><option value="CUSTOMER">Finding meal subscriptions</option><option value="LAUNCH_ALERT">Customer testing updates</option><option value="PROVIDER">Joining as a provider</option></select></label>
+      <label class="consent"><input type="checkbox" name="accepted_consent" required><span>I agree that Zomeal may contact me about availability and testing updates. See our <a href="privacy.html">Privacy Policy</a>.</span></label>
+      <button class="submit-lead" type="submit">Join early access <span>↗</span></button><p id="lead-message" role="status"></p>
     </form>
   </dialog>
   <script src="config.js"></script><script src="app.js"></script>

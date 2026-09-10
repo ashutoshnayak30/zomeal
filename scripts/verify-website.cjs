@@ -1,0 +1,43 @@
+const fs = require('node:fs');
+const path = require('node:path');
+const assert = require('node:assert/strict');
+const { JSDOM } = require('jsdom');
+const root = path.resolve(__dirname, '../website');
+const html = fs.readFileSync(path.join(root,'index.html'),'utf8');
+const dom = new JSDOM(html,{url:'https://zomeal.in/',runScripts:'outside-only',pretendToBeVisual:true});
+const w = dom.window, d = w.document;
+w.matchMedia = () => ({matches:true,addEventListener(){}});
+w.HTMLElement.prototype.scrollIntoView = function(){};
+w.HTMLDialogElement.prototype.showModal = function(){this.open=true;};
+w.HTMLDialogElement.prototype.close = function(){this.open=false;};
+let calls=[];
+w.fetch = async (url,options) => {
+  calls.push({url,body:JSON.parse(options.body)});
+  return {ok:true,json:async()=>({providers:[{provider_id:'p1',display_name:'<img src=x onerror=alert(1)>',city:'Test city',packages:[{name:'Weekly lunch',price_paise:70000,duration_days:7}],weekly_menu:[]}]})};
+};
+w.eval(fs.readFileSync(path.join(root,'config.js'),'utf8'));
+w.eval(fs.readFileSync(path.join(root,'app.js'),'utf8'));
+const tick = () => new Promise(resolve=>setImmediate(resolve));
+(async()=>{
+  for (const element of d.querySelectorAll('[src],link[href]')) {
+    const ref=element.getAttribute('src')||element.getAttribute('href');
+    if (!/^https?:/.test(ref)) assert.ok(fs.existsSync(path.join(root,ref)),`Missing ${ref}`);
+  }
+  const ids=[...d.querySelectorAll('[id]')].map(e=>e.id); assert.equal(new Set(ids).size,ids.length,'Duplicate IDs');
+  for (const a of d.querySelectorAll('a[href^="#"]')) if(a.hash) assert.ok(d.getElementById(a.hash.slice(1)),`Missing ${a.hash}`);
+  d.querySelector('#tiffin-toggle').click(); assert.equal(d.querySelector('#tiffin-toggle').getAttribute('aria-expanded'),'true');
+  assert.equal(d.querySelector('#tiffin-visual').style.getPropertyValue('--open'),'1');
+  d.querySelector('#tiffin-toggle').click(); assert.equal(d.querySelector('#tiffin-visual').style.getPropertyValue('--open'),'0');
+  d.querySelector('.menu-toggle').click(); assert.ok(d.querySelector('nav').hasAttribute('data-open'));
+  d.querySelector('nav a').click(); assert.ok(!d.querySelector('nav').hasAttribute('data-open'));
+  d.querySelector('[data-open-provider-lead]').click(); assert.equal(d.querySelector('[name=lead_interest]').value,'PROVIDER');
+  d.querySelector('#hero-pincode').value='123'; d.querySelector('#hero-search').dispatchEvent(new w.Event('submit',{cancelable:true})); await tick(); assert.equal(calls.length,0);
+  d.querySelector('#hero-pincode').value='757043'; d.querySelector('#hero-search').dispatchEvent(new w.Event('submit',{cancelable:true})); await tick();
+  assert.equal(calls[0].body.pincode,'757043'); assert.equal(d.querySelector('#provider-pincode').value,'757043');
+  assert.equal(d.querySelectorAll('#provider-grid [onerror]').length,0,'Unsafe provider HTML');
+  assert.match(d.querySelector('#provider-grid').textContent,/week/);
+  d.querySelector('[data-provider]').click(); assert.equal(d.querySelector('#provider-dialog').open,true);
+  assert.equal(d.querySelectorAll('#provider-detail [onerror]').length,0);
+  console.log('PASS: local assets, anchors, tiffin open/close, reduced motion, mobile menu, provider signup, pincode validation, mocked provider search, weekly pricing and HTML escaping. No real signup submitted.');
+  w.close();
+})().catch(error=>{console.error(error);w.close();process.exitCode=1;});

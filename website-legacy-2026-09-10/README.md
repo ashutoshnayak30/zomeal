@@ -4,19 +4,6 @@ Static, mobile-first discovery website for `zomeal.in`. It supports approved
 provider discovery by pincode and early-access lead capture. It intentionally
 does not create bookings, subscriptions or payments.
 
-## September 2026 redesign
-
-The original site is preserved unchanged in `../website-legacy-2026-09-10/`.
-The new green/lime design uses two original transparent tiffin images. A
-scroll-triggered reveal and replay button blend the closed and open states;
-this is a two-image transition, not a articulated 3D model. Reduced-motion
-preferences bypass the animation. Images are illustrative, not provider photos.
-Live provider search and lead capture retain the existing Supabase endpoints.
-
-Run `node --preserve-symlinks --preserve-symlinks-main scripts/verify-website.cjs`
-from the repository root for local asset and interaction validation. The test
-uses mocked network responses and does not submit real leads.
-
 ## Run locally
 
 From the repository root:
