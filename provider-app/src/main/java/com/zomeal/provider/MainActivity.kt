@@ -75,6 +75,7 @@ private fun ProviderApp() {
     var screen by rememberSaveable { mutableStateOf(if (repository.isAuthenticated) Screen.Registration else Screen.Login) }
     var phone by rememberSaveable { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }
+    var restoringSession by remember { mutableStateOf(repository.isAuthenticated) }
     var error by remember { mutableStateOf<String?>(null) }
     var saveStatus by remember { mutableStateOf("Draft saved") }
     var managingActiveProvider by rememberSaveable { mutableStateOf(false) }
@@ -122,13 +123,13 @@ private fun ProviderApp() {
             if (result.success) onDone() else screen = Screen.ManageBusiness
         }
     }
-    fun routeAuthenticatedProvider() {
+    fun routeAuthenticatedProvider(onRouted: () -> Unit = {}) {
         loading = true
         repository.loadApplicationStatus { status ->
             if (!status?.optString("provider_id").isNullOrBlank()) {
                 if (status?.optString("status") == "ACTIVE") {
-                    loading = false; screen = Screen.Dashboard
-                } else repository.loadSubmittedApplication { loading = false; screen = Screen.Submitted }
+                    loading = false; screen = Screen.Dashboard; onRouted()
+                } else repository.loadSubmittedApplication { loading = false; screen = Screen.Submitted; onRouted() }
             } else {
                 repository.loadDraft { draft ->
                     loading = false
@@ -136,12 +137,31 @@ private fun ProviderApp() {
                         ProviderDraft.restore(draft)
                         screen = draftResumeScreen()
                     } else screen = Screen.Registration
+                    onRouted()
                 }
             }
         }
     }
     LaunchedEffect(Unit) {
-        if (repository.isAuthenticated) routeAuthenticatedProvider()
+        if (repository.isAuthenticated) {
+            repository.restoreSession { authenticated, sessionError ->
+                if (authenticated) routeAuthenticatedProvider { restoringSession = false }
+                else {
+                    restoringSession = false
+                    screen = Screen.Login
+                    error = sessionError
+                }
+            }
+        } else restoringSession = false
+    }
+    if (restoringSession) {
+        Box(Modifier.fillMaxSize().background(Color(0xFFF7FAF7)), contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                CircularProgressIndicator(color = Brand)
+                Text("Opening your provider account…", color = Muted, fontSize = 13.sp)
+            }
+        }
+        return
     }
     ProviderDraftAutoSave(
         repository = repository,
@@ -153,7 +173,7 @@ private fun ProviderApp() {
             Screen.Otp -> Screen.Login
             Screen.Registration -> if(repository.isAuthenticated) Screen.Dashboard else Screen.Login
             Screen.Business -> if(managingActiveProvider) Screen.ManageBusiness else Screen.Registration
-            Screen.Service -> Screen.Business
+            Screen.Service -> if(managingActiveProvider) Screen.ManageBusiness else Screen.Business
             Screen.Packages -> if(managingActiveProvider) Screen.ManageBusiness else Screen.Service
             Screen.Menu -> if(managingActiveProvider) Screen.ManageBusiness else Screen.Packages
             Screen.Operations -> if(managingActiveProvider) Screen.ManageBusiness else Screen.Menu
@@ -194,7 +214,12 @@ private fun ProviderApp() {
             activeEdit = managingActiveProvider,
             saving = loading
         )
-        Screen.Service -> ServiceAreaScreen({ screen = Screen.Business }) { screen = Screen.Packages }
+        Screen.Service -> ServiceAreaScreen(
+            onBack = { screen = if (managingActiveProvider) Screen.ManageBusiness else Screen.Business },
+            onNext = { if (managingActiveProvider) saveActiveDraft("Service area changes") else screen = Screen.Packages },
+            activeEdit = managingActiveProvider,
+            saving = loading
+        )
         Screen.Packages -> PackageScreen(
             { screen = if (managingActiveProvider) Screen.ManageBusiness else Screen.Service },
             { if (managingActiveProvider) saveActiveDraft("Package changes") else screen = Screen.Menu },
@@ -247,6 +272,7 @@ private fun ProviderApp() {
             loading = loading,
             onBack = { managingActiveProvider = false; screen = Screen.Dashboard },
             onEditProfile = { openActiveEditor(Screen.Business) },
+            onEditServiceAreas = { openActiveEditor(Screen.Service) },
             onEditPackages = { openActiveEditor(Screen.Packages) },
             onEditMenus = { openActiveEditor(Screen.Menu) },
             onEditPhotos = { openActiveEditor(Screen.Operations) },

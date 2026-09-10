@@ -18,21 +18,31 @@ Deno.serve(async(req)=>{
     const client=createClient(url,serviceKey,{auth:{persistSession:false}});
     const {data,error}=await client.rpc("customer_marketplace",{target_pincode:String(pincode)});
     if(error)throw error;
-    const sign=async(path?:string|null)=>{
-      if(!path)return null;
-      const clean=path.replace(/^provider-media\//,"").replace(/^\/+/,"");
-      const {data:signed}=await client.storage.from("provider-media").createSignedUrl(clean,900);
-      return signed?.signedUrl||null;
-    };
-    const providers=await Promise.all((data||[]).map(async(provider:any)=>({
+    const cleanPath=(path?:string|null)=>path?.replace(/^provider-media\//,"").replace(/^\/+/,"")||"";
+    const paths=[...new Set((data||[]).flatMap((provider:any)=>[
+      provider.primary_photo_path,provider.kitchen_photo_path,provider.meal_photo_path,
+      ...(provider.weekly_menu||[]).flatMap((day:any)=>(day.items||[]).map((item:any)=>item.photo_path)),
+    ]).map(cleanPath).filter(Boolean))];
+    // One batched Storage request replaces a separate network round trip for
+    // every provider and dish photograph in the catalogue.
+    const signedByPath=new Map<string,string>();
+    if(paths.length){
+      const {data:signed,error:signError}=await client.storage.from("provider-media").createSignedUrls(paths,3600);
+      if(signError)console.error("Provider media signing failed",signError);
+      (signed||[]).forEach((item:any,index:number)=>{
+        if(item?.signedUrl)signedByPath.set(paths[index],item.signedUrl);
+      });
+    }
+    const signedUrl=(path?:string|null)=>signedByPath.get(cleanPath(path))||null;
+    const providers=(data||[]).map((provider:any)=>({
       ...provider,
-      primary_photo_url:await sign(provider.primary_photo_path),
-      kitchen_photo_url:await sign(provider.kitchen_photo_path),
-      meal_photo_url:await sign(provider.meal_photo_path),
-      weekly_menu:await Promise.all((provider.weekly_menu||[]).map(async(day:any)=>({
-        ...day,items:await Promise.all((day.items||[]).map(async(item:any)=>({...item,photo_url:await sign(item.photo_path)})))
-      })))
-    })));
+      primary_photo_url:signedUrl(provider.primary_photo_path),
+      kitchen_photo_url:signedUrl(provider.kitchen_photo_path),
+      meal_photo_url:signedUrl(provider.meal_photo_path),
+      weekly_menu:(provider.weekly_menu||[]).map((day:any)=>({
+        ...day,items:(day.items||[]).map((item:any)=>({...item,photo_url:signedUrl(item.photo_path)}))
+      }))
+    }));
     return json({pincode:String(pincode),count:providers.length,providers});
   }catch(error){
     console.error(error);

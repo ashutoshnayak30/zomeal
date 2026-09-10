@@ -95,6 +95,7 @@ internal class PincodeDraft(value: String = "") {
 
 internal object ProviderDraft {
     private var baselinePhotoUris: Set<String> = emptySet()
+    private var baselineServicePincodes: Set<String> = emptySet()
     var ownerPhone by mutableStateOf("")
     var businessName by mutableStateOf("")
     var contactName by mutableStateOf("")
@@ -149,12 +150,22 @@ internal object ProviderDraft {
      */
     fun markEditBaseline(json: JSONObject) {
         baselinePhotoUris = collectPhotoUris(json)
+        baselineServicePincodes = collectServicePincodes(json)
     }
 
     fun isNewOrReplacedPhoto(uri: String): Boolean = uri.isNotBlank() && uri !in baselinePhotoUris
+    fun isApprovedServicePincode(value: String): Boolean = value in baselineServicePincodes
 
     fun acceptCurrentAsBaseline() {
         baselinePhotoUris = collectPhotoUris(toJson())
+        baselineServicePincodes = collectServicePincodes(toJson())
+    }
+
+    private fun collectServicePincodes(json: JSONObject): Set<String> = buildSet {
+        val rows = json.optJSONArray("servicePincodes") ?: JSONArray()
+        for (index in 0 until rows.length()) {
+            rows.optJSONObject(index)?.optString("value")?.takeIf { it.matches(Regex("[1-9][0-9]{5}")) }?.let(::add)
+        }
     }
 
     private fun collectPhotoUris(json: JSONObject): Set<String> = buildSet {
@@ -351,15 +362,16 @@ fun BusinessScreen(onBack: () -> Unit, onNext: () -> Unit, activeEdit: Boolean =
 }
 
 @Composable
-fun ServiceAreaScreen(onBack: () -> Unit, onNext: () -> Unit) {
-    FlowScaffold(2, "Service areas & capacity", "Add every pincode you can reliably serve and your realistic daily meal capacity.", onBack, onNext,
-        nextEnabled = ProviderDraft.servicePincodes.any { it.verified }) {
+fun ServiceAreaScreen(onBack: () -> Unit, onNext: () -> Unit, activeEdit: Boolean = false, saving: Boolean = false) {
+    FlowScaffold(2, if (activeEdit) "Serviceable areas" else "Service areas & capacity", if (activeEdit) "Add pincodes where you can reliably deliver. New areas become customer-visible only after Zomeal admin approval." else "Add every pincode you can reliably serve and your realistic daily meal capacity.", onBack, onNext,
+        nextLabel = if (saving) "Saving draft…" else if (activeEdit) "Save service areas to draft" else "Save & continue",
+        nextEnabled = ProviderDraft.servicePincodes.any { it.verified } && !saving) {
         Section("Delivery coverage") {
             Text("Serviceable pincodes *", color = PInk, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
             ProviderDraft.servicePincodes.forEachIndexed { index, pincode ->
                 PincodeEditor(
                     pincode = pincode,
-                    canRemove = ProviderDraft.servicePincodes.size > 1,
+                    canRemove = ProviderDraft.servicePincodes.size > 1 && (!activeEdit || !ProviderDraft.isApprovedServicePincode(pincode.value)),
                     onRemove = { ProviderDraft.servicePincodes.removeAt(index) }
                 )
             }
@@ -368,7 +380,7 @@ fun ServiceAreaScreen(onBack: () -> Unit, onNext: () -> Unit) {
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(13.dp)
             ) { Icon(Icons.Outlined.AddLocationAlt, null); Spacer(Modifier.width(7.dp)); Text("Add another pincode") }
-            Text("Each pincode is entered and verified separately. Zomeal admin approval is still required before the area becomes visible to customers.", color = PMuted, fontSize = 11.sp)
+            Text(if (activeEdit) "Approved pincodes stay active. Newly added pincodes are submitted with your business changes and remain hidden until an admin approves them." else "Each pincode is entered and verified separately. Zomeal admin approval is still required before the area becomes visible to customers.", color = PMuted, fontSize = 11.sp)
             Field("Preferred delivery radius (km)", ProviderDraft.radius, { ProviderDraft.radius = it.filter(Char::isDigit) }, "5", true)
         }
         Section("Daily capacity") {

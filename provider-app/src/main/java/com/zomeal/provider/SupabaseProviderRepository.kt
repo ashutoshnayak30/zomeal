@@ -27,6 +27,67 @@ class SupabaseProviderRepository(context: Context) {
 
     val developmentAuthEnabled: Boolean get() = BuildConfig.DEVELOPMENT_AUTH
 
+    private fun saveSession(json: JSONObject) {
+        val userId = json.optJSONObject("user")?.optString("id").orEmpty()
+            .ifBlank { prefs.getString("user_id", null).orEmpty() }
+        prefs.edit()
+            .putString("access_token", json.optString("access_token"))
+            .putString("refresh_token", json.optString("refresh_token"))
+            .putString("user_id", userId)
+            .putBoolean("signed_out", false)
+            .apply()
+        ProviderPushNotifications.sync(appContext)
+    }
+
+    /** Refresh the persisted Supabase session before deciding which screen to open. */
+    fun restoreSession(callback: (Boolean, String?) -> Unit) {
+        val accessToken = prefs.getString("access_token", null).orEmpty()
+        val refreshToken = prefs.getString("refresh_token", null).orEmpty()
+        if (prefs.getBoolean("signed_out", false) || accessToken.isBlank()) {
+            callback(false, null)
+            return
+        }
+        if (refreshToken.isBlank()) {
+            callback(true, null)
+            return
+        }
+        Thread {
+            var connection: HttpURLConnection? = null
+            try {
+                connection = URL("$baseUrl/auth/v1/token?grant_type=refresh_token").openConnection() as HttpURLConnection
+                connection.requestMethod = "POST"
+                connection.connectTimeout = 15_000
+                connection.readTimeout = 20_000
+                connection.doOutput = true
+                connection.setRequestProperty("Content-Type", "application/json")
+                connection.setRequestProperty("apikey", anonKey)
+                connection.setRequestProperty("Authorization", "Bearer $anonKey")
+                connection.outputStream.use {
+                    it.write(JSONObject().put("refresh_token", refreshToken).toString().toByteArray(Charsets.UTF_8))
+                }
+                val code = connection.responseCode
+                val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+                val json = parseObject(stream?.bufferedReader()?.use { it.readText() }.orEmpty())
+                if (code in 200..299 && json.optString("access_token").isNotBlank()) {
+                    saveSession(json)
+                    main.post { callback(true, null) }
+                } else if (code == 400 || code == 401 || code == 403) {
+                    prefs.edit().clear().putBoolean("signed_out", true).apply()
+                    main.post { callback(false, "Your session expired. Please log in again.") }
+                } else {
+                    // A temporary server failure must not erase a valid saved login.
+                    main.post { callback(true, null) }
+                }
+            } catch (_: Exception) {
+                // Keep the saved session during a temporary network outage. Authenticated
+                // calls will refresh it automatically once connectivity returns.
+                main.post { callback(true, null) }
+            } finally {
+                connection?.disconnect()
+            }
+        }.start()
+    }
+
     fun sendOtp(phone: String, callback: (AuthResult) -> Unit) = requestAsync(
         path = "/auth/v1/otp",
         body = JSONObject().put("phone", "+91$phone").put("create_user", true),
@@ -45,12 +106,7 @@ class SupabaseProviderRepository(context: Context) {
         authenticated = false
     ) { code, json ->
         if (code in 200..299 && json.has("access_token")) {
-            prefs.edit()
-                .putString("access_token", json.optString("access_token"))
-                .putString("refresh_token", json.optString("refresh_token"))
-                .putString("user_id", json.optJSONObject("user")?.optString("id"))
-                .apply()
-            ProviderPushNotifications.sync(appContext)
+            saveSession(json)
             callback(AuthResult(true))
         } else callback(AuthResult(false, errorMessage(json, "OTP verification failed")))
     }
@@ -81,15 +137,11 @@ class SupabaseProviderRepository(context: Context) {
         authenticated = false
     ) { code, json ->
         if (code in 200..299 && json.has("access_token")) {
+            saveSession(json)
             prefs.edit()
-                .putString("access_token", json.optString("access_token"))
-                .putString("refresh_token", json.optString("refresh_token"))
-                .putString("user_id", json.optJSONObject("user")?.optString("id"))
                 .putBoolean("development_session", true)
                 .putString("development_phone",phone)
-                .putBoolean("signed_out", false)
                 .apply()
-            ProviderPushNotifications.sync(appContext)
             claimSeededProvider(phone,callback)
         } else callback(AuthResult(false, errorMessage(json, "Anonymous sign-ins must be enabled in Supabase Authentication settings")))
     }
@@ -210,9 +262,7 @@ class SupabaseProviderRepository(context: Context) {
         // from rendering a completely blank editor.
         val payload = candidate?.takeIf { it.optString("businessName").isNotBlank() }
         if (payload != null) {
-            ProviderDraft.restore(payload)
-            if (markPhotoBaseline) ProviderDraft.markEditBaseline(payload)
-            callback(payload)
+            restoreSubmittedPayload(payload, markPhotoBaseline, callback)
         } else {
             // Older/seeded active providers may have a fully approved catalogue
             // but no historical mobile-onboarding snapshot. Reconstruct an
@@ -221,11 +271,33 @@ class SupabaseProviderRepository(context: Context) {
             loadProviderProfileHub { profile, _ ->
                 val reconstructed = profile?.takeIf { it.optString("provider_id").isNotBlank() }?.let(::profileHubToDraft)
                 if (reconstructed != null) {
-                    ProviderDraft.restore(reconstructed)
-                    if (markPhotoBaseline) ProviderDraft.markEditBaseline(reconstructed)
-                }
-                callback(reconstructed)
+                    restoreSubmittedPayload(reconstructed, markPhotoBaseline, callback)
+                } else callback(null)
             }
+        }
+    }
+
+    private fun restoreSubmittedPayload(payload: JSONObject, markPhotoBaseline: Boolean, callback: (JSONObject?) -> Unit) {
+        requestAsync(
+            path = "/rest/v1/rpc/provider_approved_service_areas",
+            body = JSONObject(),
+            authenticated = true
+        ) { code, json ->
+            if (code in 200..299) {
+                val merged = linkedMapOf<String, JSONObject>()
+                val approved = json.optJSONArray("servicePincodes") ?: JSONArray()
+                val requested = payload.optJSONArray("servicePincodes") ?: JSONArray()
+                for (index in 0 until approved.length()) approved.optJSONObject(index)?.let { row ->
+                    row.optString("value").takeIf { it.isNotBlank() }?.let { merged[it] = row }
+                }
+                for (index in 0 until requested.length()) requested.optJSONObject(index)?.let { row ->
+                    row.optString("value").takeIf { it.isNotBlank() }?.let { merged[it] = row }
+                }
+                if (merged.isNotEmpty()) payload.put("servicePincodes", JSONArray().apply { merged.values.forEach(::put) })
+            }
+            ProviderDraft.restore(payload)
+            if (markPhotoBaseline) ProviderDraft.markEditBaseline(payload)
+            callback(payload)
         }
     }
 

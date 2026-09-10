@@ -149,6 +149,11 @@ class MainActivity : ComponentActivity(), PaymentResultWithDataListener {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Razorpay 1.6.x shows an SDK compatibility diagnostic before checkout
+        // in development builds. It is not part of the payment journey, so mark
+        // the diagnostic as acknowledged once for every checkout entry point
+        // (plan advance, wallet recharge, and remaining-plan payment).
+        OpinionatedSoln.alertShownForStatus = true
         handleNotificationIntent(intent)
         CustomerPushNotifications.initialize(applicationContext)
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
@@ -3085,9 +3090,6 @@ private fun PaymentScreen(
             RazorpayCoordinator.pendingOrder=order
             paidPaise=order.amountPaise
             runCatching{
-                // Suppress Razorpay's developer-only SDK diagnostic in local
-                // builds. Release builds never show it because DEBUG is false.
-                OpinionatedSoln.alertShownForStatus=true
                 Checkout().apply{setKeyID(order.keyId)}.open(activity,JSONObject().apply{
                     put("name","Zomeal");put("description","${provider.name} · ${plan.title}")
                     put("image","");put("order_id",order.razorpayOrderId);put("currency",order.currency);put("amount",order.amountPaise)

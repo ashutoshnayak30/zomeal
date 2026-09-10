@@ -8,9 +8,13 @@ import android.os.Looper
 import android.util.LruCache
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
+import java.security.MessageDigest
+import java.util.Calendar
+import java.util.concurrent.Executors
 
 internal data class MarketplaceProvider(
     val id:String,val name:String,val locality:String,val dietaryType:String,val description:String,
@@ -59,6 +63,9 @@ internal class SupabaseCustomerRepository(context:Context) {
         private val approvedBitmapCache=object:LruCache<String,Bitmap>(32*1024){
             override fun sizeOf(key:String,value:Bitmap):Int=value.byteCount/1024
         }
+        private val imageExecutor=Executors.newFixedThreadPool(4)
+        private val imageRequestLock=Any()
+        private val imageCallbacks=mutableMapOf<String,MutableList<(Bitmap?)->Unit>>()
     }
     private val developmentPhones=setOf("9999999999")
     private val appContext=context.applicationContext
@@ -66,6 +73,7 @@ internal class SupabaseCustomerRepository(context:Context) {
     private val main=Handler(Looper.getMainLooper())
     private val baseUrl=BuildConfig.SUPABASE_URL.trimEnd('/')
     private val anonKey=BuildConfig.SUPABASE_ANON_KEY
+    private val approvedMediaCacheDir by lazy { File(appContext.cacheDir,"approved-provider-media").apply { mkdirs() } }
     val configured get()=baseUrl.startsWith("https://")&&anonKey.isNotBlank()
     val isAuthenticated:Boolean get()=!prefs.getBoolean("signed_out",false)&&!prefs.getString("access_token",null).isNullOrBlank()
     val savedPincode:String get()=prefs.getString("pincode","").orEmpty()
@@ -162,25 +170,39 @@ internal class SupabaseCustomerRepository(context:Context) {
                     val connection=(URL("$baseUrl$path").openConnection() as HttpURLConnection).apply{requestMethod="POST";connectTimeout=12000;readTimeout=24000;doOutput=true;setRequestProperty("apikey",anonKey);setRequestProperty("Authorization","Bearer ${bearer()}");setRequestProperty("Content-Type","application/json")}
                     connection.outputStream.use{it.write(body.toString().toByteArray())};val code=connection.responseCode;val text=(if(code in 200..299)connection.inputStream else connection.errorStream)?.bufferedReader()?.use{it.readText()}.orEmpty();connection.disconnect();return code to text
                 }
-                // This edge function signs only the paths returned by the approved
-                // customer catalogue. Customers can therefore render private
-                // provider-media objects without depending on storage RLS in the
-                // Android image request itself.
-                var response=execute("/functions/v1/website-provider-search",JSONObject().put("pincode",pincode))
-                if(response.first==401&&refreshSessionBlocking())response=execute("/functions/v1/website-provider-search",JSONObject().put("pincode",pincode))
+                // The approved catalogue RPC is substantially faster than waking
+                // an Edge Function solely to sign every image. Approved Storage
+                // objects are already protected by their metadata-backed RLS
+                // policy, so fetch paths directly and keep signed media as a
+                // compatibility fallback.
+                var response=execute("/rest/v1/rpc/customer_marketplace",JSONObject().put("target_pincode",pincode))
+                if(response.first==401&&refreshSessionBlocking())response=execute("/rest/v1/rpc/customer_marketplace",JSONObject().put("target_pincode",pincode))
                 var(code,text)=response
-                var root=runCatching{JSONObject(text)}.getOrNull()
-                var array=root?.optJSONArray("providers")
-                // Keep the original RPC as a safe fallback while older Supabase
-                // environments are upgraded to the signed-media function.
+                var root:JSONObject?=null
+                var array=runCatching{JSONArray(text)}.getOrNull()
+                // Keep the signed-media function as a safe fallback for an older
+                // environment whose approved-object Storage policy is incomplete.
                 if(code !in 200..299||array==null){
-                    response=execute("/rest/v1/rpc/customer_marketplace",JSONObject().put("target_pincode",pincode))
-                    if(response.first==401&&refreshSessionBlocking())response=execute("/rest/v1/rpc/customer_marketplace",JSONObject().put("target_pincode",pincode))
-                    code=response.first;text=response.second;root=null
-                    array=runCatching{JSONArray(text)}.getOrNull()
+                    response=execute("/functions/v1/website-provider-search",JSONObject().put("pincode",pincode))
+                    if(response.first==401&&refreshSessionBlocking())response=execute("/functions/v1/website-provider-search",JSONObject().put("pincode",pincode))
+                    code=response.first;text=response.second;root=runCatching{JSONObject(text)}.getOrNull()
+                    array=root?.optJSONArray("providers")
                 }
                 if(code !in 200..299)throw IllegalStateException(runCatching{JSONObject(text).optString("message")}.getOrNull().orEmpty().ifBlank{if(code==401)"Your session expired. Please log in again." else "Marketplace request failed ($code)"})
-                val providerRows=array?:JSONArray();val result=buildList{for(index in 0 until providerRows.length()){val item=providerRows.optJSONObject(index)?:continue
+                val providerRows=array?:JSONArray()
+                // Normalize signed dish URLs before creating MarketplaceProvider
+                // models so prefetch and every screen receive the same path.
+                for(providerIndex in 0 until providerRows.length()){
+                    val menu=providerRows.optJSONObject(providerIndex)?.optJSONArray("weekly_menu")?:continue
+                    for(dayIndex in 0 until menu.length()){
+                        val items=menu.optJSONObject(dayIndex)?.optJSONArray("items")?:continue
+                        for(itemIndex in 0 until items.length())items.optJSONObject(itemIndex)?.let{dish->
+                            val signed=dish.optString("photo_url").trim()
+                            if(signed.isNotBlank()&&!signed.equals("null",true))dish.put("photo_path",signed)
+                        }
+                    }
+                }
+                val result=buildList{for(index in 0 until providerRows.length()){val item=providerRows.optJSONObject(index)?:continue
                     val packageJson=item.optJSONArray("packages")?:JSONArray()
                     val packages=buildList{for(packageIndex in 0 until packageJson.length()){
                         val value=packageJson.optJSONObject(packageIndex)?:continue
@@ -198,18 +220,7 @@ internal class SupabaseCustomerRepository(context:Context) {
                         cleanPath(item.optString("kitchen_photo_url").ifBlank{item.optString("kitchen_photo_path")}),
                         cleanPath(item.optString("meal_photo_url").ifBlank{item.optString("meal_photo_path")})
                     ))}}
-                // Prefer each signed dish URL while preserving the original
-                // storage path for the RPC fallback.
-                for(providerIndex in 0 until providerRows.length()){
-                    val menu=providerRows.optJSONObject(providerIndex)?.optJSONArray("weekly_menu")?:continue
-                    for(dayIndex in 0 until menu.length()){
-                        val items=menu.optJSONObject(dayIndex)?.optJSONArray("items")?:continue
-                        for(itemIndex in 0 until items.length())items.optJSONObject(itemIndex)?.let{dish->
-                            val signed=dish.optString("photo_url").trim()
-                            if(signed.isNotBlank()&&!signed.equals("null",true))dish.put("photo_path",signed)
-                        }
-                    }
-                }
+                prefetchMarketplaceMedia(result)
                 main.post{callback(result,null)}
             }catch(error:Exception){main.post{callback(emptyList(),error.message?:"Could not load providers")}}
         }.start()
@@ -359,19 +370,46 @@ internal class SupabaseCustomerRepository(context:Context) {
         },callback)
     }
 
+    private fun mediaDiskFile(objectPath:String):File{
+        val key=MessageDigest.getInstance("SHA-256").digest(objectPath.toByteArray()).joinToString(""){"%02x".format(it.toInt() and 0xff)}
+        return File(approvedMediaCacheDir,"$key.img")
+    }
+    private fun decodeDisplayBitmap(bytes:ByteArray):Bitmap?{
+        val bounds=BitmapFactory.Options().apply{inJustDecodeBounds=true}
+        BitmapFactory.decodeByteArray(bytes,0,bytes.size,bounds)
+        var sample=1
+        while(bounds.outWidth/sample>1280||bounds.outHeight/sample>1280)sample*=2
+        return BitmapFactory.decodeByteArray(bytes,0,bytes.size,BitmapFactory.Options().apply{inSampleSize=sample})
+    }
+    private fun finishMediaRequest(cacheKey:String,bitmap:Bitmap?){
+        if(bitmap!=null)approvedBitmapCache.put(cacheKey,bitmap)
+        val callbacks=synchronized(imageRequestLock){imageCallbacks.remove(cacheKey).orEmpty()}
+        main.post{callbacks.forEach{it(bitmap)}}
+    }
     fun approvedMedia(path:String,callback:(Bitmap?)->Unit){
         val requestedPath=path.trim()
-        approvedBitmapCache.get(requestedPath)?.let{callback(it);return}
         val objectPath=requestedPath.substringBefore('?')
             .substringAfter("provider-media/",requestedPath.substringBefore('?'))
             .trimStart('/')
         if(objectPath.isBlank()||objectPath.equals("null",true)||objectPath.equals("undefined",true)){callback(null);return}
-        Thread{
+        // Signed tokens change on every catalogue refresh. The object path does
+        // not, so it is the correct memory/disk cache and request-coalescing key.
+        approvedBitmapCache.get(objectPath)?.let{callback(it);return}
+        val startsDownload=synchronized(imageRequestLock){
+            val waiting=imageCallbacks[objectPath]
+            if(waiting!=null){waiting+=callback;false}else{imageCallbacks[objectPath]=mutableListOf(callback);true}
+        }
+        if(!startsDownload)return
+        imageExecutor.execute{
             val bitmap=runCatching{
+                val diskFile=mediaDiskFile(objectPath)
+                if(diskFile.isFile&&diskFile.length()>0)decodeDisplayBitmap(diskFile.readBytes())?.let{return@runCatching it}
                 val encoded=objectPath.split('/').joinToString("/"){URLEncoder.encode(it,"UTF-8").replace("+","%20")}
+                val authenticatedUrl="$baseUrl/storage/v1/object/authenticated/provider-media/$encoded"
                 fun download(url:String,authorised:Boolean):Pair<Int,ByteArray?>{
                     val connection=(URL(url).openConnection() as HttpURLConnection).apply{
-                        requestMethod="GET";connectTimeout=12000;readTimeout=20000
+                        requestMethod="GET";connectTimeout=10000;readTimeout=20000;useCaches=true
+                        setRequestProperty("Accept","image/*")
                         if(authorised){setRequestProperty("apikey",anonKey);setRequestProperty("Authorization","Bearer ${bearer()}")}
                     }
                     val code=connection.responseCode
@@ -379,12 +417,36 @@ internal class SupabaseCustomerRepository(context:Context) {
                     connection.disconnect();return code to bytes
                 }
                 val signed=requestedPath.startsWith("https://")||requestedPath.startsWith("http://")
-                var response=if(signed)download(requestedPath,false) else download("$baseUrl/storage/v1/object/authenticated/provider-media/$encoded",true)
-                if(!signed&&response.first==401&&refreshSessionBlocking())response=download("$baseUrl/storage/v1/object/authenticated/provider-media/$encoded",true)
-                response.second?.let{BitmapFactory.decodeByteArray(it,0,it.size)}?.also{approvedBitmapCache.put(requestedPath,it)}
+                var response=if(signed)download(requestedPath,false)else download(authenticatedUrl,true)
+                // A catalogue can remain onscreen after its signed URL expires.
+                // Fall back to the authenticated object path instead of leaving
+                // the illustration visible until a full marketplace refresh.
+                if(signed&&response.first !in 200..299)response=download(authenticatedUrl,true)
+                if(response.first==401&&refreshSessionBlocking())response=download(authenticatedUrl,true)
+                response.second?.let{bytes->
+                    runCatching{if(bytes.size<=20*1024*1024)diskFile.writeBytes(bytes)}
+                    decodeDisplayBitmap(bytes)
+                }
             }.getOrNull()
-            main.post{callback(bitmap)}
-        }.start()
+            finishMediaRequest(objectPath,bitmap)
+        }
+    }
+
+    private fun prefetchMarketplaceMedia(providers:List<MarketplaceProvider>){
+        val calendar=Calendar.getInstance()
+        val today=(calendar.get(Calendar.DAY_OF_WEEK)+5)%7+1
+        val tomorrow=today%7+1
+        val priority=linkedSetOf<String>()
+        providers.forEach{provider->
+            listOf(provider.primaryPhotoPath,provider.mealPhotoPath).filterTo(priority){it.isNotBlank()}
+            for(index in 0 until provider.menu.length()){
+                val day=provider.menu.optJSONObject(index)?:continue
+                if(day.optInt("day_of_week") !in setOf(today,tomorrow))continue
+                val items=day.optJSONArray("items")?:continue
+                for(itemIndex in 0 until items.length())items.optJSONObject(itemIndex)?.optString("photo_path")?.takeIf{it.isNotBlank()}?.let(priority::add)
+            }
+        }
+        priority.forEach{approvedMedia(it){}}
     }
 
     fun saveRegistrationProfile(fullName:String,phone:String,callback:(String?)->Unit){

@@ -30,6 +30,7 @@ fun ManageBusinessScreen(
     loading: Boolean,
     onBack: () -> Unit,
     onEditProfile: () -> Unit,
+    onEditServiceAreas: () -> Unit,
     onEditPackages: () -> Unit,
     onEditMenus: () -> Unit,
     onEditPhotos: () -> Unit,
@@ -79,6 +80,17 @@ fun ManageBusinessScreen(
             }
             message?.let { text -> item { ManageNotice(text) } }
             if (loading) item { LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = MBrand) }
+            item {
+                val pincodes = ProviderDraft.servicePincodes.filter { it.verified }.map { it.value }
+                ManageCard(
+                    icon = Icons.Outlined.AddLocationAlt,
+                    title = "Serviceable areas",
+                    summary = "${pincodes.size} approved or verified pincode${if (pincodes.size == 1) "" else "s"}",
+                    detail = pincodes.joinToString(" · ").ifBlank { "No serviceable pincode added" },
+                    action = "Add serviceable pincodes",
+                    onClick = onEditServiceAreas
+                )
+            }
             item {
                 ManageCard(
                     icon = Icons.Outlined.Storefront,
