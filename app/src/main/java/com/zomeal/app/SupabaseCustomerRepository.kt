@@ -340,6 +340,11 @@ internal class SupabaseCustomerRepository(context:Context) {
     }
 
     fun clearCheckoutDraft(callback:(String?)->Unit){rpc("customer_clear_checkout_draft",JSONObject()){_,error->callback(error)}}
+    fun homeBanners(callback:(JSONObject?,String?)->Unit){rpc("customer_home_banners",JSONObject(),callback)}
+    fun homeBannerMedia(path:String,callback:(Bitmap?)->Unit){
+        if(!Regex("^[a-zA-Z0-9_-]+/[a-zA-Z0-9_-]+\\.(webp|jpg|png)$").matches(path)){callback(null);return}
+        approvedMedia("$baseUrl/storage/v1/object/public/home-banners/$path",callback)
+    }
     fun referralProgram(callback:(JSONObject?,String?)->Unit){rpc("customer_referral_program",JSONObject(),callback)}
     fun referralDashboard(callback:(JSONObject?,String?)->Unit){rpc("customer_referral_dashboard",JSONObject(),callback)}
     fun notificationFeed(callback:(JSONArray?,String?)->Unit){
