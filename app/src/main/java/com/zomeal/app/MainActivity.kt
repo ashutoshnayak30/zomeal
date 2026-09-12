@@ -160,9 +160,6 @@ class MainActivity : ComponentActivity(), PaymentResultWithDataListener {
         OpinionatedSoln.alertShownForStatus = true
         handleNotificationIntent(intent)
         CustomerPushNotifications.initialize(applicationContext)
-        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 4101)
-        }
         setContent { ZomealTheme { ZomealApp() } }
     }
 
@@ -185,13 +182,25 @@ class MainActivity : ComponentActivity(), PaymentResultWithDataListener {
 @Composable
 private fun ZomealApp() {
     var showSplash by remember { mutableStateOf(true) }
+    val context=LocalContext.current
+    val onboarding=remember{CustomerOnboardingPreferences(context)}
+    var showOnboarding by rememberSaveable{mutableStateOf(!onboarding.completed&&!SupabaseCustomerRepository(context).isAuthenticated)}
+    LaunchedEffect(showSplash,showOnboarding){
+        val activity=context as? Activity
+        if(!showSplash&&!showOnboarding&&activity!=null&&Build.VERSION.SDK_INT>=33&&activity.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=android.content.pm.PackageManager.PERMISSION_GRANTED){
+            activity.requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS),4101)
+        }
+    }
 
     LaunchedEffect(Unit) {
+        if(!showOnboarding)onboarding.complete()
         delay(2200)
         showSplash = false
     }
 
-    if (showSplash) SplashScreen() else ProviderListScreen()
+    if (showSplash) SplashScreen()
+    else if(showOnboarding)CustomerOnboardingScreen{onboarding.complete();showOnboarding=false}
+    else ProviderListScreen()
 }
 
 @Composable
@@ -5933,6 +5942,8 @@ private fun ProfileScreen(
     var editAddress by remember { mutableStateOf(false) }
     var editProfile by remember { mutableStateOf(false) }
     var legalPage by remember { mutableStateOf<String?>(null) }
+    var showTour by remember { mutableStateOf(false) }
+    if(showTour){CustomerOnboardingScreen{showTour=false};return}
     BackHandler(enabled=editProfile||legalPage!=null){editProfile=false;legalPage=null}
     legalPage?.let{LegalPolicyScreen(PrototypeState.TERMS,{legalPage=null},it);return}
     if(editProfile){CustomerAccountEditor(onBack={editProfile=false},onChangePincode=onChangePincode);return}
@@ -5944,6 +5955,7 @@ private fun ProfileScreen(
             item { AppSectionHeader("Profile", "Your account, preferences and security", Icons.Outlined.Person) { onNav(0) } }
             item { ProfileIdentityCard() }
             item { SectionTitle("Account") }
+            item { ProfileMenuCard(listOf(Triple(Icons.Outlined.AutoStories,"How Zomeal works","Replay the getting-started guide"))){showTour=true} }
             item { ProfileMenuCard(listOf(Triple(Icons.Outlined.Edit,"Edit profile","Name, delivery address and pincode"))) { editProfile=true } }
             item { ProfileMenuCard(listOf(Triple(Icons.Outlined.LocationOn, "Saved address", if (CustomerProfileStore.addressSaved) CustomerProfileStore.completeAddress else "Add your delivery address"), Triple(Icons.Outlined.AccountBalanceWallet, "Zomeal Wallet", "View live balance and transactions"))) { label -> when (label) { "Zomeal Wallet" -> onWallet(); else -> editAddress = true } } }
             requestSubmitted?.let { message ->
@@ -6017,6 +6029,8 @@ private fun CustomerLegalLinks(onOpen:(String)->Unit) {
 
 @Composable
 private fun CustomerAccountEditor(onBack:()->Unit,onChangePincode:(String)->Unit) {
+    var showTour by remember{mutableStateOf(false)}
+    if(showTour){CustomerOnboardingScreen{showTour=false};return}
     val context=LocalContext.current
     val repository=remember{SupabaseCustomerRepository(context.applicationContext)}
     var name by remember{mutableStateOf(repository.savedFullName)}
@@ -6065,6 +6079,7 @@ private fun CustomerAccountEditor(onBack:()->Unit,onChangePincode:(String)->Unit
                 }
             }}
             item{SectionTitle("Policies & legal")}
+            item{ProfileMenuCard(listOf(Triple(Icons.Outlined.AutoStories,"How Zomeal works","Replay the getting-started guide"))){showTour=true}}
             item{CustomerLegalLinks{policy=it}}
         }
     }
