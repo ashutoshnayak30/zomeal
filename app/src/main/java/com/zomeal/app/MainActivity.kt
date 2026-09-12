@@ -499,6 +499,7 @@ private fun ProviderListScreen() {
     val marketplaceRepository = remember(appContext) { SupabaseCustomerRepository(appContext) }
     var signupComplete by rememberSaveable { mutableStateOf(false) }
     var awaitingOtp by rememberSaveable { mutableStateOf(false) }
+    var showRegistrationPincode by rememberSaveable { mutableStateOf(false) }
     var pendingFullName by rememberSaveable { mutableStateOf("") }
     var pendingMobile by rememberSaveable { mutableStateOf("") }
     var pendingPincode by rememberSaveable { mutableStateOf("") }
@@ -680,6 +681,8 @@ private fun ProviderListScreen() {
                 onTryAnotherPincode = {
                     serviceUnavailable = false
                     awaitingOtp = false
+                    showRegistrationPincode = true
+                    showLogin = false
                 }
             )
         } else if (awaitingOtp) {
@@ -739,22 +742,28 @@ private fun ProviderListScreen() {
                         if(result.success)awaitingOtp = true else authenticationError = result.message?:"Unable to send OTP"
                     }
                 },
-                onCreateAccount = { showLogin = false; authenticationError = null },
+                onCreateAccount = { showLogin = false; showRegistrationPincode=false; pendingIsLogin=false; authenticationError = null },
                 submitting = authenticationLoading,
                 error = authenticationError
-            ) else SignupScreen(onContinue = { fullName, mobile, pincode, referralCode ->
+            ) else if(showRegistrationPincode) RegistrationPincodeScreen(
+                pincode=pendingPincode,mobile=pendingMobile,onPincodeChange={pendingPincode=it;authenticationError=null},
+                onBack={if(!authenticationLoading){showRegistrationPincode=false;authenticationError=null}},
+                onContinue={
+                    authenticationLoading=true;authenticationError=null
+                    marketplaceRepository.beginAuthentication(pendingMobile){result->
+                        authenticationLoading=false
+                        if(result.success)awaitingOtp=true else authenticationError=result.message?:"Unable to send OTP. Please try again."
+                    }
+                },submitting=authenticationLoading,error=authenticationError
+            ) else SignupScreen(onContinue = { fullName, mobile, referralCode ->
                 pendingFullName = fullName
                 pendingMobile = mobile
-                pendingPincode = pincode
                 pendingReferralCode = referralCode
                 pendingIsLogin = false
-                authenticationLoading = true
                 authenticationError = null
-                marketplaceRepository.beginAuthentication(mobile){ result ->
-                    authenticationLoading = false
-                    if(result.success)awaitingOtp = true else authenticationError = result.message?:"Unable to send OTP"
-                }
-            }, onLogin = { showLogin = true; authenticationError = null }, submitting = authenticationLoading, error = authenticationError)
+                showRegistrationPincode = true
+            }, onLogin = { showLogin = true; authenticationError = null }, submitting = authenticationLoading, error = authenticationError,
+                initialName=pendingFullName,initialMobile=pendingMobile,initialReferral=pendingReferralCode)
         }
         return
     }
@@ -6553,12 +6562,47 @@ private fun LoginScreen(onContinue: (String) -> Unit, onCreateAccount: () -> Uni
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun SignupScreen(onContinue: (String, String, String, String) -> Unit, onLogin: () -> Unit, submitting:Boolean = false, error:String? = null) {
-    var fullName by rememberSaveable { mutableStateOf("") }
-    var mobile by rememberSaveable { mutableStateOf("") }
-    var pincode by rememberSaveable { mutableStateOf("") }
-    var referralCode by rememberSaveable { mutableStateOf("") }
-    val valid = fullName.trim().length >= 2 && mobile.length == 10 && pincode.length == 6
+private fun RegistrationPincodeScreen(pincode:String,mobile:String,onPincodeChange:(String)->Unit,onBack:()->Unit,onContinue:()->Unit,submitting:Boolean,error:String?) {
+    BackHandler { if(!submitting)onBack() }
+    val valid=pincode.matches(Regex("[1-9][0-9]{5}"))&&mobile.matches(Regex("[6-9][0-9]{9}"))
+    Scaffold(modifier=Modifier.systemBarsPadding().imePadding(),containerColor=Color(0xFFFAFCF8),topBar={
+        Row(Modifier.fillMaxWidth().padding(10.dp),verticalAlignment=Alignment.CenterVertically){
+            IconButton(onClick=onBack,enabled=!submitting){Icon(Icons.Filled.ArrowBack,"Back to your details",tint=BrandDark)}
+            Column{Text("Your delivery area",fontWeight=FontWeight.Bold,color=Ink,fontSize=18.sp);Text("Step 2 of 3 · Next: verify your mobile",color=Muted,fontSize=12.sp)}
+        }
+    },bottomBar={
+        Surface(color=Color.White,shadowElevation=4.dp){Column(Modifier.padding(horizontal=22.dp,vertical=14.dp),verticalArrangement=Arrangement.spacedBy(8.dp)){
+            Button(onClick=onContinue,enabled=valid&&!submitting,modifier=Modifier.fillMaxWidth().heightIn(min=54.dp),shape=RoundedCornerShape(16.dp),colors=ButtonDefaults.buttonColors(containerColor=Brand)){
+                if(submitting){CircularProgressIndicator(Modifier.size(18.dp),strokeWidth=2.dp,color=Color.White);Spacer(Modifier.width(8.dp))}
+                Text(if(submitting)"Sending OTP…" else "Send OTP & continue",fontSize=16.sp,fontWeight=FontWeight.Bold)
+            }
+            Text("OTP verifies your mobile number—not your address. We’ll check kitchen availability after verification.",fontSize=12.sp,lineHeight=17.sp,color=Muted)
+        }}
+    }){padding->
+        Column(Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(horizontal=24.dp,vertical=12.dp),verticalArrangement=Arrangement.spacedBy(17.dp)){
+            Box(Modifier.fillMaxWidth(.8f).align(Alignment.CenterHorizontally)){TourIllustration(0,onboardingAnimationsEnabled())}
+            Text("Enter your area\npincode",fontSize=28.sp,lineHeight=34.sp,fontWeight=FontWeight.ExtraBold,color=Ink)
+            Text("Use the 6-digit pincode where you want your meals delivered. We’ll show service providers available in that area.",fontSize=15.sp,lineHeight=22.sp,color=Muted)
+            OutlinedTextField(value=pincode,onValueChange={onPincodeChange(it.filter(Char::isDigit).take(6))},enabled=!submitting,
+                label={Text("Delivery area pincode")},placeholder={Text("6 digits")},singleLine=true,keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Number),
+                textStyle=LocalTextStyle.current.copy(fontSize=26.sp,letterSpacing=4.sp),modifier=Modifier.fillMaxWidth(),shape=RoundedCornerShape(16.dp),
+                isError=pincode.length==6&&!pincode.matches(Regex("[1-9][0-9]{5}")))
+            if(pincode.length==6&&!pincode.matches(Regex("[1-9][0-9]{5}")))Text("Enter a valid pincode beginning with 1–9.",color=Color(0xFFD64545),fontSize=13.sp)
+            Surface(color=Mist,shape=RoundedCornerShape(14.dp)){Column(Modifier.padding(14.dp),verticalArrangement=Arrangement.spacedBy(5.dp)){
+                Text("We’ll send an OTP to +91 $mobile",fontSize=14.sp,fontWeight=FontWeight.Bold,color=Ink)
+                TextButton(onClick=onBack,enabled=!submitting){Text("Edit name or mobile number",color=BrandDark)}
+            }}
+            error?.let{Text(it,color=Color(0xFFD64545),fontSize=14.sp,lineHeight=20.sp)}
+        }
+    }
+}
+
+@Composable
+private fun SignupScreen(onContinue: (String, String, String) -> Unit, onLogin: () -> Unit, submitting:Boolean = false, error:String? = null,initialName:String="",initialMobile:String="",initialReferral:String="") {
+    var fullName by rememberSaveable { mutableStateOf(initialName) }
+    var mobile by rememberSaveable { mutableStateOf(initialMobile) }
+    var referralCode by rememberSaveable { mutableStateOf(initialReferral) }
+    val valid = fullName.trim().length >= 2 && mobile.matches(Regex("[6-9][0-9]{9}"))
 
     BoxWithConstraints(
         Modifier
@@ -6611,19 +6655,6 @@ private fun SignupScreen(onContinue: (String, String, String, String) -> Unit, o
                             Text("Your number is safe with us", color = Muted, fontSize = CustomerTypeScale.Caption)
                         }
 
-                        RegistrationFieldHeader(Icons.Outlined.LocationOn, "Delivery Pincode", "Enter a valid 6-digit pincode", compact)
-                        PincodeInput(pincode, compact) { pincode = it }
-                        Row(verticalAlignment = Alignment.Top) {
-                            Icon(Icons.Outlined.Info, null, tint = Muted, modifier = Modifier.size(14.dp))
-                            Spacer(Modifier.width(6.dp))
-                            Text(
-                                "We'll verify service availability after OTP verification.",
-                                color = Muted,
-                                fontSize = if (compact) CustomerTypeScale.Compact else CustomerTypeScale.Caption,
-                                lineHeight = 12.sp
-                            )
-                        }
-
                         Surface(color=Mist,shape=RoundedCornerShape(16.dp),border=androidx.compose.foundation.BorderStroke(1.dp,Border)) {
                             Column(Modifier.fillMaxWidth().padding(horizontal=12.dp,vertical=10.dp)) {
                                 Row(verticalAlignment=Alignment.CenterVertically) {
@@ -6648,13 +6679,13 @@ private fun SignupScreen(onContinue: (String, String, String, String) -> Unit, o
                     Spacer(Modifier.height(if(compact)10.dp else 14.dp))
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Button(
-                            onClick = { onContinue(fullName.trim(), mobile, pincode, referralCode.trim()) },
+                            onClick = { onContinue(fullName.trim(), mobile, referralCode.trim()) },
                             enabled = valid && !submitting,
                             modifier = Modifier.fillMaxWidth().height(if (compact) 54.dp else 60.dp),
                             shape = RoundedCornerShape(17.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = Brand, disabledContainerColor = Border)
                         ) {
-                            Text(if(submitting)"Sending OTP…" else "Create Account", fontSize = CustomerTypeScale.Body, fontWeight = FontWeight.ExtraBold, modifier = Modifier.weight(1f))
+                            Text("Next: enter your area pincode", fontSize = CustomerTypeScale.Body, fontWeight = FontWeight.ExtraBold, modifier = Modifier.weight(1f))
                             if(submitting)CircularProgressIndicator(Modifier.size(17.dp),color=Color.White,strokeWidth=2.dp) else Icon(Icons.Filled.ArrowForward, null, modifier = Modifier.size(17.dp))
                         }
                         error?.let { Text(it,color=Color(0xFFD64545),fontSize = CustomerTypeScale.Caption,lineHeight=14.sp,modifier=Modifier.fillMaxWidth().padding(top=6.dp)) }

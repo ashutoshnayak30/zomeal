@@ -23,6 +23,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -38,12 +39,12 @@ private val TourInk=Color(0xFF10231B)
 private val TourMuted=Color(0xFF66716B)
 private data class TourStep(val label:String,val title:String,val description:String,val note:String)
 private val tourSteps=listOf(
-    TourStep("YOUR AREA","Good food starts\nclose to home","Enter your delivery pincode to discover approved kitchens that serve your area.","Availability is checked for your pincode."),
-    TourStep("YOUR KITCHEN","Find your kind\nof kitchen","Explore providers, food photos and menus. Choose the kitchen that fits your routine.","Choose from kitchens available in your area."),
-    TourStep("YOUR PACKAGE","Lunch, dinner\nor a little of both?","Choose lunch, dinner or both, then pick an available weekly trial or monthly plan.","Each provider sets their own package prices."),
-    TourStep("YOUR WEEK","A week of meals,\nchosen by you","Set your seven-day menu from your kitchen’s available choices. Review each day before continuing.","Available dishes depend on your selected kitchen."),
-    TourStep("REVIEW & PAY","Check the details.\nMake it yours.","Review your meals, delivery address, start date and payment amount. Pay securely—or save your plan and pay later.","A saved plan is not an active subscription."),
-    TourStep("YOU’RE IN CONTROL","Your routine changes.\nYour meals can too.","Manage your plan, edit eligible meals and pause before the cut-off. Track meal charges and recharge in your wallet.","Lunch cut-off: 8 AM · Dinner cut-off: 4 PM (IST).")
+    TourStep("ENTER YOUR AREA","Enter your area\npincode","Add your name and mobile number, then enter your 6-digit delivery pincode. Verify your mobile number with the OTP.","Use the pincode where you want meals delivered."),
+    TourStep("CHOOSE A PROVIDER","Choose a service\nprovider in your area","We’ll show the kitchens that serve your pincode. Compare their food photos, menus and prices, then choose a provider.","Only available service providers are shown."),
+    TourStep("CHOOSE A PACKAGE","Choose lunch, dinner\nor both","Select your meal package, then choose a 7-day weekly trial or a 30-day monthly plan where available.","Check the price for your selected package and period."),
+    TourStep("SET YOUR MENU","Choose your meals\nfor all 7 days","Pick your lunch and dinner dishes from the provider’s menu. Review and save each day to complete your weekly menu.","Use the quick-selection options or choose day by day."),
+    TourStep("REVIEW & PAY","Review your plan.\nChoose how to pay.","Check your menu, delivery address, start date and payment amount. Pay securely, or save your details and pay later.","Saving a plan does not activate the subscription."),
+    TourStep("MANAGE YOUR MEALS","Pause or edit meals\nwhen plans change","Open Pause Plan to skip eligible meals before the cut-off. Edit available meal choices and use Wallet to check charges or recharge.","Lunch cut-off: 8 AM · Dinner cut-off: 4 PM (IST).")
 )
 
 internal class CustomerOnboardingPreferences(context:Context) {
@@ -52,13 +53,17 @@ internal class CustomerOnboardingPreferences(context:Context) {
     fun complete(){preferences.edit().putBoolean("completed_v1",true).apply()}
 }
 
+@Composable internal fun onboardingAnimationsEnabled():Boolean {
+    val context=LocalContext.current
+    return remember{runCatching{Settings.Global.getFloat(context.contentResolver,Settings.Global.ANIMATOR_DURATION_SCALE,1f)>0f}.getOrDefault(false)}
+}
+
 /** Local, offline introduction only: never creates a plan or changes account data. */
 @Composable
 internal fun CustomerOnboardingScreen(onFinish:()->Unit) {
     val pager=rememberPagerState(pageCount={tourSteps.size})
     val scope=rememberCoroutineScope()
-    val context=LocalContext.current
-    val animate=remember{runCatching{Settings.Global.getFloat(context.contentResolver,Settings.Global.ANIMATOR_DURATION_SCALE,1f)>0f}.getOrDefault(false)}
+    val animate=onboardingAnimationsEnabled()
     BackHandler{if(pager.currentPage==0)onFinish() else scope.launch{pager.animateScrollToPage(pager.currentPage-1)}}
     Scaffold(containerColor=Color(0xFFFAFCF8),modifier=Modifier.systemBarsPadding(),topBar={
         Row(Modifier.fillMaxWidth().padding(start=24.dp,end=12.dp,top=6.dp),verticalAlignment=Alignment.CenterVertically){
@@ -78,8 +83,9 @@ internal fun CustomerOnboardingScreen(onFinish:()->Unit) {
     }){padding->
         HorizontalPager(state=pager,modifier=Modifier.fillMaxSize().padding(padding),key={it}){index->
             val step=tourSteps[index]
+            val entrance by animateFloatAsState(if(!animate||pager.currentPage==index)1f else .85f,tween(if(animate)450 else 0),label="page reveal")
             Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal=24.dp,vertical=14.dp),horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.spacedBy(15.dp)){
-                TourIllustration(index,animate&&pager.currentPage==index)
+                Box(Modifier.graphicsLayer{alpha=entrance;scaleX=entrance;scaleY=entrance}){TourIllustration(index,animate&&pager.currentPage==index)}
                 Text("${index+1}. ${step.label}",fontSize=12.sp,fontWeight=FontWeight.Bold,color=TourGreen,letterSpacing=1.6.sp)
                 Text(step.title,fontSize=27.sp,lineHeight=33.sp,fontWeight=FontWeight.ExtraBold,color=TourInk,textAlign=TextAlign.Center,modifier=Modifier.semantics{heading()})
                 Text(step.description,fontSize=15.sp,lineHeight=23.sp,color=TourMuted,textAlign=TextAlign.Center)
@@ -92,18 +98,25 @@ internal fun CustomerOnboardingScreen(onFinish:()->Unit) {
 }
 
 @Composable
-private fun TourIllustration(step:Int,animated:Boolean) {
+internal fun TourIllustration(step:Int,animated:Boolean) {
     val phase=if(animated){
         val transition=rememberInfiniteTransition(label="onboarding illustration")
-        val value by transition.animateFloat(0f,1f,infiniteRepeatable(tween(2600,easing=FastOutSlowInEasing),RepeatMode.Reverse),label="gentle movement")
+        val value by transition.animateFloat(0f,1f,infiniteRepeatable(tween(2200,easing=FastOutSlowInEasing),RepeatMode.Reverse),label="scene movement")
         value
     } else .5f
     BoxWithConstraints(Modifier.fillMaxWidth().aspectRatio(1.32f).clip(RoundedCornerShape(32.dp)).background(Brush.linearGradient(listOf(Color(0xFFE4F2DB),Color(0xFFF2F8ED),Color(0xFFE1F1E9)))).clearAndSetSemantics{},contentAlignment=Alignment.Center){
         Canvas(Modifier.fillMaxSize()){
             drawCircle(Color(0xFFB7DA45).copy(alpha=.22f),size.minDimension*.32f,center.copy(x=size.width*.85f,y=size.height*.2f))
             drawCircle(TourGreen.copy(alpha=.07f),size.minDimension*.4f,center.copy(x=size.width*.06f,y=size.height*.95f))
+            // A gentle expanding location ripple and drifting accents, not flashing effects.
+            drawCircle(TourGreen.copy(alpha=.12f*(1-phase)),size.minDimension*(.2f+phase*.26f),center,style=Stroke(3.dp.toPx()))
+            repeat(5){i->
+                val x=size.width*(.08f+i*.21f)
+                val y=size.height*(.12f+((i%2)*.66f))+(phase-.5f)*18.dp.toPx()
+                drawCircle(if(i%2==0)Color(0xFF94BF42).copy(alpha=.5f) else TourGreen.copy(alpha=.22f),3.dp.toPx()+phase*2.dp.toPx(),androidx.compose.ui.geometry.Offset(x,y))
+            }
         }
-        Column(Modifier.fillMaxWidth(.86f).offset(y=((phase-.5f)*7).dp),horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.spacedBy(8.dp)){
+        Column(Modifier.fillMaxWidth(.86f).offset(y=((phase-.5f)*12).dp).graphicsLayer{rotationZ=(phase-.5f)*1.4f},horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.spacedBy(8.dp)){
             when(step){
                 0->{
                     Icon(Icons.Outlined.LocationOn,null,tint=TourGreen,modifier=Modifier.size(42.dp).offset(y=(-phase*7).dp))
@@ -117,7 +130,7 @@ private fun TourIllustration(step:Int,animated:Boolean) {
                 }
                 2->{
                     Row(horizontalArrangement=Arrangement.spacedBy(6.dp)){TourPill(Icons.Outlined.DateRange,"Weekly");TourPill(Icons.Outlined.CalendarMonth,"Monthly")}
-                    TourCard{Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceEvenly){TourMeal(Icons.Outlined.LightMode,"Lunch",false);TourMeal(Icons.Outlined.Restaurant,"Both",true);TourMeal(Icons.Outlined.DarkMode,"Dinner",false)}}
+                    TourCard{Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceEvenly){TourMeal(Icons.Outlined.LightMode,"Lunch",phase<.3f);TourMeal(Icons.Outlined.Restaurant,"Both",phase in .3f.. .7f);TourMeal(Icons.Outlined.DarkMode,"Dinner",phase>.7f)}}
                 }
                 3->{
                     TourCard{
@@ -152,5 +165,8 @@ private fun TourIllustration(step:Int,animated:Boolean) {
     drawOval(Color(0xFFD2E5B7),topLeft=androidx.compose.ui.geometry.Offset(w*.12f,h*.39f),size=androidx.compose.ui.geometry.Size(w*.76f,h*.27f))
     drawOval(Color(0xFFFFF4CC),topLeft=androidx.compose.ui.geometry.Offset(w*.22f,h*.43f),size=androidx.compose.ui.geometry.Size(w*.36f,h*.17f))
     drawCircle(Color(0xFFE9A044),w*.11f,androidx.compose.ui.geometry.Offset(w*.66f,h*.53f))
+    val lidY=h*(.3f-phase*.19f)
+    drawOval(TourGreen,topLeft=androidx.compose.ui.geometry.Offset(w*.1f,lidY),size=androidx.compose.ui.geometry.Size(w*.8f,h*.12f))
+    drawRoundRect(Color(0xFF006B38),topLeft=androidx.compose.ui.geometry.Offset(w*.38f,lidY-h*.06f),size=androidx.compose.ui.geometry.Size(w*.24f,h*.09f),cornerRadius=androidx.compose.ui.geometry.CornerRadius(w*.04f))
     repeat(3){i->val x=w*(.32f+i*.18f);val y=h*(.37f-phase*.14f);val steam=Path().apply{moveTo(x,y);cubicTo(x-w*.12f,y-h*.11f,x+w*.12f,y-h*.13f,x,y-h*.25f)};drawPath(steam,Color.White.copy(alpha=.8f),style=Stroke(width=w*.038f))}
 }}
