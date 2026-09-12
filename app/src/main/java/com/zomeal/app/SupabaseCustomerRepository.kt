@@ -83,6 +83,28 @@ internal class SupabaseCustomerRepository(context:Context) {
     val savedPincode:String get()=prefs.getString("pincode","").orEmpty()
     val savedFullName:String get()=prefs.getString("full_name","").orEmpty()
     val savedPhone:String get()=prefs.getString("phone","").orEmpty()
+    private fun cacheProfile(json:JSONObject?) {
+        if(json==null)return
+        val edit=prefs.edit()
+        json.optString("full_name").takeIf{it.isNotBlank()&&it!="null"}?.let{edit.putString("full_name",it)}
+        json.optString("phone").filter(Char::isDigit).takeLast(10).takeIf{it.length==10}?.let{edit.putString("phone",it)}
+        json.optString("pincode").takeIf{it.matches(Regex("[1-9][0-9]{5}"))}?.let{edit.putString("pincode",it)}
+        edit.apply()
+    }
+    fun profileDetails(callback:(JSONObject?,String?)->Unit) {
+        rpc("customer_profile_details",JSONObject()){json,error->if(error==null)cacheProfile(json);callback(json,error)}
+    }
+    fun updateProfile(name:String,callback:(JSONObject?,String?)->Unit) {
+        rpc("customer_update_profile",JSONObject().put("target_full_name",name.trim())){json,error->if(error==null)cacheProfile(json);callback(json,error)}
+    }
+    fun updateDeliveryAddress(address:JSONObject,callback:(JSONObject?,String?)->Unit) {
+        rpc("customer_update_delivery_address",JSONObject().put("target_address",address)){json,error->if(error==null)cacheProfile(json);callback(json,error)}
+    }
+    fun relocateSubscription(subscriptionId:String,providerId:String,packageId:String,menu:JSONObject,address:JSONObject,startDate:String,pricePaise:Long,callback:(JSONObject?,String?)->Unit) {
+        rpc("customer_relocate_subscription",JSONObject().put("target_subscription",subscriptionId).put("replacement_provider",providerId)
+            .put("replacement_package",packageId).put("target_weekly_menu",menu).put("target_address",address)
+            .put("target_start_date",startDate).put("expected_price_paise",pricePaise),callback)
+    }
     /** Only customer JWTs are stored here. Service-role credentials must never enter the app. */
     private fun saveSession(json:JSONObject){
         customerAccessToken=json.optString("access_token").trim()
@@ -484,10 +506,11 @@ internal class SupabaseCustomerRepository(context:Context) {
         priority.filter{it.isNotBlank()&&!it.equals("null",true)}.forEach{approvedMedia(it){}}
     }
 
-    fun saveRegistrationProfile(fullName:String,phone:String,callback:(String?)->Unit){
+    fun saveRegistrationProfile(fullName:String,phone:String,pincode:String,callback:(String?)->Unit){
         if(customerAccessToken.isBlank()){callback("Customer authentication is required");return}
         rpc("customer_save_registration_profile",JSONObject().apply{
             put("target_full_name",fullName.trim());put("target_phone",phone)
+            put("target_pincode",pincode.trim().ifBlank{null} ?: JSONObject.NULL)
         }){_,error->
             if(error==null){
                 val edit=prefs.edit().putString("phone",phone)

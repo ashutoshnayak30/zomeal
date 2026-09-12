@@ -10,15 +10,30 @@ const label = s => String(s || '').replaceAll('_', ' ').toLowerCase().replace(/\
 const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const validPin = value => /^[1-9][0-9]{5}$/.test(value);
 let latestProviders = [], searchController, lastPin = '';
+let selectedDuration = 30;
+const durationControls=document.createElement('div');
+durationControls.className='package-duration-controls';durationControls.hidden=true;
+durationControls.setAttribute('role','group');durationControls.setAttribute('aria-label','Plan duration');
+durationControls.innerHTML='<button type="button" data-duration="7">Weekly · 7 days</button><button type="button" data-duration="30">Monthly · 30 days</button>';
+grid.before(durationControls);
+function packagesFor(p,days=selectedDuration){return (p.packages||[]).filter(x=>Number(x.duration_days)===days&&Number(x.price_paise)>0)}
+function renderCatalogue(){
+  durationControls.hidden=false;
+  durationControls.querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',String(Number(b.dataset.duration)===selectedDuration)));
+  grid.innerHTML=latestProviders.map(card).join('');imageFallbacks(grid);
+}
+durationControls.addEventListener('click',event=>{const button=event.target.closest('[data-duration]');if(!button)return;selectedDuration=Number(button.dataset.duration);renderCatalogue()});
 function photoUrl(value) {
   try { const url = new URL(value); return url.protocol === 'https:' && url.origin === new URL(cfg.supabaseUrl).origin ? url.href : ''; } catch { return ''; }
 }
 function period(p) {
-  const duration = Number(p.duration_days || p.plan_days || (String(p.name || '').toLowerCase().includes('week') ? 7 : 30));
+  const duration = Number(p.duration_days);
+  if(!Number.isFinite(duration)||duration<=0)return 'period unavailable';
   return duration === 7 ? 'week' : duration === 30 ? 'month' : `${duration} days`;
 }
 function message(title, text, retry = false) {
   grid.replaceChildren(); state.hidden = false; count.hidden = true;
+  durationControls.hidden=true;
   state.innerHTML = `<div class="search-tiffin" aria-hidden="true">⌖</div><h3>${escapeHtml(title)}</h3><p>${escapeHtml(text)}</p>${retry ? '<button type="button" class="button button-dark" data-retry>Try again</button>' : ''}`;
 }
 function imageFallbacks(root) {
@@ -28,7 +43,7 @@ function imageFallbacks(root) {
   }, {once:true}));
 }
 function card(p) {
-  const packages = (p.packages || []).filter(x => Number(x.price_paise) > 0);
+  const packages = packagesFor(p);
   const cheapest = [...packages].sort((a,b) => Number(a.price_paise) - Number(b.price_paise))[0];
   const img = photoUrl(p.primary_photo_url || p.meal_photo_url);
   return `<article class="provider-card"><div class="provider-photo">${img ? `<img data-provider-image src="${escapeHtml(img)}" alt="${escapeHtml(p.display_name)}" loading="lazy" decoding="async">` : '<div class="fallback" aria-label="Kitchen photo unavailable">⌖</div>'}<span class="verified">✓ ZOMEAL REVIEWED</span></div><div class="provider-body"><h3>${escapeHtml(p.display_name)}</h3><p>⌖ ${escapeHtml(p.locality || p.city || 'Serving your pincode')}</p><div class="chips"><span class="chip">${escapeHtml(label(p.dietary_type))}</span><span class="chip">${packages.length} plan${packages.length === 1 ? '' : 's'}</span></div><div class="price-line"><div><small>Plans from</small><br><b>${cheapest ? money(cheapest.price_paise) : 'See details'}</b>${cheapest ? `<small> / ${period(cheapest)}</small>` : ''}</div><button type="button" data-provider="${escapeHtml(p.provider_id)}">View details</button></div></div></article>`;
@@ -52,7 +67,7 @@ async function search(pin) {
       const button = document.createElement('button'); button.type = 'button'; button.className = 'button button-dark'; button.dataset.openLead = ''; button.textContent = 'Notify me about my area'; state.append(button); return;
     }
     state.hidden = true; count.hidden = false; count.textContent = `${latestProviders.length} kitchen${latestProviders.length === 1 ? '' : 's'} found`;
-    grid.innerHTML = latestProviders.map(card).join(''); imageFallbacks(grid);
+    renderCatalogue();
   } catch (error) {
     if (controller !== searchController) return;
     message('We couldn’t load kitchens', error.name === 'AbortError' ? 'The request took too long. Please check your connection and try again.' : 'Please check your connection and try again in a moment.', true);
@@ -61,10 +76,14 @@ async function search(pin) {
 function showProvider(id) {
   const p = latestProviders.find(x => String(x.provider_id) === id); if (!p) return;
   const photo = photoUrl(p.meal_photo_url || p.primary_photo_url);
-  const packages = (p.packages || []).map(x => `<div class="detail-package"><b>${escapeHtml(x.name)}</b><br><span>${money(x.price_paise)} / ${period(x)}</span></div>`).join('');
+  const packages = packagesFor(p).map(x => `<div class="detail-package"><b>${escapeHtml(label(x.kind))}</b><br><span>${money(x.price_paise)} / ${period(x)}</span><small>${Number(x.duration_days)} days</small></div>`).join('');
   const menu = (p.weekly_menu || []).map(row => `<div class="menu-day"><b>${escapeHtml(days[Number(row.day_of_week || 1)-1] || '')}</b><span>${escapeHtml(label(row.meal_slot))}</span><span>${escapeHtml((row.items || []).map(i => i.name).join(' · '))}</span></div>`).join('');
   $('#provider-detail').innerHTML = `<div class="detail-cover">${photo ? `<img data-provider-image src="${escapeHtml(photo)}" alt="Meal from ${escapeHtml(p.display_name)}">` : '⌖'}</div><div class="detail-title"><h2>${escapeHtml(p.display_name)}</h2><p>${escapeHtml([p.locality,p.city].filter(Boolean).join(', '))} · Zomeal reviewed</p></div><h3>Available packages</h3><div class="detail-packages">${packages || 'Package details are not available yet.'}</div><div class="detail-menu"><h3>Weekly menu</h3>${menu || '<p>Menu details are being prepared.</p>'}</div><p>Manage subscriptions and payments in the Zomeal Android app. Join early access for testing availability.</p><button type="button" class="submit-lead" data-open-lead>Join early access</button>`;
-  imageFallbacks(providerDialog); providerDialog.showModal();
+  const switcher=durationControls.cloneNode(true);switcher.hidden=false;
+  switcher.querySelectorAll('button').forEach(button=>{button.onclick=()=>{selectedDuration=Number(button.dataset.duration);renderCatalogue();showProvider(id)}});
+  $('#provider-detail .detail-packages').before(switcher);
+  if(!packages)$('#provider-detail .detail-packages').textContent=`No approved ${selectedDuration===7?'weekly':'monthly'} package is available from this kitchen.`;
+  imageFallbacks(providerDialog); if(!providerDialog.open)providerDialog.showModal();
 }
 $('#hero-search').addEventListener('submit', e => { e.preventDefault(); search($('#hero-pincode').value.trim()); });
 $('#provider-search').addEventListener('submit', e => { e.preventDefault(); search($('#provider-pincode').value.trim()); });

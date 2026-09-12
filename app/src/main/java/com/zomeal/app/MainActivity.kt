@@ -97,6 +97,9 @@ private object CustomerTypeScale {
 }
 
 private object CustomerProfileStore {
+    var relocating by mutableStateOf(false)
+    fun snapshot()=JSONObject().put("house",house).put("street",street).put("locality",locality).put("landmark",landmark).put("pincode",pincode).put("saved",addressSaved)
+    fun restore(address:JSONObject) { house=address.optString("house");street=address.optString("street");locality=address.optString("locality");landmark=address.optString("landmark");pincode=address.optString("pincode");addressSaved=address.optBoolean("saved",true) }
     var house by mutableStateOf("")
     var street by mutableStateOf("")
     var locality by mutableStateOf("")
@@ -105,6 +108,7 @@ private object CustomerProfileStore {
     var addressSaved by mutableStateOf(false)
 
     fun reset(registrationPincode: String = "") {
+        relocating=false
         house = ""; street = ""; locality = ""; landmark = ""
         pincode = registrationPincode; addressSaved = false
     }
@@ -504,6 +508,10 @@ private fun ProviderListScreen() {
     var selectedProvider by remember { mutableStateOf<Provider?>(null) }
     var activeProvider by remember { mutableStateOf<Provider?>(null) }
     var changingProvider by rememberSaveable { mutableStateOf(false) }
+    var relocationAddressBackup by remember { mutableStateOf<JSONObject?>(null) }
+    var relocationLunchBackup by remember { mutableStateOf<Map<Int,SavedCustomerMeal>>(emptyMap()) }
+    var relocationDinnerBackup by remember { mutableStateOf<Map<Int,SavedCustomerMeal>>(emptyMap()) }
+    var relocationKindBackup by remember { mutableStateOf("LUNCH_AND_DINNER") }
     var liveProviders by remember { mutableStateOf<List<Provider>>(emptyList()) }
     var marketplaceLoading by remember { mutableStateOf(false) }
     var marketplaceError by remember { mutableStateOf<String?>(null) }
@@ -512,6 +520,23 @@ private fun ProviderListScreen() {
     var resumePendingPayment by remember { mutableStateOf(false) }
     val requestedPincode = pendingPincode.ifBlank { marketplaceRepository.savedPincode }
     val availableProviders = liveProviders
+
+    fun beginPincodeChange(newPin:String) {
+        relocationAddressBackup=CustomerProfileStore.snapshot()
+        relocationLunchBackup=CustomerMenuStore.lunches.toMap();relocationDinnerBackup=CustomerMenuStore.dinners.toMap()
+        relocationKindBackup=CustomerMenuStore.packageKind
+        CustomerProfileStore.reset(newPin);CustomerProfileStore.relocating=true
+        pendingPincode=newPin;selectedProvider=null;changingProvider=activeProvider!=null
+        showDiscoveryProfile=false;showNoSubscriptionHome=false;pendingCheckoutState=null
+        query="";filter=DietFilter.ALL;liveProviders=emptyList()
+    }
+    fun cancelProviderBrowse() {
+        relocationAddressBackup?.let{CustomerProfileStore.restore(it);pendingPincode=it.optString("pincode")
+            CustomerMenuStore.lunches.clear();CustomerMenuStore.lunches.putAll(relocationLunchBackup)
+            CustomerMenuStore.dinners.clear();CustomerMenuStore.dinners.putAll(relocationDinnerBackup)
+            CustomerMenuStore.packageKind=relocationKindBackup}
+        relocationAddressBackup=null;CustomerProfileStore.relocating=false;selectedProvider=null;changingProvider=false
+    }
 
     fun refreshMarketplace() {
         if (!requestedPincode.matches(Regex("\\d{6}"))) {
@@ -654,7 +679,7 @@ private fun ProviderListScreen() {
                 onVerified = { otp,complete ->
                     marketplaceRepository.completeAuthentication(pendingMobile,otp){auth->
                         if(!auth.success){complete(auth.message?:"OTP verification failed");return@completeAuthentication}
-                        marketplaceRepository.saveRegistrationProfile(pendingFullName,pendingMobile){profileError->
+                        marketplaceRepository.saveRegistrationProfile(pendingFullName,pendingMobile,if(pendingIsLogin) "" else pendingPincode){profileError->
                             if(profileError!=null){complete(profileError);return@saveRegistrationProfile}
                             fun continueRegistration(){
                                 if (!pendingIsLogin) {
@@ -734,6 +759,10 @@ private fun ProviderListScreen() {
         return
     }
 
+    if (showDiscoveryProfile) {
+        CustomerAccountEditor(onBack={showDiscoveryProfile=false},onChangePincode=::beginPincodeChange)
+        return
+    }
     activeProvider?.takeUnless { changingProvider }?.let { provider ->
         ActiveSubscriberHome(provider, onBrowseProviders = {
             changingProvider = true
@@ -742,7 +771,7 @@ private fun ProviderListScreen() {
             // fresh approved catalogue whenever an active subscriber starts a
             // provider change instead of reusing URLs loaded earlier in the day.
             refreshMarketplace()
-        }, onLogout = {
+        }, onChangePincode = ::beginPincodeChange, onLogout = {
             marketplaceRepository.signOut()
             activeProvider = null
             selectedProvider = null
@@ -758,6 +787,7 @@ private fun ProviderListScreen() {
     if (showNoSubscriptionHome) {
         NoSubscriptionHomeScreen(
             hasSavedPlan = pendingCheckoutState != null,
+            onProfile = { showDiscoveryProfile=true },
             onFindPlan = { showNoSubscriptionHome = false },
             onResumePlan = { showNoSubscriptionHome = false; resumePendingPayment = true },
             onLogout = { marketplaceRepository.signOut();showNoSubscriptionHome = false; signupComplete = false; awaitingOtp = false; showLogin = true }
@@ -777,7 +807,7 @@ private fun ProviderListScreen() {
         return
     }
 
-    BackHandler(enabled = changingProvider && selectedProvider == null) { changingProvider = false }
+    BackHandler(enabled = (changingProvider||CustomerProfileStore.relocating) && selectedProvider == null) { cancelProviderBrowse() }
 
     BackHandler(enabled = selectedProvider != null) { selectedProvider = null }
     selectedProvider?.let { provider ->
@@ -785,6 +815,10 @@ private fun ProviderListScreen() {
             provider = provider,
             onBack = { selectedProvider = null },
             onActivated = {
+                if(CustomerProfileStore.relocating) {
+                    CustomerProfileStore.relocating=false;relocationAddressBackup=null
+                    marketplaceRepository.savePincode(CustomerProfileStore.pincode)
+                }
                 if (changingProvider) {
                     activeProvider = provider
                     changingProvider = false
@@ -793,8 +827,11 @@ private fun ProviderListScreen() {
                     activeProvider = provider
                     selectedProvider = null
                 }
+                marketplaceRepository.activeSubscription{subscription,_->if(subscription!=null)restoreSubscription(subscription)}
             },
             onPayLater = {
+                CustomerProfileStore.relocating=false
+                relocationAddressBackup=null;relocationLunchBackup=emptyMap();relocationDinnerBackup=emptyMap()
                 activeProvider = null
                 selectedProvider = null
                 showNoSubscriptionHome = true
@@ -821,22 +858,6 @@ private fun ProviderListScreen() {
         }.let { list -> if (sortByRating) list.sortedByDescending { it.rating } else list }
     }
 
-    if (showDiscoveryProfile) {
-        DiscoveryAccountDialog(
-            pincode = pendingPincode.ifBlank { "Not set" },
-            onDismiss = { showDiscoveryProfile = false },
-            onLogout = {
-                marketplaceRepository.signOut()
-                showDiscoveryProfile = false
-                signupComplete = false
-                awaitingOtp = false
-                selectedProvider = null
-                liveProviders = emptyList()
-                showLogin = true
-            }
-        )
-    }
-
     Scaffold(containerColor = Color.White) { scaffoldPadding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(scaffoldPadding),
@@ -851,7 +872,7 @@ private fun ProviderListScreen() {
                     browseMode = browseMode,
                     onQueryChange = { query = it },
                     onProfile = { showDiscoveryProfile = true },
-                    onBack = if (changingProvider) ({ changingProvider = false }) else null
+                    onBack = if (changingProvider||CustomerProfileStore.relocating) (::cancelProviderBrowse) else null
                 )
             }
             if (marketplaceLoading) item { MarketplaceStatusCard("Finding approved kitchens near you…", false, null) }
@@ -1376,7 +1397,8 @@ private fun ZomealBottomBar(selected: Int, onSelect: (Int) -> Unit) {
         Triple("Home", Icons.Filled.Home, Icons.Outlined.Home),
         Triple("My Plans", Icons.Filled.TakeoutDining, Icons.Outlined.TakeoutDining),
         Triple("Orders", Icons.Filled.ReceiptLong, Icons.Outlined.ReceiptLong),
-        Triple("Profile", Icons.Filled.Person, Icons.Outlined.Person)
+        Triple("Profile", Icons.Filled.Person, Icons.Outlined.Person),
+        Triple("Pause Plan", Icons.Filled.PauseCircle, Icons.Outlined.PauseCircle)
     )
     Box(Modifier.fillMaxWidth().navigationBarsPadding().background(Color.White)) {
         NavigationBar(
@@ -1385,7 +1407,9 @@ private fun ZomealBottomBar(selected: Int, onSelect: (Int) -> Unit) {
             tonalElevation = 8.dp,
             windowInsets = WindowInsets(0, 0, 0, 0)
         ) {
-            items.forEachIndexed { index, item ->
+            // Stable route IDs keep existing Orders/Profile destinations unchanged.
+            listOf(0, 1, 4, 2, 3).forEach { index ->
+                val item = items[index]
                 NavigationBarItem(
                     selected = selected == index,
                     onClick = { onSelect(index) },
@@ -1442,7 +1466,8 @@ private fun ProviderDetailsScreen(provider: Provider, onBack: () -> Unit, onActi
             allPackages.firstOrNull { it.kind==kind && it.durationDays==selectedDuration }
         }
     }
-    var selectedPackage by remember(provider.id, selectedDuration) { mutableIntStateOf(packages.indexOfFirst { it.kind=="LUNCH_AND_DINNER" }.takeIf { it>=0 } ?: 0) }
+    var selectedKind by remember(provider.id) { mutableStateOf("LUNCH_AND_DINNER") }
+    val selectedPackage = packages.indexOfFirst { it.kind==selectedKind }.takeIf { it>=0 } ?: 0
     var menuPackage by remember { mutableStateOf<MealPackage?>(null) }
 
     BackHandler(enabled = menuPackage != null) { menuPackage = null }
@@ -1498,7 +1523,7 @@ private fun ProviderDetailsScreen(provider: Provider, onBack: () -> Unit, onActi
                                     PackageCard(
                                         mealPackage = mealPackage,
                                         selected = selectedPackage == index,
-                                        onSelect = { selectedPackage = index },
+                                        onSelect = { selectedKind = mealPackage.kind },
                                         modifier = Modifier.fillMaxWidth()
                                     )
                                 }
@@ -1513,7 +1538,7 @@ private fun ProviderDetailsScreen(provider: Provider, onBack: () -> Unit, onActi
                                     PackageCard(
                                         mealPackage = mealPackage,
                                         selected = selectedPackage == index,
-                                        onSelect = { selectedPackage = index },
+                                        onSelect = { selectedKind = mealPackage.kind },
                                         modifier = Modifier.weight(1f)
                                     )
                                 }
@@ -1710,7 +1735,7 @@ private fun PackageCard(mealPackage: MealPackage, selected: Boolean, onSelect: (
             Text(mealPackage.meals, color = Muted, fontSize = CustomerTypeScale.Caption, lineHeight = 16.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
             Spacer(Modifier.weight(1f))
             Text(mealPackage.price, color = BrandDark, fontSize = CustomerTypeScale.Title, lineHeight = 22.sp, fontWeight = FontWeight.Black)
-            Text(if(mealPackage.durationDays==7)"/ 7 days" else "/ month", color = Muted, fontSize = CustomerTypeScale.Caption, lineHeight = 13.sp)
+            Text("/ ${mealPackage.durationDays} days", color = Muted, fontSize = CustomerTypeScale.Caption, lineHeight = 13.sp)
             Spacer(Modifier.height(8.dp))
                 OutlinedButton(
                     onClick = onSelect,
@@ -2421,6 +2446,10 @@ private fun ReviewPlanScreen(
     val context = LocalContext.current.applicationContext
     val repository = remember(context) { SupabaseCustomerRepository(context) }
     var changeMessage by remember { mutableStateOf<String?>(null) }
+    var relocationBusy by remember { mutableStateOf(false) }
+    var relocationStart by remember { mutableStateOf(subscriptionStartIso()) }
+    val relocationContext=LocalContext.current
+    BackHandler(enabled=relocationBusy) { /* Wait for the server's atomic confirmation. */ }
 
     BackHandler(enabled = showPayment) { showPayment = false }
     if (showPayment) {
@@ -2448,12 +2477,30 @@ private fun ReviewPlanScreen(
                 Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.width(112.dp)) {
                         Text("Plan estimate", color = Muted, fontSize = CustomerTypeScale.Body)
-                        Text(formatRupees(total), color = BrandDark, fontSize = CustomerTypeScale.Heading, fontWeight = FontWeight.Black)
-                        Text("Choose advance next", color = Muted, fontSize = CustomerTypeScale.Caption)
+                        Text(formatRupees(if(changeProviderMode&&CustomerProfileStore.relocating)basePrice else total), color = BrandDark, fontSize = CustomerTypeScale.Heading, fontWeight = FontWeight.Black)
+                        Text(if(changeProviderMode&&CustomerProfileStore.relocating) "Wallet per meal · Pay ₹0 now" else "Choose advance next", color = Muted, fontSize = CustomerTypeScale.Caption)
                     }
                     Button(
                         onClick = {
-                            if (!changeProviderMode) showPayment = true
+                            if (changeProviderMode && CustomerProfileStore.relocating) {
+                                val subscriptionId=CustomerSubscriptionStore.current?.id.orEmpty()
+                                val currentPrice=provider.packages.firstOrNull{it.id==plan.id}?.pricePaise
+                                if(subscriptionId.isBlank()||currentPrice==null)changeMessage="Reload your subscription and selected package before continuing."
+                                else {
+                                    relocationBusy=true;changeMessage=null
+                                    repository.relocateSubscription(subscriptionId,provider.id,plan.id,
+                                        JSONObject().put("lunch",JSONObject(lunchSelections.mapKeys{it.key.toString()})).put("dinner",JSONObject(dinnerSelections.mapKeys{it.key.toString()})),
+                                        CustomerProfileStore.snapshot(),relocationStart,currentPrice){result,error->
+                                        if(error!=null||result==null){relocationBusy=false;changeMessage=error?:"The move could not be confirmed."}
+                                        else repository.activeSubscription{subscription,refreshError->
+                                            relocationBusy=false
+                                            if(subscription!=null){CustomerSubscriptionStore.current=subscription;onGoHome()}
+                                            else changeMessage=refreshError?:"Move saved. Return Home and refresh your plan."
+                                        }
+                                    }
+                                }
+                            }
+                            else if (!changeProviderMode) showPayment = true
                             else {
                                 val subscriptionId = CustomerSubscriptionStore.current?.id.orEmpty()
                                 if (subscriptionId.isBlank()) changeMessage = "Your active subscription could not be found. Please sign in again."
@@ -2478,13 +2525,15 @@ private fun ReviewPlanScreen(
                                 }
                             }
                         },
-                        enabled = CustomerProfileStore.addressSaved,
+                        enabled = CustomerProfileStore.addressSaved&&!relocationBusy,
                         modifier = Modifier.weight(1f).height(54.dp),
                         shape = RoundedCornerShape(17.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = Brand)
                     ) {
                         Text(
-                            if (!CustomerProfileStore.addressSaved) "Save Address First"
+                            if (relocationBusy) "Confirming…"
+                            else if (!CustomerProfileStore.addressSaved) "Save Address First"
+                            else if (CustomerProfileStore.relocating&&changeProviderMode) "Start fresh plan"
                             else if (changeProviderMode) "Confirm Provider Change"
                             else "Choose payment amount",
                             fontSize = CustomerTypeScale.Body, fontWeight = FontWeight.ExtraBold, modifier = Modifier.weight(1f)
@@ -2501,10 +2550,27 @@ private fun ReviewPlanScreen(
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             changeMessage?.let { item { WalletMessageBanner(it) { changeMessage = null } } }
-            item { ReviewHeader(onBack) }
+            item { ReviewHeader { if(!relocationBusy)onBack() } }
             item { ReviewProviderCard(provider) }
             item { ReviewSectionTitle("Your Selected Plan") }
             item { SelectedPlanCard(plan) }
+            if(changeProviderMode&&CustomerProfileStore.relocating) item {
+                Surface(Modifier.fillMaxWidth().padding(horizontal=18.dp),color=Mist,shape=RoundedCornerShape(16.dp)){
+                    Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)){
+                        Text("Fresh ${plan.durationDays}-day plan",fontWeight=FontWeight.Bold,color=Ink)
+                        Text("Your new plan starts on the chosen date. Old meals from that date are cancelled; earlier committed meals stay unchanged. Your wallet is not charged now. Meals use the new package’s daily prices.",fontSize=CustomerTypeScale.Caption,color=Muted)
+                        OutlinedButton(enabled=!relocationBusy,onClick={
+                            val date=Calendar.getInstance().apply{timeInMillis=subscriptionStartMillis(relocationStart)}
+                            android.app.DatePickerDialog(relocationContext,{_,year,month,day->
+                                relocationStart=String.format(Locale.US,"%04d-%02d-%02d",year,month+1,day)
+                            },date.get(Calendar.YEAR),date.get(Calendar.MONTH),date.get(Calendar.DAY_OF_MONTH)).apply{
+                                datePicker.minDate=subscriptionStartMillis(null)
+                                datePicker.maxDate=Calendar.getInstance().apply{add(Calendar.DAY_OF_YEAR,30)}.timeInMillis
+                            }.show()
+                        }){Text("Start date: ${formatIsoDate(relocationStart)}")}
+                    }
+                }
+            }
             item {
                 WeeklyPreviewCard(
                     showLunch = showLunch,
@@ -2515,7 +2581,7 @@ private fun ReviewPlanScreen(
             }
             item { AddressReviewCard() }
             item { DeliveryInformationCard(provider.name, showLunch, showDinner) }
-            item { PriceDetailsCard(plan, basePrice, platformFee, deliveryFee, discount, total) }
+            if(!CustomerProfileStore.relocating||!changeProviderMode) item { PriceDetailsCard(plan, basePrice, platformFee, deliveryFee, discount, total) }
             item { PoliciesCard() }
         }
     }
@@ -2754,7 +2820,7 @@ private fun AddressReviewCard() {
                 ReviewAddressField("Street / Building *", street, "Street, apartment or building") { street = it }
                 ReviewAddressField("Locality / City *", locality, "Locality and city") { locality = it }
                 ReviewAddressField("Landmark (optional)", landmark, "Nearby landmark") { landmark = it }
-                ReviewAddressField("Pincode *", pincode, "6-digit pincode", numeric = true) { pincode = it.take(6) }
+                ReviewAddressField("Pincode *", pincode, "6-digit pincode", numeric = true, readOnly = true) { }
                 error?.let { Text(it, color = Color(0xFFD64545), fontSize = CustomerTypeScale.Caption) }
                 Button(
                     onClick = {
@@ -2770,19 +2836,20 @@ private fun AddressReviewCard() {
                     },
                     modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp), shape = RoundedCornerShape(13.dp), colors = ButtonDefaults.buttonColors(containerColor = BrandDark)
                 ) { Icon(Icons.Outlined.Save, null, modifier = Modifier.size(20.dp)); Spacer(Modifier.width(6.dp)); Text("Save Delivery Address", fontSize = CustomerTypeScale.BodyLarge, fontWeight = FontWeight.Bold) }
-                Text("Pincode is filled from registration when available. Check your address before continuing.", color = Muted, fontSize = CustomerTypeScale.Body)
+                Text("This is the pincode checked for this kitchen. To change area, return to Profile → Change pincode.", color = Muted, fontSize = CustomerTypeScale.Body)
             }
         }
     }
 }
 
 @Composable
-private fun ReviewAddressField(label: String, value: String, placeholder: String, numeric: Boolean = false, onValueChange: (String) -> Unit) {
+private fun ReviewAddressField(label: String, value: String, placeholder: String, numeric: Boolean = false, readOnly: Boolean = false, onValueChange: (String) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(label, color = Ink, fontSize = CustomerTypeScale.Body, fontWeight = FontWeight.Bold)
         OutlinedTextField(
             value = value,
             onValueChange = { updated -> onValueChange(if (numeric) updated.filter(Char::isDigit) else updated) },
+            readOnly = readOnly,
             modifier = Modifier.fillMaxWidth().heightIn(min = 60.dp), singleLine = numeric,
             minLines = 1,
             placeholder = { Text(placeholder, fontSize = CustomerTypeScale.BodyLarge) },
@@ -2901,13 +2968,14 @@ private data class PaymentMethod(
 private enum class PrototypeState { NONE, LOADING, OFFLINE, SERVER_ERROR, SESSION_EXPIRED, NO_PROVIDERS, PAYMENT_PENDING, PAYMENT_FAILED, PROVIDER_UNAVAILABLE, PACKAGE_UNAVAILABLE, MENU_UNAVAILABLE, TERMS, PRIVACY, REFUND_POLICY, PAUSE_POLICY }
 
 @Composable
-private fun NoSubscriptionHomeScreen(hasSavedPlan:Boolean,onFindPlan: () -> Unit,onResumePlan:()->Unit,onLogout: () -> Unit) {
+private fun NoSubscriptionHomeScreen(hasSavedPlan:Boolean,onFindPlan: () -> Unit,onResumePlan:()->Unit,onProfile:()->Unit,onLogout: () -> Unit) {
     var showWallet by remember { mutableStateOf(false) }
     BackHandler(enabled = showWallet) { showWallet = false }
     if(showWallet){ WalletScreen(onBack={showWallet=false});return }
     Scaffold(containerColor = Color(0xFFFAFCFA)) { padding ->
         LazyColumn(Modifier.fillMaxSize().padding(padding).navigationBarsPadding(), contentPadding = PaddingValues(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             item { NoPlanHeader(onLogout,onWallet={showWallet=true}) }
+            item { ProfileMenuCard(listOf(Triple(Icons.Outlined.Person,"Profile & legal","Edit account details, delivery pincode and read policies"))){onProfile()} }
             item { NoPlanHero(hasSavedPlan,onFindPlan,onResumePlan,onWallet={showWallet=true}) }
             item { HomeDiscoveryBanners(onFindPlan, { showWallet = true }, onFindPlan) }
             item { NoPlanBenefits() }
@@ -2997,10 +3065,10 @@ private fun NoSubscriptionHomeScreen(hasSavedPlan:Boolean,onFindPlan: () -> Unit
     Surface(Modifier.fillMaxWidth().padding(horizontal = 18.dp), color = Color.White, shape = RoundedCornerShape(16.dp)) { Column(Modifier.padding(13.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { Text("Policies & Legal", color = Ink, fontSize = CustomerTypeScale.Caption, fontWeight = FontWeight.ExtraBold); listOf(PrototypeState.TERMS to "Terms of Service", PrototypeState.PRIVACY to "Privacy Policy", PrototypeState.REFUND_POLICY to "Refund & Cancellation", PrototypeState.PAUSE_POLICY to "Subscription Pause Policy").forEach { item -> Row(Modifier.fillMaxWidth().clickable { onOpen(item.first) }.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Outlined.Description, null, tint = Brand, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(8.dp)); Text(item.second, color = Ink, fontSize = CustomerTypeScale.Caption, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)); Icon(Icons.Filled.ChevronRight, null, tint = Muted, modifier = Modifier.size(16.dp)) } } } }
 }
 
-@Composable private fun LegalPolicyScreen(state: PrototypeState, onBack: () -> Unit) {
-    val title = when (state) { PrototypeState.TERMS -> "Terms of Service"; PrototypeState.PRIVACY -> "Privacy Policy"; PrototypeState.REFUND_POLICY -> "Refund & Cancellation"; else -> "Subscription Pause Policy" }
+@Composable private fun LegalPolicyScreen(state: PrototypeState, onBack: () -> Unit, policyOverride:String?=null) {
     val context = LocalContext.current
-    val policyId = when(state) { PrototypeState.TERMS -> "terms"; PrototypeState.PRIVACY -> "privacy"; PrototypeState.REFUND_POLICY -> "refund"; else -> "pause" }
+    val policyId = policyOverride ?: when(state) { PrototypeState.TERMS -> "terms"; PrototypeState.PRIVACY -> "privacy"; PrototypeState.REFUND_POLICY -> "refund"; else -> "pause" }
+    val title = remember(policyId) { JSONObject(context.assets.open("legal-policies.json").bufferedReader().use{it.readText()}).getJSONObject("policies").getJSONObject(policyId).getString("title") }
     val sections = remember(policyId) {
         val data = org.json.JSONObject(context.assets.open("legal-policies.json").bufferedReader().use { it.readText() })
         val rows = data.getJSONObject("policies").getJSONObject(policyId).getJSONArray("sections")
@@ -3825,7 +3893,7 @@ private fun WhatsNextSection() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ActiveSubscriberHome(provider: Provider, onBrowseProviders: () -> Unit, onLogout: () -> Unit) {
+private fun ActiveSubscriberHome(provider: Provider, onBrowseProviders: () -> Unit, onChangePincode:(String)->Unit, onLogout: () -> Unit) {
     val context=LocalContext.current.applicationContext
     val hostActivity = LocalContext.current as? androidx.activity.ComponentActivity
     var resumed by remember { mutableIntStateOf(0) }
@@ -4020,14 +4088,18 @@ private fun ActiveSubscriberHome(provider: Provider, onBrowseProviders: () -> Un
         SupportCentreScreen(onBack = { showSupportScreen = false })
         return
     }
+    fun selectBottomNavigation(index: Int) {
+        if (index == 4) showPauseScreen = true else selectedNav = index
+    }
     when (selectedNav) {
         1 -> { if(showBalancePayment) BalancePaymentScreen(onBack={showBalancePayment=false},onPaid={repository.activeSubscription{subscription,_->if(subscription!=null)CustomerSubscriptionStore.current=subscription;showBalancePayment=false}})
-            else MyPlanScreen(provider, onNav = { selectedNav = it }, onSupport = { showSupportScreen = true }, onWeeklyMenu = { showFullWeeklyMenu = true }, onProviderDetails={showSubscribedProviderDetails=true}, onBrowseProviders = onBrowseProviders,onPayBalance={showBalancePayment=true},onPause={showPauseScreen=true}); return }
-        2 -> { OrdersScreen(provider, onNav = { selectedNav = it }, onSupport = { showSupportScreen = true }); return }
+            else MyPlanScreen(provider, onNav = ::selectBottomNavigation, onSupport = { showSupportScreen = true }, onWeeklyMenu = { showFullWeeklyMenu = true }, onProviderDetails={showSubscribedProviderDetails=true}, onBrowseProviders = onBrowseProviders,onPayBalance={showBalancePayment=true},onPause={showPauseScreen=true},onChangePincode=onChangePincode); return }
+        2 -> { OrdersScreen(provider, onNav = ::selectBottomNavigation, onSupport = { showSupportScreen = true }); return }
         3 -> {
             ProfileScreen(
                 providerName = provider.name,
-                onNav = { selectedNav = it },
+                onChangePincode = onChangePincode,
+                onNav = ::selectBottomNavigation,
                 onWallet = { showWalletScreen = true },
                 onSupport = { showSupportScreen = true },
                 onBrowseProviders = onBrowseProviders,
@@ -4039,9 +4111,7 @@ private fun ActiveSubscriberHome(provider: Provider, onBrowseProviders: () -> Un
 
     Scaffold(
         containerColor = Color(0xFFFAFCFA),
-        bottomBar = { ZomealBottomBar(selectedNav) { index ->
-            selectedNav = index
-        } }
+        bottomBar = { ZomealBottomBar(selectedNav, ::selectBottomNavigation) }
     ) { padding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(padding),
@@ -4111,9 +4181,8 @@ private fun ActiveSubscriberHome(provider: Provider, onBrowseProviders: () -> Un
                     onUpgrade = { selectedNav = 1 }, onReferral = { showWalletScreen = true }, onProviders = onBrowseProviders
                 )
             }
-            item {
+            if (reviewableMeal != null) item {
                 SubscriberQuickActions(
-                    onPause = { showPauseScreen = true },
                     reviewMeal = reviewableMeal,
                     onReview = { selectedReviewMeal=reviewableMeal }
                 )
@@ -4770,7 +4839,7 @@ private fun BalancePaymentScreen(onBack:()->Unit,onPaid:()->Unit){
 }
 
 @Composable
-private fun MyPlanScreen(provider: Provider, onNav: (Int) -> Unit, onSupport: () -> Unit, onWeeklyMenu: () -> Unit, onProviderDetails:()->Unit, onBrowseProviders: () -> Unit,onPayBalance:()->Unit,onPause:()->Unit) {
+private fun MyPlanScreen(provider: Provider, onNav: (Int) -> Unit, onSupport: () -> Unit, onWeeklyMenu: () -> Unit, onProviderDetails:()->Unit, onBrowseProviders: () -> Unit,onPayBalance:()->Unit,onPause:()->Unit,onChangePincode:(String)->Unit) {
     val context = LocalContext.current.applicationContext
     val repository = remember(context) { SupabaseCustomerRepository(context) }
     val subscription = CustomerSubscriptionStore.current
@@ -4843,7 +4912,7 @@ private fun MyPlanScreen(provider: Provider, onNav: (Int) -> Unit, onSupport: ()
             }
         }
     )
-    if (editAddress) ProfileAddressDialog { editAddress = false }
+    if (editAddress) ProfileAddressDialog(onDismiss={editAddress=false},onChangePincode=onChangePincode)
     if (showCancelDialog && !confirmCancellation) AlertDialog(
         onDismissRequest = { showCancelDialog = false },
         icon = { Icon(Icons.Outlined.SwapHoriz, null, tint = Brand) },
@@ -5829,7 +5898,7 @@ private fun SupportCentreScreen(onBack: () -> Unit) {
             item { AppSectionHeader("Support Centre", "Quick help for every meal and payment", Icons.Outlined.SupportAgent, onBack) }
             item { Surface(Modifier.fillMaxWidth().padding(horizontal = 18.dp), color = Mist, shape = RoundedCornerShape(18.dp)) { Text("Direct support channels will appear here after Zomeal publishes verified contact details. No ticket has been created.", color = Muted, fontSize = CustomerTypeScale.Caption, lineHeight = 15.sp, modifier = Modifier.padding(15.dp)) } }
             item { SectionTitle("Frequently asked questions") }
-            items(listOf("How do I pause a meal?" to "Open Home → Pause Plan, select dates and choose lunch, dinner or both.", "Can I change tomorrow’s menu?" to "Yes, until the provider’s menu cut-off time shown in My Plan.", "When will a refund arrive?" to "Eligible refunds return to the original payment method within 5–7 working days.").withIndex().toList()) { indexed ->
+            items(listOf("How do I pause a meal?" to "Tap Pause Plan in the bottom navigation, select dates and choose lunch, dinner or both.", "Can I change tomorrow’s menu?" to "Yes, until the provider’s menu cut-off time shown in My Plan.", "When will a refund arrive?" to "Eligible refunds return to the original payment method within 5–7 working days.").withIndex().toList()) { indexed ->
                 Surface(Modifier.fillMaxWidth().padding(horizontal = 18.dp).clickable { expanded = if (expanded == indexed.index) null else indexed.index }, color = Color.White, shape = RoundedCornerShape(13.dp), border = androidx.compose.foundation.BorderStroke(1.dp, Border)) { Column(Modifier.padding(12.dp)) { Row { Text(indexed.value.first, color = Ink, fontSize = CustomerTypeScale.Caption, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)); Icon(if (expanded == indexed.index) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown, null, tint = Brand, modifier = Modifier.size(17.dp)) }; if (expanded == indexed.index) Text(indexed.value.second, color = Muted, fontSize = CustomerTypeScale.Caption, modifier = Modifier.padding(top = 7.dp)) } }
             }
         }
@@ -5855,12 +5924,18 @@ private fun ProfileScreen(
     onWallet: () -> Unit,
     onSupport: () -> Unit,
     onBrowseProviders: () -> Unit,
+    onChangePincode: (String) -> Unit,
     onLogout: () -> Unit
 ) {
     val profileContext=LocalContext.current.applicationContext
     val subscriptionRepository = remember(profileContext) { SupabaseCustomerRepository(profileContext) }
     var dialog by remember { mutableStateOf<String?>(null) }
     var editAddress by remember { mutableStateOf(false) }
+    var editProfile by remember { mutableStateOf(false) }
+    var legalPage by remember { mutableStateOf<String?>(null) }
+    BackHandler(enabled=editProfile||legalPage!=null){editProfile=false;legalPage=null}
+    legalPage?.let{LegalPolicyScreen(PrototypeState.TERMS,{legalPage=null},it);return}
+    if(editProfile){CustomerAccountEditor(onBack={editProfile=false},onChangePincode=onChangePincode);return}
     var subscriptionAction by remember { mutableStateOf<String?>(null) }
     var requestSubmitted by remember { mutableStateOf<String?>(null) }
     var requestError by remember { mutableStateOf<String?>(null) }
@@ -5869,6 +5944,7 @@ private fun ProfileScreen(
             item { AppSectionHeader("Profile", "Your account, preferences and security", Icons.Outlined.Person) { onNav(0) } }
             item { ProfileIdentityCard() }
             item { SectionTitle("Account") }
+            item { ProfileMenuCard(listOf(Triple(Icons.Outlined.Edit,"Edit profile","Name, delivery address and pincode"))) { editProfile=true } }
             item { ProfileMenuCard(listOf(Triple(Icons.Outlined.LocationOn, "Saved address", if (CustomerProfileStore.addressSaved) CustomerProfileStore.completeAddress else "Add your delivery address"), Triple(Icons.Outlined.AccountBalanceWallet, "Zomeal Wallet", "View live balance and transactions"))) { label -> when (label) { "Zomeal Wallet" -> onWallet(); else -> editAddress = true } } }
             requestSubmitted?.let { message ->
                 item {
@@ -5883,11 +5959,12 @@ private fun ProfileScreen(
             }
             requestError?.let { message -> item { MarketplaceStatusCard("Subscription request needs attention",true,message) } }
             item { SectionTitle("Help & settings") }
+            item { CustomerLegalLinks { legalPage=it } }
             item { ProfileMenuCard(listOf(Triple(Icons.Outlined.SupportAgent, "Support Centre", "Get help with your subscription"))) { onSupport() } }
             item { OutlinedButton(onClick = { dialog = "Log out" }, modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp).height(43.dp), colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFD64545))) { Icon(Icons.Outlined.Logout, null, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(6.dp)); Text("Log out", fontSize = CustomerTypeScale.Caption, fontWeight = FontWeight.Bold) } }
         }
     }
-    if (editAddress) ProfileAddressDialog(onDismiss = { editAddress = false })
+    if (editAddress) ProfileAddressDialog(onDismiss = { editAddress = false },onChangePincode={editAddress=false;onChangePincode(it)})
     subscriptionAction?.let { action ->
         val changingProvider = action == "Change service provider"
         AlertDialog(
@@ -5929,7 +6006,73 @@ private fun ProfileScreen(
 }
 
 @Composable
-private fun ProfileAddressDialog(onDismiss: () -> Unit) {
+private fun CustomerLegalLinks(onOpen:(String)->Unit) {
+    val context=LocalContext.current
+    val policies=remember{JSONObject(context.assets.open("legal-policies.json").bufferedReader().use{it.readText()}).getJSONObject("policies")}
+    val ids=listOf("terms","privacy","refund","pause","account-deletion","contact","provider-terms").filter{policies.has(it)}
+    ProfileMenuCard(ids.map{Triple(Icons.Outlined.Description,policies.getJSONObject(it).getString("title"),"Read Zomeal’s published policy")}){label->
+        ids.firstOrNull{policies.getJSONObject(it).getString("title")==label}?.let(onOpen)
+    }
+}
+
+@Composable
+private fun CustomerAccountEditor(onBack:()->Unit,onChangePincode:(String)->Unit) {
+    val context=LocalContext.current
+    val repository=remember{SupabaseCustomerRepository(context.applicationContext)}
+    var name by remember{mutableStateOf(repository.savedFullName)}
+    var phone by remember{mutableStateOf(repository.savedPhone)}
+    var pin by remember{mutableStateOf(CustomerProfileStore.pincode.ifBlank{repository.savedPincode})}
+    var loaded by remember{mutableStateOf(false)}
+    var busy by remember{mutableStateOf(false)}
+    var status by remember{mutableStateOf<String?>(null)}
+    var editingAddress by remember{mutableStateOf(false)}
+    var policy by remember{mutableStateOf<String?>(null)}
+    var reload by remember{mutableIntStateOf(0)}
+    BackHandler{if(policy!=null)policy=null else if(!busy)onBack()}
+    LaunchedEffect(reload){repository.profileDetails{result,error->
+        loaded=error==null&&result!=null;status=error
+        if(loaded){name=result!!.optString("full_name").takeUnless{it=="null"}.orEmpty();phone=repository.savedPhone;pin=repository.savedPincode
+            result.optJSONObject("address")?.let{CustomerProfileStore.restore(it)}}
+    }}
+    policy?.let{LegalPolicyScreen(PrototypeState.TERMS,{policy=null},it);return}
+    Scaffold(containerColor=Color(0xFFFAFCFA)){padding->
+        LazyColumn(Modifier.fillMaxSize().padding(padding).navigationBarsPadding(),contentPadding=PaddingValues(bottom=24.dp),verticalArrangement=Arrangement.spacedBy(12.dp)){
+            item{AppSectionHeader("Your profile","Account details and delivery area",Icons.Outlined.Person){if(!busy)onBack()}}
+            item{Surface(Modifier.fillMaxWidth().padding(horizontal=18.dp),color=Color.White,shape=RoundedCornerShape(18.dp)){
+                Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(12.dp)){
+                    OutlinedTextField(value=name,onValueChange={name=it.take(100)},label={Text("Full name")},enabled=loaded&&!busy,singleLine=true,modifier=Modifier.fillMaxWidth())
+                    OutlinedTextField(value=phone,onValueChange={},label={Text("Verified mobile number")},readOnly=true,singleLine=true,modifier=Modifier.fillMaxWidth())
+                    Text("Your login number is protected. Contact support if you need to change it.",color=Muted,fontSize=CustomerTypeScale.Caption)
+                    Button(onClick={busy=true;status=null;repository.updateProfile(name){_,error->busy=false;status=error?:"Profile saved"}},enabled=loaded&&!busy&&name.trim().length>=2,modifier=Modifier.fillMaxWidth()){
+                        Text(if(busy)"Saving…" else "Save profile")
+                    }
+                    if(!loaded)TextButton(onClick={reload++}){Text("Retry loading profile")}
+                    status?.let{Text(it,color=Muted,fontSize=CustomerTypeScale.Caption)}
+                }
+            }}
+            item{ProfileMenuCard(listOf(Triple(Icons.Outlined.LocationOn,"Delivery address",CustomerProfileStore.completeAddress.ifBlank{"Add address"}))){editingAddress=true}}
+            item{Surface(Modifier.fillMaxWidth().padding(horizontal=18.dp),color=Mist,shape=RoundedCornerShape(18.dp)){
+                Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(10.dp)){
+                    Text("Change delivery pincode",fontWeight=FontWeight.Bold,color=Ink,fontSize=CustomerTypeScale.BodyLarge)
+                    Text("Check kitchens → choose a package → set your weekly menu → enter the new address → confirm a fresh 7/30-day plan. Your wallet stays unchanged.",color=Muted,fontSize=CustomerTypeScale.Caption)
+                    OutlinedTextField(value=pin,onValueChange={pin=it.filter(Char::isDigit).take(6)},label={Text("New pincode")},singleLine=true,keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Number),modifier=Modifier.fillMaxWidth())
+                    Button(onClick={busy=true;status=null;repository.marketplace(pin){providers,error->
+                        busy=false
+                        if(error!=null)status=error else if(providers.isEmpty())status="No approved kitchens serve this pincode. Your current plan is unchanged."
+                        else onChangePincode(pin)
+                    }},enabled=loaded&&!busy&&pin.matches(Regex("[1-9][0-9]{5}"))&&pin!=repository.savedPincode,modifier=Modifier.fillMaxWidth()){Text(if(busy)"Checking…" else "Check kitchens & choose plan")}
+                    status?.takeUnless{it=="Profile saved"}?.let{Text(it,color=Muted,fontSize=CustomerTypeScale.Caption)}
+                }
+            }}
+            item{SectionTitle("Policies & legal")}
+            item{CustomerLegalLinks{policy=it}}
+        }
+    }
+    if(editingAddress)ProfileAddressDialog(onDismiss={editingAddress=false},onChangePincode=onChangePincode)
+}
+
+@Composable
+private fun ProfileAddressDialog(onDismiss: () -> Unit,onChangePincode:(String)->Unit) {
     val context = LocalContext.current.applicationContext
     val repository = remember(context) { SupabaseCustomerRepository(context) }
     var house by remember { mutableStateOf(CustomerProfileStore.house) }
@@ -5939,6 +6082,7 @@ private fun ProfileAddressDialog(onDismiss: () -> Unit) {
     var pincode by remember { mutableStateOf(CustomerProfileStore.pincode) }
     var availability by remember { mutableStateOf<String?>(null) }
     var checking by remember { mutableStateOf(false) }
+    var saveError by remember { mutableStateOf<String?>(null) }
     val serviceable = availability == "Available"
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -5946,7 +6090,8 @@ private fun ProfileAddressDialog(onDismiss: () -> Unit) {
         title = { Text("Change delivery address", fontSize = CustomerTypeScale.BodyLarge, fontWeight = FontWeight.ExtraBold) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                Text("Check availability before replacing the address saved in your profile.", color = Muted, fontSize = CustomerTypeScale.Caption)
+                Text("A new pincode requires a new provider, package, weekly menu and delivery address. Your current plan stays unchanged until you confirm.", color = Muted, fontSize = CustomerTypeScale.Caption)
+                saveError?.let{Text(it,color=Color(0xFFD64545),fontSize=CustomerTypeScale.Caption)}
                 ReviewAddressField("House / Flat number *", house, "House or flat") { house = it; availability = null }
                 ReviewAddressField("Street / Building *", street, "Street or building") { street = it; availability = null }
                 ReviewAddressField("Locality / City *", locality, "Locality and city") { locality = it; availability = null }
@@ -5973,7 +6118,17 @@ private fun ProfileAddressDialog(onDismiss: () -> Unit) {
             }
         },
         confirmButton = {
-            Button(enabled = serviceable, onClick = { CustomerProfileStore.house = house.trim(); CustomerProfileStore.street = street.trim(); CustomerProfileStore.locality = locality.trim(); CustomerProfileStore.landmark = landmark.trim(); CustomerProfileStore.pincode = pincode; CustomerProfileStore.addressSaved = true; onDismiss() }) { Text("Save address", fontSize = CustomerTypeScale.Caption) }
+            Button(enabled = serviceable&&!checking, onClick = {
+                if(pincode!=CustomerProfileStore.pincode){onChangePincode(pincode)}
+                else {
+                    checking=true;saveError=null
+                    repository.updateDeliveryAddress(JSONObject().put("house",house.trim()).put("street",street.trim()).put("locality",locality.trim()).put("landmark",landmark.trim()).put("pincode",pincode)){result,error->
+                        checking=false
+                        if(error!=null)saveError=error
+                        else{result?.optJSONObject("address")?.let{CustomerProfileStore.restore(it)};onDismiss()}
+                    }
+                }
+            }) { Text(if(checking)"Saving…" else if(pincode!=CustomerProfileStore.pincode)"Choose new plan" else "Save address", fontSize = CustomerTypeScale.Caption) }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel", fontSize = CustomerTypeScale.Caption) } }
     )
@@ -6263,16 +6418,15 @@ private fun NutritionOverview(onDetails: () -> Unit) {
 }
 
 @Composable
-private fun SubscriberQuickActions(onPause: () -> Unit, reviewMeal:CustomerMealExperience?, onReview: () -> Unit) {
+private fun SubscriberQuickActions(reviewMeal:CustomerMealExperience?, onReview: () -> Unit) {
     val actions = buildList {
-        add(Triple(Icons.Outlined.PauseCircle, "Pause Plan", "Skip eligible meals"))
         if(reviewMeal != null) add(Triple(Icons.Outlined.RateReview, "Rate this food", "Review a delivered meal"))
     }
     Surface(Modifier.fillMaxWidth().padding(horizontal = 18.dp), color = Color.White, shape = RoundedCornerShape(18.dp)) {
         Row(Modifier.padding(vertical = 15.dp)) {
-            actions.forEachIndexed { index, action ->
-                val enabled=index==0||reviewMeal!=null
-                val onClick=if(index==0)onPause else onReview
+            actions.forEach { action ->
+                val enabled=reviewMeal!=null
+                val onClick=onReview
                 Column(Modifier.weight(1f).clickable(enabled=enabled,onClick = onClick).padding(vertical = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Surface(color = Mist, shape = CircleShape) { Icon(action.first, null, tint = if(enabled)Brand else Muted.copy(alpha=.55f), modifier = Modifier.padding(9.dp).size(17.dp)) }
                     Text(action.second, color = if(enabled)Ink else Muted, fontSize = CustomerTypeScale.Caption, fontWeight = FontWeight.Bold, maxLines = 1)
