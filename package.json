@@ -1,6 +1,6 @@
 {
   "scripts": {
-    "test:accounts": "node --preserve-symlinks --preserve-symlinks-main scripts/test-admin-accounts.cjs && node --preserve-symlinks --preserve-symlinks-main scripts/test-admin-accounts-ui.cjs"
+    "test:accounts": "node --preserve-symlinks --preserve-symlinks-main scripts/test-admin-accounts.cjs && node --preserve-symlinks --preserve-symlinks-main scripts/test-admin-accounts-ui.cjs && node --preserve-symlinks --preserve-symlinks-main scripts/test-customer-directory-ui.cjs"
   },
   "devDependencies": {
     "@electric-sql/pglite": "0.5.8",

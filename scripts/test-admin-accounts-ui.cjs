@@ -12,6 +12,7 @@ const settle=()=>new Promise(resolve=>setImmediate(resolve));
 const click=selector=>{assert.ok(d.querySelector(selector),selector);d.querySelector(selector).click();};
 const submit=el=>el.dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));
 w.ZomealAPI={configured:true,accountAccess:async()=>allowed,
+  customerDirectory:async()=>({total:0,page_size:25,customers:[],as_of_date:'2026-09-20',summary:{registered:0,active:0,paused:0,no_plan:0,total_accounts:0,incomplete:0,inactive:0}}),
   accountSearch:async()=>{if(searchFails)throw new Error('Search unavailable');return{total:1,results:[{kind:'user',id,name:'<img src=x onerror=alert(1)>',phone:'9999999993',status:'ACTIVE'}]};},
   accountDetail:async()=>({profile:{id,full_name:'Test customer'},auth:{phone:'919999999993'},roles:['CUSTOMER'],wallet:{balance_paise:12345},addresses:[],providers:[],subscriptions:[],payments:[],wallet_entries:[],payouts:[],subscription_count:0,payment_count:0,wallet_entry_count:0,payout_count:0,advance_count:0}),
   accountDeletePreview:async()=>({name:'Test customer',allowed:!blockDeletion,scope:'Deletes this login.',counts:{addresses:0},confirmation:`DELETE ${id}`,blockers:['Wallet history must be retained.']}),
@@ -43,7 +44,7 @@ async function main(){
   submit(deleteForm);await settle();await settle();assert.equal(deleted,1);assert.equal(d.querySelector('dialog').open,false);
   assert.match(d.querySelector('.account-cleanup').textContent,/Pending file cleanup/);
   click('[data-job]');await settle();assert.equal(cleanupAttempts,2);assert.equal(d.querySelector('[data-job]'),null);
-  searchFails=true;submit(form);await settle();assert.match(d.querySelector('#accountsView [role=status]').textContent,/Search unavailable/);assert.equal(form.querySelector('button').disabled,false);
+  searchFails=true;submit(form);await settle();assert.match(d.querySelector('.account-layout').previousElementSibling.textContent,/Search unavailable/);assert.equal(form.querySelector('button').disabled,false);
   d.querySelector('#dashboard').classList.add('hidden');await settle();assert.equal(d.querySelector('.account-detail').textContent,'');assert.equal(form.elements.query.value,'');assert.equal(d.querySelector('dialog').textContent,'');
   console.log('PASS: role visibility, navigation, search, XSS escaping, wallet display, blocked deletion, typed confirmation, cleanup failure/retry, errors and logout clearing.');
 }

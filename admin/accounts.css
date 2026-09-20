@@ -1,4 +1,6 @@
 #accountsView {font-size:1rem;line-height:1.55}
+/* Allow the directory table to scroll inside the grid, not widen the page. */
+#dashboard > main {min-width:0}
 #accountsNav.hidden {display:none}
 .account-search {display:flex;align-items:end;gap:1rem;padding:1.4rem;margin-bottom:1.2rem}
 .account-search label {flex:1;font-weight:600}
@@ -36,5 +38,43 @@
 .account-delete::backdrop {background:#10271c99}
 .account-delete label {display:block;margin:1rem 0}
 .account-cleanup {margin-bottom:1rem}
+.account-directory-stats {display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1rem;margin:1.2rem 0}
+.account-directory-stats button {text-align:left;background:#fff;border:1px solid #d7e9dc;border-radius:16px;padding:1.2rem;color:#17352b;font:inherit;cursor:pointer;min-width:0}
+.account-directory-stats strong {display:block;font-size:2rem;line-height:1.3;color:#08783f;margin:.35rem 0}
+.account-directory-stats small {display:block;color:#50635a;font-size:.83rem}
+.account-directory-stats button[aria-pressed=true],.account-directory-filters button[aria-pressed=true] {background:#e5f5eb;border-color:#08783f;box-shadow:inset 0 0 0 1px #08783f}
+.account-directory-definitions {font-size:.88rem;color:#50635a;max-width:1000px;margin:0 0 1.2rem}
+.customer-directory-search {display:flex;gap:.8rem;align-items:end;padding:1.2rem;margin-bottom:1rem}
+.customer-directory-search label {flex:1;font-weight:600;min-width:0}
+.customer-directory-search input {display:block;width:100%;padding:.8rem;margin-top:.4rem;border:1px solid #b9ccc0;border-radius:10px;font:inherit;box-sizing:border-box}
+.customer-directory-search button,.account-directory-refresh,.account-directory-filters button,.account-directory-table button {padding:.65rem 1rem;min-height:44px;border:1px solid #b9ccc0;border-radius:10px;font:inherit;cursor:pointer;background:white;color:#08783f}
+.account-directory-filters {display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:.7rem}
+.account-directory-filters button {font-size:.88rem}
+.account-directory-notice {font-size:.88rem;color:#50635a;margin:.8rem 0}
+.account-directory-table {overflow-x:auto;padding:0}
+.account-directory-table table {width:100%;border-collapse:collapse;font-size:.9rem;min-width:880px}
+.account-directory-table th {background:#edf7f0;color:#365448;text-align:left;font-size:.82rem;white-space:nowrap}
+.account-directory-table th,.account-directory-table td {padding:.9rem .8rem;border-bottom:1px solid #e1e9e3;vertical-align:top}
+.account-directory-table td:first-child {min-width:190px;max-width:260px}
+.account-directory-table td:nth-child(4) {min-width:235px;max-width:340px}
+.account-directory-table strong,.account-directory-table small {display:block;overflow-wrap:anywhere}
+.account-directory-table small {color:#50635a;font-size:.8rem;margin-top:.3rem}
+.account-directory-money {font-weight:700;color:#08783f;white-space:nowrap}
+.account-directory-table button {font-size:.85rem;white-space:nowrap}
+.account-customer-badge {display:inline-block;border-radius:7px;padding:.15rem .45rem;font-size:.76rem;font-weight:600;margin:0 .2rem .3rem 0}
+.account-customer-badge.active {color:#006a37;background:#e5f5eb}
+.account-customer-badge.paused {color:#845600;background:#fff1d8}
+.account-customer-badge.neutral {color:#50635a;background:#eff2f0}
+.account-customer-badge.disabled {color:#922b25;background:#fff0ef}
+.account-directory-empty {padding:1.2rem;margin:0;color:#50635a}
+.account-directory-pages {justify-content:flex-end;margin-bottom:1.5rem;font-size:.9rem}
+.account-other-lookup {margin:1.2rem 0}
+.account-other-lookup>summary {font-weight:600;cursor:pointer;padding:.6rem 0}
+.account-layout.account-detail-only {grid-template-columns:minmax(0,1fr)}
+.account-detail-only>.account-results {display:none}
+#accountsView .hidden {display:none}
+.account-directory-table .sr-only {position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+@media(max-width:1000px){.account-directory-stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:600px){.customer-directory-search{flex-wrap:wrap}.customer-directory-search label{flex-basis:100%}.account-directory-stats{gap:.6rem}.account-directory-stats button{padding:.85rem}.account-directory-stats strong{font-size:1.6rem}.account-directory-pages{justify-content:flex-start}}
 @media(max-width:1000px){.account-layout{grid-template-columns:1fr}.account-results{grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}}
 @media(max-width:600px){.account-search{flex-direction:column;align-items:stretch}.account-fields{grid-template-columns:1fr}.account-card{padding:1rem}}

@@ -5,16 +5,32 @@
   const dashboard = document.querySelector('#dashboard');
   const view = document.createElement('section');
   view.id = 'accountsView'; view.className = 'view hidden';
-  view.innerHTML = `<div class="staff-heading"><div><h2>Users data</h2><p class="muted">Search a phone number or user ID, then select a user or provider to see their details, packages and wallet.</p></div></div>
+  view.innerHTML = `<div class="staff-heading"><div><h2>Users data</h2><p class="muted">Registered customers, current subscriptions and wallet balances in one place.</p></div><button type="button" class="account-directory-refresh">Refresh users</button></div>
+    <div class="account-directory-stats" aria-label="Customer totals"></div>
+    <p class="account-directory-definitions">Registered users have a saved phone number. Active users have an enabled account and an ACTIVE subscription covering today in India. These are account counts, not app downloads or daily app usage.</p>
+    <form class="panel customer-directory-search"><label for="customerDirectoryQuery">Search customers<input id="customerDirectoryQuery" name="query" type="search" maxlength="100" autocomplete="off" placeholder="Name, phone number, pincode or user ID"></label><button type="submit">Search users</button><button type="button" data-clear-directory>Clear</button></form>
+    <div class="account-directory-filters" role="group" aria-label="Filter customers">
+      <button data-customer-filter="ALL" aria-pressed="true">All accounts</button><button data-customer-filter="REGISTERED" aria-pressed="false">Registered</button><button data-customer-filter="ACTIVE" aria-pressed="false">Active subscriptions</button><button data-customer-filter="PAUSED" aria-pressed="false">Paused subscriptions</button><button data-customer-filter="NO_PLAN" aria-pressed="false">No current plan</button><button data-customer-filter="INCOMPLETE" aria-pressed="false">Incomplete profiles</button><button data-customer-filter="INACTIVE" aria-pressed="false">Disabled accounts</button>
+    </div>
+    <p class="account-directory-notice" role="status" aria-live="polite">Open Users data to load customers.</p>
+    <div class="panel account-directory-table" aria-label="Customer directory"></div><div class="account-directory-pages account-pages"></div>
+    <details class="account-other-lookup"><summary>Find a provider or staff account by phone / ID</summary>
     <form class="panel account-search"><label>Phone number or user / provider ID<input name="query" type="search" maxlength="50" autocomplete="off" placeholder="10-digit phone number, +91 number, or full UUID" required></label><button class="primary" type="submit">Search accounts</button></form>
-    <div class="account-cleanup"></div><div class="account-notice" role="status" aria-live="polite">Search to inspect a customer or provider. No accounts are loaded until you search.</div>
-    <div class="account-layout"><aside class="panel account-results" aria-label="Search results"></aside><div class="account-detail"></div></div>`;
+    </details><div class="account-notice account-detail-notice hidden" role="status" aria-live="polite"></div>
+    <div class="account-layout hidden"><aside class="panel account-results" aria-label="Search results"></aside><div class="account-detail" tabindex="-1"></div></div>
+    <div class="account-cleanup"></div>`;
   document.querySelector('#overviewView').parentElement.append(view);
   const dialog = document.createElement('dialog'); dialog.className = 'account-delete';
   dialog.setAttribute('aria-label', 'Confirm permanent account deletion');
   document.body.append(dialog);
-  const form = view.querySelector('form'), results = view.querySelector('.account-results');
-  const detail = view.querySelector('.account-detail'), status = view.querySelector('[role=status]');
+  const form = view.querySelector('.account-search'), results = view.querySelector('.account-results');
+  const detail = view.querySelector('.account-detail'), status = view.querySelector('.account-detail-notice');
+  const directoryForm = view.querySelector('.customer-directory-search');
+  const directoryTable = view.querySelector('.account-directory-table');
+  const directoryStatus = view.querySelector('.account-directory-notice');
+  const directoryStats = view.querySelector('.account-directory-stats');
+  const directoryPages = view.querySelector('.account-directory-pages');
+  let directorySequence=0, directoryPage=0, directoryQuery='', directoryFilter='ALL', cleanupSequence=0;
   let selection = null, searchText = '', searchPage = 0, sequence = 0, accessSequence = 0;
   const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const label = key => key.replace(/_paise$/, ' (₹)').replace(/_/g, ' ').replace(/^./, c => c.toUpperCase());
@@ -29,12 +45,79 @@
   const cards = (heading, rows) => `<section class="panel account-card"><h3>${escape(heading)}</h3>${rows?.length ? rows.map((row,i) => `<details><summary>${escape(row.name || row.full_name || row.id || `${heading} ${i+1}`)}</summary>${fields(row)}</details>`).join('') : '<p>No records.</p>'}</section>`;
   const table = (heading, rows, columns) => `<section class="panel account-card"><h3>${escape(heading)}</h3>${rows?.length ? `<div class="account-table"><table><thead><tr>${columns.map(c=>`<th>${escape(label(c))}</th>`).join('')}<th>Details</th></tr></thead><tbody>${rows.map(row=>`<tr>${columns.map(c=>`<td>${escape(valueText(c,row[c]))}</td>`).join('')}<td><details><summary>View all fields</summary>${fields(row)}</details></td></tr>`).join('')}</tbody></table></div>` : '<p>No records on this page.</p>'}</section>`;
   const notice = (text, error=false) => {status.textContent=text;status.className=error?'account-error':'account-notice';};
+  const dateText = value => {
+    if(!value)return '—';
+    const date=new Date(value.length===10?`${value}T00:00:00+05:30`:value);
+    return Number.isNaN(date.getTime())?'—':new Intl.DateTimeFormat('en-IN',{day:'2-digit',month:'short',year:'numeric',timeZone:'Asia/Kolkata'}).format(date);
+  };
+  function resetDirectory() {
+    ++directorySequence;++cleanupSequence;
+    directoryPage=0;directoryQuery='';directoryFilter='ALL';directoryForm.reset();
+    directoryTable.replaceChildren();directoryStats.replaceChildren();directoryPages.replaceChildren();
+    directoryStatus.textContent='Open Users data to load customers.';
+    directoryForm.querySelector('[type=submit]').disabled=false;
+    view.querySelector('.account-directory-refresh').disabled=false;
+    view.querySelectorAll('[data-customer-filter]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.customerFilter==='ALL')));
+    view.querySelector('.account-layout').classList.add('hidden');status.textContent='';status.classList.add('hidden');
+  }
+  function showDirectoryTotals(summary) {
+    const metrics=[['REGISTERED','Registered users',summary.registered,'Accounts with a saved phone'],['ACTIVE','Active users',summary.active,'Active subscription today'],['PAUSED','Paused users',summary.paused,'Current subscription paused'],['NO_PLAN','No current plan',summary.no_plan,'Registered, no in-period plan']];
+    directoryStats.innerHTML=metrics.map(([filter,title,count,note])=>`<button type="button" data-customer-filter="${filter}" aria-pressed="${directoryFilter===filter}"><span>${title}</span><strong>${escape(count)}</strong><small>${note}</small></button>`).join('');
+  }
+  async function loadDirectory() {
+    const revision=++directorySequence;
+    directoryStatus.className='account-directory-notice';directoryStatus.textContent='Loading customers…';
+    directoryTable.replaceChildren();directoryPages.replaceChildren();
+    directoryForm.querySelector('[type=submit]').disabled=true;view.querySelector('.account-directory-refresh').disabled=true;
+    try {
+      const data=await api.customerDirectory(directoryQuery,directoryFilter,directoryPage);
+      if(revision!==directorySequence||dashboard.classList.contains('hidden'))return;
+      if(directoryPage>0&&directoryPage*data.page_size>=data.total){directoryPage=Math.max(0,Math.ceil(data.total/data.page_size)-1);return loadDirectory();}
+      showDirectoryTotals(data.summary);
+      view.querySelectorAll('[data-customer-filter]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.customerFilter===directoryFilter)));
+      directoryStatus.textContent=`${data.total} matching customer account(s). ${data.summary.total_accounts} accounts overall, including ${data.summary.incomplete} incomplete profile(s) and ${data.summary.inactive} disabled account(s). Totals above are not reduced by search. As of ${dateText(data.as_of_date)} (India).`;
+      if(!data.customers.length){directoryTable.innerHTML='<p class="account-directory-empty">No customers match this search and category. Try All accounts or clear the search.</p>';return;}
+      const stateLabels={ACTIVE:'Active',PAUSED:'Paused',NONE:'No subscription',UPCOMING:'Starts later',EXPIRED:'Expired',COMPLETED:'Completed',CANCELLED:'Cancelled',CANCEL_PENDING:'Cancellation pending',PENDING:'Pending'};
+      const kindLabels={LUNCH_ONLY:'Lunch only',DINNER_ONLY:'Dinner only',LUNCH_AND_DINNER:'Lunch + dinner'};
+      directoryTable.innerHTML=`<table><caption class="sr-only">Customer names, phones, locations, wallets and subscriptions</caption><thead><tr><th scope="col">Customer</th><th scope="col">Phone / location</th><th scope="col">Wallet balance</th><th scope="col">Subscription</th><th scope="col">Joined</th><th scope="col">Details</th></tr></thead><tbody>${data.customers.map((customer,index)=>{
+        const sub=customer.subscription;
+        const state=stateLabels[customer.subscription_state]||customer.subscription_state||'No subscription';
+        const tone=customer.active_subscription?'active':customer.paused_subscription?'paused':'neutral';
+        return `<tr><td><strong>${escape(customer.full_name||'Name not saved')}</strong><small class="account-id">${escape(customer.id)}</small>${!customer.is_registered?'<span class="account-customer-badge paused">Incomplete registration</span>':''}${!customer.account_enabled?'<span class="account-customer-badge disabled">Account disabled</span>':''}${customer.is_test_account?'<span class="account-customer-badge neutral">Test account</span>':''}</td>
+          <td><span>${escape(customer.phone||'Phone not saved')}</span><small>Pincode: ${escape(customer.pincode||'Not saved')}</small>${customer.city?`<small>${escape(customer.city)}</small>`:''}</td>
+          <td class="account-directory-money">${escape(money(customer.balance_paise))}</td>
+          <td><span class="account-customer-badge ${tone}">${escape(state)}</span>${sub?`<strong>${escape(sub.provider_name||'Provider not available')}</strong><small>${escape(sub.package_name||'Package not available')} · ${escape(kindLabels[sub.package_kind]||sub.package_kind||'')}${sub.duration_days?` · ${escape(sub.duration_days)} days`:''}</small><small>${escape(dateText(sub.start_date))} – ${escape(dateText(sub.end_date))}</small>${sub.pause_reason?`<small>Reason: ${escape(sub.pause_reason.replace(/_/g,' ').toLowerCase())}</small>`:''}`:'<small>No subscription purchased yet</small>'}</td>
+          <td>${escape(dateText(customer.registered_at))}</td><td><button type="button" data-customer-index="${index}" aria-label="View details for ${escape(customer.full_name||customer.phone||customer.id)}">View details</button></td></tr>`;
+      }).join('')}</tbody></table>`;
+      directoryTable.querySelectorAll('[data-customer-index]').forEach(button=>button.onclick=()=>{
+        const customer=data.customers[Number(button.dataset.customerIndex)];
+        results.replaceChildren();selection={kind:'user',id:customer.id};
+        view.querySelector('.account-layout').classList.remove('hidden');
+        view.querySelector('.account-layout').classList.add('account-detail-only');
+        notice(`Details for ${customer.full_name||customer.phone||customer.id}`);loadDetail();
+        detail.focus({preventScroll:true});detail.scrollIntoView?.({behavior:'smooth',block:'start'});
+      });
+      directoryPages.innerHTML=`<button type="button" data-directory-prev ${directoryPage===0?'disabled':''}>Previous</button><span>Showing ${directoryPage*data.page_size+1}–${Math.min((directoryPage+1)*data.page_size,data.total)} of ${data.total}</span><button type="button" data-directory-next ${(directoryPage+1)*data.page_size>=data.total?'disabled':''}>Next</button>`;
+      directoryPages.querySelector('[data-directory-prev]').onclick=()=>{directoryPage--;loadDirectory();};
+      directoryPages.querySelector('[data-directory-next]').onclick=()=>{directoryPage++;loadDirectory();};
+    } catch(error) {
+      if(revision!==directorySequence)return;
+      directoryStats.replaceChildren();directoryStatus.className='account-directory-notice account-error';
+      directoryStatus.textContent=`Could not load customers. ${error.message} Use Refresh users to retry. If this is a new deployment, apply the customer-directory database migration.`;
+    } finally {
+      if(revision===directorySequence){directoryForm.querySelector('[type=submit]').disabled=false;view.querySelector('.account-directory-refresh').disabled=false;}
+    }
+  }
+  directoryForm.addEventListener('submit',event=>{event.preventDefault();directoryQuery=directoryForm.elements.query.value.trim();directoryPage=0;loadDirectory();});
+  directoryForm.querySelector('[data-clear-directory]').onclick=()=>{directoryForm.reset();directoryQuery='';directoryPage=0;loadDirectory();};
+  view.querySelector('.account-directory-refresh').onclick=()=>loadDirectory();
+  view.addEventListener('click',event=>{const button=event.target.closest('[data-customer-filter]');if(!button)return;directoryFilter=button.dataset.customerFilter;directoryPage=0;loadDirectory();});
 
   async function checkAccess() {
     const revision=++accessSequence;
     if (dashboard.classList.contains('hidden')) {
       ++sequence; nav.classList.add('hidden'); view.classList.add('hidden');
-      selection=null; results.replaceChildren(); detail.replaceChildren(); view.querySelector('.account-cleanup').replaceChildren(); form.reset(); dialog.close(); dialog.replaceChildren(); return;
+      selection=null; results.replaceChildren(); detail.replaceChildren(); view.querySelector('.account-cleanup').replaceChildren(); form.reset(); dialog.close(); dialog.replaceChildren(); resetDirectory(); return;
     }
     try { const allowed = api.configured && await api.accountAccess(); if(revision===accessSequence) nav.classList.toggle('hidden', !allowed); }
     catch { if(revision===accessSequence) nav.classList.add('hidden'); }
@@ -48,11 +131,12 @@
     document.querySelector('.sidebar').classList.remove('open');
     document.querySelector('#pageTitle').textContent='Users data';
     document.querySelector('#crumb').textContent='Administration / Users data';
-    view.classList.remove('hidden'); form.elements.query.focus(); loadCleanup();
+    view.classList.remove('hidden'); directoryForm.elements.query.focus(); loadDirectory(); loadCleanup();
   });
   form.addEventListener('submit', event=>{event.preventDefault();searchText=form.elements.query.value.trim();searchPage=0;search();});
   async function search() {
     const revision=++sequence; selection=null; detail.replaceChildren(); results.replaceChildren();
+    view.querySelector('.account-layout').classList.remove('hidden','account-detail-only');
     notice('Searching…'); form.querySelector('button').disabled=true;
     try {
       const data=await api.accountSearch(searchText,searchPage); if(revision!==sequence)return;
@@ -104,6 +188,7 @@
           const outcome=await api.accountDelete(target.kind,target.id,deleteForm.elements.confirmation.value,deleteForm.elements.reason.value);
           dialog.close();selection=null;++sequence;detail.replaceChildren();results.replaceChildren();
           notice('Account deleted. Clear the app’s local data before registering again.');
+          loadDirectory();
           if(outcome.cleanup_pending){try{await api.accountCleanup('cleanup',outcome.job_id);}catch{notice('Account deleted. Some uploaded files still need cleanup; use Retry cleanup below.',true);}}
           await loadCleanup();
         }catch(error){dialog.querySelector('[role=status]').textContent=`${error.message} Refresh and check the account before retrying.`;deleteForm.querySelector('[data-cancel]').disabled=false;}
@@ -113,10 +198,11 @@
   }
   async function loadCleanup() {
     const host=view.querySelector('.account-cleanup');
+    const revision=++cleanupSequence;
     try {
-      const data=await api.accountCleanup('list');if(dashboard.classList.contains('hidden'))return;
-      host.innerHTML=data.jobs.length?`<section class="panel account-card"><h3>Pending file cleanup</h3><p>These accounts were deleted. Their uploaded files still need cleanup.</p>${data.jobs.map(j=>`<div class="account-actions"><span class="account-id">${escape(j.target_kind)} ${escape(j.target_id)}</span><button data-job="${escape(j.id)}">Retry cleanup</button></div>`).join('')}</section>`:'';
+      const data=await api.accountCleanup('list');if(revision!==cleanupSequence||dashboard.classList.contains('hidden'))return;
+      host.innerHTML=data.jobs.length?`<details class="panel account-card"><summary>Pending file cleanup (${data.jobs.length})</summary><p>These accounts were deleted. Their uploaded files still need cleanup.</p>${data.jobs.map(j=>`<div class="account-actions"><span class="account-id">${escape(j.target_kind)} ${escape(j.target_id)}</span><button data-job="${escape(j.id)}">Retry cleanup</button></div>`).join('')}</details>`:'';
       host.querySelectorAll('[data-job]').forEach(b=>b.onclick=async()=>{b.disabled=true;try{await api.accountCleanup('cleanup',b.dataset.job);await loadCleanup();}catch(error){notice(error.message,true);b.disabled=false;}});
-    }catch{host.textContent='File-cleanup service unavailable. Deploy admin-account-cleanup to enable cleanup retries.';}
+    }catch{if(revision===cleanupSequence&&!dashboard.classList.contains('hidden'))host.textContent='File-cleanup service unavailable. Deploy admin-account-cleanup to enable cleanup retries.';}
   }
 })();

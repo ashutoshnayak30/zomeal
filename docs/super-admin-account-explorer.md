@@ -8,6 +8,53 @@ checks the same requirements; hiding the navigation is not the security boundary
 Ordinary administrators can no longer grant themselves super-admin access through
 the staff-management function. Deploy its update before enabling the page.
 
+## Customer directory
+
+Opening **Users data** now loads customer accounts automatically in pages of 25.
+The four global counters show **Registered users**, **Active users**, **Paused
+users**, and **No current plan**. Clicking a counter filters the directory; the
+same filters and **All accounts**, **Incomplete profiles**, and **Disabled
+accounts** are available below the search box. Search accepts names, phone
+numbers (including +91 or partial numbers), pincodes and user IDs. Global totals
+stay unchanged during a search; the matching count and page range are separate.
+
+Definitions:
+
+- Registered: a customer account with a saved valid-format Indian phone number.
+  This includes legacy test registrations. It does not assert phone verification.
+- Incomplete: customer account without such a phone. It remains visible but is
+  not counted in registered users. Missing names/phones are shown honestly.
+- Active: a registered, enabled account with an `ACTIVE` subscription whose
+  inclusive start/end dates cover today in `Asia/Kolkata`.
+- Paused: the same date/account requirements with a `PAUSED` subscription.
+- No current plan: registered, with no `ACTIVE`, `PAUSED` or `CANCEL_PENDING` plan
+  covering today. Future plans are labelled **Starts later**, stale active plans
+  **Expired**, and completed/cancelled plans retain their labels. This is not
+  mutually exclusive with **Disabled accounts**.
+
+Counts are unique account IDs, not unique phones, downloads, devices, or daily
+app usage. Staff and provider-only login accounts are excluded. Providers with
+customer onboarding data or subscription history remain in the customer list.
+Explicit `CUSTOMER_TEST` accounts are labelled; other test accounts cannot be
+reliably inferred from their names and are not silently hidden.
+
+Each row shows name, full phone, pincode/city, wallet balance in rupees, provider,
+package, meal type, duration, subscription dates/status, and account creation
+date. **View details** opens the existing account/ledger/history inspector.
+An in-period subscription takes precedence over future upgrades and historical
+plans. Multiple subscriptions/addresses do not multiply customer rows.
+
+The original exact phone/UUID search remains under **Find a provider or staff
+account by phone / ID**. Pending file cleanup is collapsed at the bottom and its
+retry controls still work. The directory does not delete or change accounts.
+
+Apply `202609200001_admin_customer_directory.sql` and deploy `admin/accounts.js`,
+`admin/accounts.css` and `admin/live.js` together. No customer/provider APK or
+Edge Function change is needed. The new RPC checks `can_manage_accounts()` and
+audits access without saving search text or phone numbers in the audit metadata.
+Anonymous and non-administrator callers cannot read the directory. Records are
+kept in memory and cleared on logout, including late responses.
+
 Search by a complete Indian phone number (10 digits, 91 prefix or +91 prefix),
 user UUID, or provider UUID. Searching a user also finds their linked providers.
 Select the customer or provider result to see its saved profile, addresses or

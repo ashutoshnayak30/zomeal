@@ -58,6 +58,7 @@ async function main() {
   await asUser('');
   await assert.rejects(()=>rpc('super_admin_account_detail',['user',userId,0]),/Administrator access/);
   await asUser(superId);
+  await require('./test-customer-directory.cjs')(db,superId);
   assert.equal((await db.query("select has_function_privilege('anon','public.super_admin_delete_account(text,uuid,text,text)','execute') allowed")).rows[0].allowed,false);
   await db.query('update profiles set is_active=false where id=$1',[superId]);
   await assert.rejects(()=>rpc('super_admin_account_search',['9999999993',0]),/Administrator access/);
