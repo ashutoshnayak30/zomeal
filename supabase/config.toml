@@ -68,6 +68,14 @@ verify_jwt = true
 [functions.send-fcm-notification]
 verify_jwt = true
 
+[functions.dispatch-meal-push]
+# Authenticated using a private DB-generated secret; no user-supplied recipients.
+verify_jwt = false
+
+[functions.dispatch-campaign-push]
+# Private database dispatcher secret; no client-controlled recipients.
+verify_jwt = false
+
 [functions.msg91-send-sms]
 # Supabase Auth calls this before a user JWT exists. The function verifies the
 # signed Standard Webhooks headers instead.
