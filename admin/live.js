@@ -67,6 +67,7 @@ async function datedMenuChanges(id=null,decision=null,note=null){return request(
 async function websiteLeads(status=null,search=null){return request('/rest/v1/rpc/admin_website_leads',{method:'POST',body:{status_filter:status,search_text:search}})}
 async function updateWebsiteLead(id,status){return request('/rest/v1/rpc/admin_update_website_lead',{method:'POST',body:{target_lead:id,target_status:status}})}
 async function businessDashboard(fromDate,toDate){return request('/rest/v1/rpc/admin_business_dashboard',{method:'POST',body:{target_from:fromDate,target_to:toDate}})}
+businessDashboard.workspace=(name,body)=>{if(!['admin_ceo_report','admin_payment_register','admin_customer_action'].includes(name))throw new Error('Unknown workspace action');return request('/rest/v1/rpc/'+name,{method:'POST',body})};
 async function referralSettings(){return request('/rest/v1/rpc/admin_referral_settings',{method:'POST',body:{}})}
 async function updateReferralSettings(values){return request('/rest/v1/rpc/admin_update_referral_settings',{method:'POST',body:values})}
 async function campaignPreview(kind,segment,targets=[],search_text=''){return request('/rest/v1/rpc/admin_campaign_preview',{method:'POST',body:{kind,segment,targets,search_text}})}

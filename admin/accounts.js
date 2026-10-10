@@ -164,6 +164,19 @@
         ${table('Wallet / earnings activity',data.wallet_entries,target.kind==='user'?['created_at','entry_type','amount_paise','description']:['created_at','entry_type','gross_paise','commission_paise','provider_net_paise','available_at'])}
         ${target.kind==='provider'?table('Payout history',data.payouts,['requested_at','amount_paise','status','paid_at'])+table('Advance history',data.advances,['requested_at','amount_paise','recovered_paise','status']):''}`;
       detail.querySelector('[data-refresh]').onclick=()=>loadDetail(page);
+      if(target.kind==='user') {
+        const controls=document.createElement('section');controls.className='panel account-card';
+        controls.innerHTML=`<h3>Customer verification & access</h3><p>Admin review: ${data.profile.admin_reviewed_at?escape(data.profile.admin_reviewed_at):'Not reviewed'}. This does not replace phone OTP verification.</p><p>Account: ${data.profile.is_active?'Enabled':'Blocked'}. Blocking disables new sign-ins and refreshes; an existing access token may remain valid until expiry. Existing meals and wallet funds are not cancelled or deleted.</p><div class="account-actions"><button data-action="VERIFY">Mark profile reviewed</button><button data-action="${data.profile.is_active?'BLOCK':'UNBLOCK'}">${data.profile.is_active?'Block customer':'Unblock customer'}</button></div><p role="status"></p>`;
+        detail.prepend(controls);
+        controls.querySelectorAll('[data-action]').forEach(button=>button.onclick=async()=>{
+          const reason=prompt('Reason for this action (10–500 characters):')?.trim();if(!reason)return;
+          if(reason.length<10||reason.length>500){controls.querySelector('[role=status]').textContent='Enter a reason of 10–500 characters.';return;}
+          if(!confirm(`${button.textContent} for this customer? This action is audited.`))return;
+          controls.querySelectorAll('button').forEach(b=>b.disabled=true);
+          try{await api.businessDashboard.workspace('admin_customer_action',{target_id:target.id,target_action:button.dataset.action,reason});await loadDetail(page);await loadDirectory();}
+          catch(e){controls.querySelector('[role=status]').textContent=e.message;controls.querySelectorAll('button').forEach(b=>b.disabled=false);}
+        });
+      }
       detail.querySelector('[data-delete]').onclick=()=>reviewDeletion(target);
       detail.querySelector('[data-prev]').onclick=()=>loadDetail(page-1);
       detail.querySelector('[data-next]').onclick=()=>loadDetail(page+1);

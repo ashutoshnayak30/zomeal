@@ -1,0 +1,22 @@
+const {JSDOM}=require('jsdom');const fs=require('node:fs');const assert=require('node:assert/strict');
+const dom=new JSDOM(fs.readFileSync('admin/index.html','utf8'),{runScripts:'outside-only',url:'https://admin.example.test'});const w=dom.window,d=w.document;
+d.querySelector('#dashboard').classList.remove('hidden');
+w.HTMLDialogElement.prototype.close=function(){this.open=false};
+w.HTMLDialogElement.prototype.showModal=function(){this.open=true};
+let fail=false;const calls=[];
+w.ZomealAPI={configured:true,accountAccess:async()=>true,customerDirectory:async()=>({customers:[],total:0,summary:{},as_of_date:'2026-10-10'}),accountCleanup:async()=>({jobs:[]}),businessDashboard:{workspace:async(n,p)=>{calls.push([n,p]);if(fail)throw Error('Unavailable');return n==='admin_ceo_report'?{summary:{active_providers:3},ceo:{active_customers:2},from_date:p.target_from,to_date:p.target_to,generated_at:new Date().toISOString()}:{total:1,rows:[{id:'payment',customer:'<img src=x onerror=alert(1)>',provider:'Kitchen',created_at:new Date().toISOString(),amount_paise:5000,status:'CAPTURED'}]}}}};
+w.eval(fs.readFileSync('admin/accounts.js','utf8'));
+const nv=d.createElement('section');nv.id='notificationsView';nv.className='view hidden';nv.innerHTML='<div class="notification-head"></div><div class="meal-reminder-manager"></div><div class="campaign-manager"><form id="campaignForm"><select id="campaignCategory"><option>UPDATE</option><option>OFFER</option><option>REMINDER</option></select></form><div id="campaignList"><article data-category="OFFER"></article><article data-category="UPDATE"></article></div></div><div class="notification-layout"></div>';d.querySelector('#content').append(nv);
+w.eval(fs.readFileSync('admin/workspace.js','utf8'));
+const settle=()=>new Promise(r=>setImmediate(r));
+(async()=>{
+ assert.match(d.querySelector('#accountsNav').textContent,/User Management/);
+ d.querySelector('[data-view=payment-register]').click();await settle();assert.equal(calls.at(-1)[0],'admin_payment_register');
+ assert.match(d.querySelector('.workspace-table').textContent,/<img/);assert.equal(d.querySelector('.workspace-table img'),null);
+ d.querySelector('[data-view=business-report]').click();await settle();assert.match(d.querySelector('#business-reportView').textContent,/Active customers/);
+ fail=true;d.querySelector('#business-reportView form').dispatchEvent(new w.Event('submit',{cancelable:true}));await settle();assert.equal(d.querySelector('.workspace-metrics').textContent,'');assert.match(d.querySelector('#business-reportView .workspace-status').textContent,/Unavailable/);
+ const tabs=nv.querySelectorAll('.workspace-tabs button');tabs[1].click();assert.equal(d.querySelector('#campaignCategory').value,'OFFER');assert.equal(nv.querySelector('[data-category=UPDATE]').hidden,true);assert.equal(nv.querySelector('[data-category=OFFER]').hidden,false);
+ tabs[4].click();assert.equal(nv.querySelector('.notification-layout').classList.contains('hidden'),false);assert.equal(nv.querySelector('.campaign-manager').classList.contains('hidden'),true);
+ d.querySelector('#dashboard').classList.add('hidden');await settle();assert.equal(d.querySelector('.workspace-table').textContent,'');
+ console.log('PASS: workspace navigation, payment escaping, report error clearing, category tabs and logout cleanup');dom.window.close();
+})().catch(e=>{console.error(e);dom.window.close();process.exitCode=1;});

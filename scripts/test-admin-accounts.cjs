@@ -11,7 +11,7 @@ async function main() {
     create function auth.uid() returns uuid language sql stable as $$select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$;
     create function auth.role() returns text language sql stable as $$select 'authenticated'::text$$;
     create function auth.jwt() returns jsonb language sql stable as $$select '{}'::jsonb$$;
-    create table auth.users(id uuid primary key,phone text,email text,raw_user_meta_data jsonb default '{}',raw_app_meta_data jsonb default '{}',created_at timestamptz default now(),last_sign_in_at timestamptz,phone_confirmed_at timestamptz);
+    create table auth.users(id uuid primary key,phone text,email text,raw_user_meta_data jsonb default '{}',raw_app_meta_data jsonb default '{}',created_at timestamptz default now(),last_sign_in_at timestamptz,phone_confirmed_at timestamptz,banned_until timestamptz);
     create table storage.buckets(id text primary key,name text,public boolean,file_size_limit bigint,allowed_mime_types text[]);
     create table storage.objects(id uuid primary key default gen_random_uuid(),bucket_id text,name text,owner uuid,owner_id text,metadata jsonb);
     create function storage.foldername(text) returns text[] language sql as $$select string_to_array($1,'/')$$;`);
@@ -22,10 +22,11 @@ async function main() {
     if(file==='202608140007_fix_mobile_submission_block.sql') continue;
     const sql=fs.readFileSync(path.join(migrations,file),'utf8')
       .replace(/create extension if not exists pgcrypto;/gi,'')
+      .replace(/-- HOSTED DISPATCH START[\s\S]*?-- HOSTED DISPATCH END/g,'')
       // PGlite has no pg_cron. The scheduled function itself remains covered;
       // only Supabase's external five-minute job registration is omitted here.
       .replace(/create extension if not exists pg_cron with schema extensions;\s*do \$\$[\s\S]*?end \$\$;/gi,'');
-    try { await db.exec(sql); } catch(e) {throw new Error(`Migration ${file}: ${e.message}`, {cause:e});}
+    try { await db.exec(sql); } catch(e) {throw new Error(`Migration ${file}: ${e.message} (position ${e.position}; ${e.where||''})`, {cause:e});}
   }
   const superId='10000000-0000-4000-8000-000000000001';
   const adminId='10000000-0000-4000-8000-000000000002';
@@ -58,11 +59,24 @@ async function main() {
   await asUser('');
   await assert.rejects(()=>rpc('super_admin_account_detail',['user',userId,0]),/Administrator access/);
   await asUser(superId);
+  await require('./test-kitchen-book.cjs')(db);
+  await require('./test-provider-staff.cjs')(db);
+  await require('./test-provider-earnings-history.cjs')(db);
+  await require('./test-guest-meals.cjs')(db,superId);
   await require('./test-customer-directory.cjs')(db,superId);
+  await require('./test-meal-charge-push.cjs')(db);
+  await require('./test-notification-schedules.cjs')(db,superId);
+  await require('./test-personal-meal-reminders.cjs')(db,superId);
+  await require('./test-automatic-meal-delivery.cjs')(db);
+  await require('./test-meal-complaints.cjs')(db,superId);
+  await require('./test-menu-sync.cjs')(db,superId);
   assert.equal((await db.query("select has_function_privilege('anon','public.super_admin_delete_account(text,uuid,text,text)','execute') allowed")).rows[0].allowed,false);
   await db.query('update profiles set is_active=false where id=$1',[superId]);
   await assert.rejects(()=>rpc('super_admin_account_search',['9999999993',0]),/Administrator access/);
+  await asUser(''); // Trusted fixture restoration; disabled users cannot reactivate themselves.
   await db.query('update profiles set is_active=true where id=$1',[superId]);
+  await asUser(superId);
+  await require('./test-admin-workspace.cjs')(db,superId);
   for(const phone of ['9999999993','+91 99999 99993','919999999993']) {
     const found=await rpc('super_admin_account_search',[phone,0]);assert.equal(found.total,2);
   }
