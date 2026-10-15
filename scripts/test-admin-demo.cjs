@@ -1,0 +1,42 @@
+const assert=require('node:assert/strict');
+module.exports=async(db,admin)=>{
+ await db.exec('begin');
+ const uid=crypto.randomUUID(),provider=crypto.randomUUID(),owner=crypto.randomUUID(),request=crypto.randomUUID();
+ const as=id=>db.query("select set_config('request.jwt.claim.sub',$1,false)",[id]);
+ const rpc=async payload=>(await db.query('select admin_demo_workspace($1::jsonb) r',[JSON.stringify(payload)])).rows[0].r;
+ const preview=async()=>(await db.query('select provider_demo_preview() r')).rows[0].r;
+ const reject=async(fn,re)=>{await db.exec('savepoint denied');try{await assert.rejects(fn,re);}finally{await db.exec('rollback to savepoint denied;release savepoint denied');}};
+ try{
+  await db.query("insert into auth.users(id,phone) values($1,'918765432109'),($2,'918765432108')",[uid,owner]);
+  await as('');await reject(()=>rpc({action:'list'}),/Super Administrator/);
+  await as(uid);await reject(()=>rpc({action:'credit'}),/Super Administrator/);
+  await as('10000000-0000-4000-8000-000000000002');await reject(()=>rpc({action:'list'}),/Super Administrator/);
+  await as(admin);
+  const lookup=await rpc({action:'lookup',phone:'+91 87654 32109'});assert.equal(lookup.id,uid);
+  await reject(()=>rpc({action:'lookup',phone:'32109'}),/complete/);
+  const payload={action:'credit',phone:'8765432109',customer_id:uid,amount_paise:360000,reason:'Demo screenshot testing',request_id:request};
+  await reject(()=>rpc({...payload,customer_id:owner}),/Account changed/);
+  await reject(()=>rpc({...payload,amount_paise:0}),/Credit must/);
+  const credited=await rpc(payload);assert.equal(credited.balance_paise,360000);
+  assert.equal((await rpc(payload)).already_applied,true);
+  await reject(()=>rpc({...payload,amount_paise:10000}),/already used/);
+  const entries=await db.query('select * from customer_wallet_entries where customer_id=$1',[uid]);assert.equal(entries.rows.length,1);assert.equal(entries.rows[0].description,'Wallet credit');assert.equal(entries.rows[0].metadata.is_test,true);
+  await db.query('update customer_wallets set balance_paise=1000 where customer_id=$1',[uid]);
+  await reject(()=>rpc({action:'reverse',id:request}),/Balance is too low/);
+  await db.query('update customer_wallets set balance_paise=360500 where customer_id=$1',[uid]);
+  assert.equal((await rpc({action:'reverse',id:request})).balance_paise,500);
+  assert.equal((await rpc({action:'reverse',id:request})).already_reversed,true);
+  assert.equal((await db.query('select count(*) n from customer_wallet_entries where customer_id=$1',[uid])).rows[0].n,2);
+  await db.query("insert into providers(id,legal_name,display_name,slug,dietary_type) values($1::uuid,'Demo','Demo kitchen',($1::uuid)::text,'VEG')",[provider]);
+  await db.query("insert into provider_members(provider_id,user_id,member_role,is_active) values($1,$2,'OWNER',true)",[provider,owner]);
+  await reject(()=>rpc({action:'lookup',phone:'8765432108'}),/not provider/);
+  const enable={action:'provider_enable',provider_id:provider,sample_count:12,lunch_paise:6500,dinner_paise:5500};
+  await rpc(enable);await as(uid);assert.equal((await preview()).enabled,false);
+  await as(owner);const demo=await preview();assert.equal(demo.customers.length,12);assert.equal(demo.lunch_paise,6500);assert.match(demo.customers[0].name,/Sample customer/);
+  assert.equal((await db.query('select count(*) n from customer_subscriptions where provider_id=$1',[provider])).rows[0].n,0);
+  await as(admin);await rpc({...enable,action:'provider_disable'});await as(owner);assert.equal((await preview()).enabled,false);
+  await as(admin);await rpc(enable);await db.query("update provider_demo_sessions set expires_at=now()-interval '1 second' where provider_id=$1",[provider]);await as(owner);assert.equal((await preview()).enabled,false);
+  assert.equal((await db.query("select has_table_privilege('authenticated','admin_demo_credits','insert') allowed")).rows[0].allowed,false);
+  console.log('PASS: demo authorization, normalized lookup, identity guard, credit idempotency, reversal/spend safeguards, isolated provider samples, expiry and cleanup');
+ }finally{await db.exec('rollback');await as(admin);}
+};

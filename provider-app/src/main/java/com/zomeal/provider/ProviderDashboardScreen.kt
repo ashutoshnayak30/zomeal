@@ -3,7 +3,6 @@ package com.zomeal.provider
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
@@ -11,284 +10,237 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.json.JSONObject
-import org.json.JSONArray
-import java.text.NumberFormat
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
+import java.util.TimeZone
 
-private val DBrand = Color(0xFF087F43)
-private val DInk = Color(0xFF14221B)
-private val DMuted = Color(0xFF68736D)
-private val DMist = Color(0xFFF0F7F2)
+private val KitchenGreen = Color(0xFF087F43)
+private val KitchenInk = Color(0xFF14221B)
+private val KitchenMuted = Color(0xFF68736D)
 
 @Composable
-fun ProviderDashboardScreen(repository: SupabaseProviderRepository, bannerMessage: String? = null, onDismissBanner: () -> Unit = {}, onOrders: () -> Unit, onEarnings: () -> Unit, onProfile: () -> Unit, onManageBusiness: () -> Unit, onNotifications: () -> Unit, onSignOut: () -> Unit) {
-    var slot by remember { mutableStateOf("LUNCH") }
-    var data by remember { mutableStateOf<JSONObject?>(null) }
-    var loading by remember { mutableStateOf(true) }
-    var error by remember { mutableStateOf<String?>(null) }
-    var updating by remember { mutableStateOf(false) }
-    var updateMessage by remember { mutableStateOf<String?>(null) }
-    var assigningPerson by remember { mutableStateOf<JSONObject?>(null) }
-    var assignmentCount by remember { mutableStateOf("100") }
-    var assignmentMessage by remember { mutableStateOf<String?>(null) }
-    var unreadNotifications by remember { mutableIntStateOf(0) }
-    fun load() {
-        loading = true; error = null
-        repository.loadDailyDashboard(slot) { result, message -> data = result; error = message; loading = false }
-    }
-    LaunchedEffect(slot) { load(); repository.loadNotifications { result, _ -> unreadNotifications=result?.optInt("unread_count")?:0 } }
-    val metrics = data?.optJSONObject("metrics") ?: JSONObject()
-    val isFinal = data?.optBoolean("is_final") == true
-    val active = metrics.optInt("active")
-    val capacity = metrics.optInt("capacity")
-    val gross = metrics.optLong("gross_paise")
-    val commission = data?.optJSONObject("commission") ?: JSONObject()
-    val commissionRate = commission.optDouble("rate_percent",14.0)
-    val commissionPaise = commission.optLong("commission_paise",(gross*commissionRate/100.0).toLong())
-    val previewMode = data?.optBoolean("preview_mode") == true
-    // Kept behind one flag so the post-MVP live tracking workflow can be restored without a rewrite.
-    val liveOrderStatusEnabled = false
-    fun updateTracking(status: String) {
-        if (previewMode) {
-            val copy = JSONObject(data.toString())
-            val copyMetrics = copy.optJSONObject("metrics") ?: JSONObject().also { copy.put("metrics", it) }
-            listOf("preparing", "packing", "ready", "out_for_delivery", "delivered").forEach { copyMetrics.put(it, 0) }
-            copyMetrics.put(status.lowercase(), copyMetrics.optInt("active"))
-            data = copy
-            updateMessage = "Preview updated to ${status.replace('_', ' ').lowercase()}. No customer was notified."
-        } else {
-            updating = true; updateMessage = null
-            repository.updateDailyMealStatus(slot, status) { result ->
-                updating = false
-                if (result.success) { updateMessage = "Customer tracking updated."; load() }
-                else updateMessage = result.message
+fun ProviderDashboardScreen(repository: SupabaseProviderRepository, bannerMessage: String? = null, onDismissBanner: () -> Unit = {}, onOrders: () -> Unit, onEarnings: () -> Unit, onProfile: () -> Unit, onManageBusiness: () -> Unit, onOrdersForSession: (String) -> Unit = { onOrders() }, onNotifications: () -> Unit, onCosts: () -> Unit, onSignOut: () -> Unit) {
+    var selectedSession by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(
+        if (currentAutomaticMealSlot() == "DINNER") "Dinner" else "Lunch"
+    ) }
+    var sessionMenuOpen by remember { mutableStateOf(false) }
+    var lunch by remember { mutableStateOf<JSONObject?>(null) }
+    var dinner by remember { mutableStateOf<JSONObject?>(null) }
+    var lunchUpdated by remember { mutableStateOf("") }
+    var dinnerUpdated by remember { mutableStateOf("") }
+    var lunchError by remember { mutableStateOf<String?>(null) }
+    var dinnerError by remember { mutableStateOf<String?>(null) }
+    var refresh by remember { mutableIntStateOf(0) }
+    var demoAvailable by remember { mutableStateOf(false) }
+    var showDemo by remember { mutableStateOf(false) }
+    var automaticSession by remember { mutableStateOf(currentAutomaticMealSlot()) }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    LaunchedEffect(Unit) {
+        val dayFormat = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply { timeZone = TimeZone.getTimeZone("Asia/Kolkata") }
+        var observedDay = dayFormat.format(Date())
+        while (true) {
+            kotlinx.coroutines.delay(15_000L)
+            val activity = context as? androidx.activity.ComponentActivity
+            if (activity != null && !activity.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)) continue
+            val session = currentAutomaticMealSlot()
+            val day = dayFormat.format(Date())
+            if (session != automaticSession) {
+                automaticSession = session
+                selectedSession = if (session == "DINNER") "Dinner" else "Lunch"
+                refresh++
+            } else if (day != observedDay) {
+                refresh++
             }
+            observedDay = day
         }
     }
-    fun assignBatch() {
-        val person = assigningPerson ?: return
-        val count = assignmentCount.toIntOrNull()?.coerceIn(1, 100) ?: return
-        if (previewMode) {
-            val copy = JSONObject(data.toString())
-            val people = copy.optJSONArray("delivery_people")
-            if (people != null) for (index in 0 until people.length()) {
-                val item = people.optJSONObject(index)
-                if (item?.optString("id") == person.optString("id")) item.put("assigned", count.coerceAtMost(metrics.optInt("active")))
-            }
-            data = copy; assignmentMessage = "Preview batch assigned. Nothing was saved."; assigningPerson = null
-        } else {
-            updating = true; assignmentMessage = null
-            repository.assignDeliveryBatch(person.optString("id"), slot, count) { result ->
-                updating = false
-                if (result.success) { assignmentMessage = "Delivery batch assigned successfully."; assigningPerson = null; load() }
-                else assignmentMessage = result.message
-            }
+    var unread by remember { mutableIntStateOf(0) }
+    var today by remember { mutableStateOf("") }
+    var profile by remember { mutableStateOf<JSONObject?>(null) }
+    val requests = remember { OperationsRequestGate() }
+    DisposableEffect(Unit) { onDispose { requests.invalidate() } }
+    LaunchedEffect(refresh) {
+        val request = requests.next()
+        repository.loadDemoPreview { result, _ -> if(requests.accepts(request)) demoAvailable = result?.optBoolean("enabled") == true }
+        today = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply { timeZone = TimeZone.getTimeZone("Asia/Kolkata") }.format(Date())
+        lunch = null; dinner = null; lunchError = null; dinnerError = null
+        profile = null
+        repository.loadProviderProfileHub { result, _ -> if (requests.accepts(request)) profile = result }
+        repository.loadDailyDashboard("LUNCH", today) { result, error ->
+            if (requests.accepts(request)) { lunch = result; lunchUpdated = kitchenTimestamp(); lunchError = error ?: if (result == null) "Lunch counts could not be loaded." else null }
         }
+        repository.loadDailyDashboard("DINNER", today) { result, error ->
+            if (requests.accepts(request)) { dinner = result; dinnerUpdated = kitchenTimestamp(); dinnerError = error ?: if (result == null) "Dinner counts could not be loaded." else null }
+        }
+        repository.loadNotifications { result, _ -> if (requests.accepts(request)) unread = result?.optInt("unread_count") ?: 0 }
     }
-
-    assigningPerson?.let { person ->
-        AlertDialog(
-            onDismissRequest = { if (!updating) assigningPerson = null },
-            icon = { Icon(Icons.Outlined.DeliveryDining, null, tint = DBrand) },
-            title = { Text("Assign meals to ${person.optString("name").ifBlank { "delivery person" }}") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
-                    Text("Choose how many meals this person will carry on the ${slot.lowercase()} route. Maximum 100 meals per batch.", fontSize = 12.sp, color = DMuted)
-                    OutlinedTextField(value = assignmentCount, onValueChange = { assignmentCount = it.filter(Char::isDigit).take(3) }, label = { Text("Number of meals") }, singleLine = true)
-                }
-            },
-            confirmButton = { Button(onClick = { assignBatch() }, enabled = !updating && assignmentCount.toIntOrNull()?.let { it in 1..100 } == true) { Text("Assign batch") } },
-            dismissButton = { TextButton(onClick = { assigningPerson = null }) { Text("Cancel") } }
-        )
-    }
-
+    if(showDemo) { ProviderDemoScreen(repository) { showDemo = false; refresh++ }; return }
+    val selectedData = if (selectedSession == "Lunch") lunch else dinner
+    val selectedError = if (selectedSession == "Lunch") lunchError else dinnerError
+    val updated = if (selectedSession == "Lunch") lunchUpdated else dinnerUpdated
+    val name = (lunch ?: dinner)?.optString("provider_name").orEmpty().ifBlank { "Your kitchen" }
     Scaffold(
         modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing),
         containerColor = Color(0xFFF7FAF7),
-        bottomBar = { ProviderBottomBar(onOrders, onEarnings, onProfile) }
+        bottomBar = { ProviderNavigation("Dashboard", {}, onOrders, onEarnings, onProfile, onCosts) }
     ) { padding ->
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(padding),
-            contentPadding = PaddingValues(bottom = 18.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
+        LazyColumn(Modifier.fillMaxSize().padding(padding), verticalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(bottom = 16.dp)) {
             item {
-                Column(
-                    Modifier.fillMaxWidth().background(Brush.horizontalGradient(listOf(Color(0xFF047A45), Color(0xFF54AF45)))).padding(20.dp)
-                ) {
+                Column(Modifier.fillMaxWidth().background(Brush.horizontalGradient(listOf(Color(0xFF047A45), Color(0xFF48A743)))).padding(horizontal = 16.dp, vertical = 14.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
-                            Text("zomeal partner", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold)
-                            Text(data?.optString("provider_name").orEmpty().ifBlank { "Provider dashboard" }, color = Color.White.copy(alpha = .88f), fontSize = 13.sp)
+                            Text("$selectedSession preparation", color = Color.White, fontSize = 21.sp, fontWeight = FontWeight.Bold)
+                            Text(name, color = Color.White.copy(alpha = .9f), fontSize = 13.sp)
                         }
-                        IconButton(onClick = { load() }, colors = IconButtonDefaults.iconButtonColors(containerColor = Color.White.copy(alpha = .16f))) {
-                            Icon(Icons.Outlined.Refresh, "Refresh", tint = Color.White)
-                        }
-                        BadgedBox(badge={if(unreadNotifications>0)Badge(containerColor=Color(0xFFE53935)){Text(if(unreadNotifications>99)"99+" else unreadNotifications.toString())}}){IconButton(onClick=onNotifications,colors=IconButtonDefaults.iconButtonColors(containerColor=Color.White.copy(alpha=.16f))){Icon(Icons.Outlined.Notifications,"Notifications",tint=Color.White)}}
-                        IconButton(onClick = onSignOut, colors = IconButtonDefaults.iconButtonColors(containerColor = Color.White.copy(alpha = .16f))) {
-                            Icon(Icons.Outlined.Logout, "Sign out", tint = Color.White)
+                        IconButton(onClick = { refresh++ }) { Icon(Icons.Outlined.Refresh, "Refresh meal counts", tint = Color.White) }
+                        IconButton(onClick = onNotifications) {
+                            BadgedBox(badge = { if (unread > 0) Badge { Text(if (unread > 99) "99+" else unread.toString()) } }) {
+                                Icon(Icons.Outlined.NotificationsNone, "Notifications", tint = Color.White)
+                            }
                         }
                     }
-                    Spacer(Modifier.height(16.dp))
-                    Text("Today's meal operations", color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Bold)
-                    Text(data?.optString("date").orEmpty(), color = Color.White.copy(alpha = .82f), fontSize = 12.sp)
-                    Spacer(Modifier.height(12.dp))
-                    Button(
-                        onClick = onManageBusiness,
-                        colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = DBrand),
-                        shape = RoundedCornerShape(13.dp),
-                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 9.dp)
-                    ) {
-                        Icon(Icons.Outlined.EditNote, null, modifier = Modifier.size(18.dp)); Spacer(Modifier.width(7.dp))
-                        Text("Manage profile, packages & menus", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    }
+                    Text(kitchenDate(today), color = Color.White.copy(alpha = .85f), fontSize = 12.sp)
                 }
             }
             bannerMessage?.let { message -> item {
-                Surface(Modifier.fillMaxWidth().padding(horizontal=16.dp),color=Color(0xFFE7F5EA),shape=RoundedCornerShape(14.dp)) {
-                    Row(Modifier.padding(13.dp),verticalAlignment=Alignment.Top){Icon(Icons.Outlined.CheckCircle,null,tint=DBrand,modifier=Modifier.size(20.dp));Spacer(Modifier.width(8.dp));Text(message,color=DBrand,fontSize=10.sp,lineHeight=15.sp,modifier=Modifier.weight(1f));IconButton(onClick=onDismissBanner,modifier=Modifier.size(24.dp)){Icon(Icons.Outlined.Close,"Dismiss",tint=DMuted,modifier=Modifier.size(16.dp))}}
+                Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(message, Modifier.weight(1f), color = KitchenGreen, fontSize = 12.sp)
+                    IconButton(onClick = onDismissBanner) { Icon(Icons.Outlined.Close, "Dismiss message") }
                 }
             } }
+            if(demoAvailable) item {
+                Card(Modifier.fillMaxWidth().padding(horizontal = 16.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFFE6F4EA))) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Try your kitchen demo", color = KitchenGreen, fontWeight = FontWeight.Bold)
+                        Text("Explore sample customers and practice preparing, packing and delivery. Live orders stay separate.", fontSize = 12.sp)
+                        Button(onClick = { showDemo = true }) { Text("Open demo") }
+                    }
+                }
+            }
             item {
-                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    MealSlotButton("LUNCH", "Lunch", Icons.Outlined.WbSunny, slot == "LUNCH", Modifier.weight(1f)) { slot = "LUNCH" }
-                    MealSlotButton("DINNER", "Dinner", Icons.Outlined.DarkMode, slot == "DINNER", Modifier.weight(1f)) { slot = "DINNER" }
+                Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Box {
+                        OutlinedButton(onClick = { sessionMenuOpen = true }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp), shape = RoundedCornerShape(14.dp)) {
+                            Icon(if (selectedSession == "Lunch") Icons.Outlined.WbSunny else Icons.Outlined.DarkMode, null, Modifier.size(20.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("$selectedSession preparation", modifier = Modifier.weight(1f), fontSize = 14.sp)
+                            Icon(Icons.Outlined.ExpandMore, "Choose cooking session")
+                        }
+                        DropdownMenu(expanded = sessionMenuOpen, onDismissRequest = { sessionMenuOpen = false }) {
+                            listOf("Lunch", "Dinner").forEach { session ->
+                                DropdownMenuItem(
+                                    text = { Text("$session preparation · " + if (session == "Lunch") "Morning" else "Afternoon") },
+                                    onClick = { selectedSession = session; sessionMenuOpen = false },
+                                    leadingIcon = { Icon(if (session == "Lunch") Icons.Outlined.WbSunny else Icons.Outlined.DarkMode, null) }
+                                )
+                            }
+                        }
+                    }
                 }
             }
-            if (loading) item { Box(Modifier.fillMaxWidth().height(180.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = DBrand) } }
-            error?.let { message -> item { DashboardNotice(message, true) } }
-            if (!loading && data != null) {
-                item {
-                    DashboardNotice(
-                        if (previewMode) "Dashboard preview · Your listing is not active, so no customers are notified and operational totals may be zero."
-                        else if (isFinal) "Final ${slot.lowercase()} list · Customer changes are locked for today."
-                        else "Live ${slot.lowercase()} data · Customers may still change choices until ${if (slot == "LUNCH") "7:00 AM" else "4:00 PM"} IST.",
-                        false
-                    )
+            item {
+                KitchenPreparation(selectedSession, selectedData, selectedError, updated, { refresh++ }, repository, profile)
+            }
+            if (selectedData != null && selectedError == null && !selectedData.optBoolean("preview_mode") && selectedData.optJSONObject("metrics")?.has("active") == true) {
+                item { KitchenDelivery(selectedData) { onOrdersForSession(selectedSession.uppercase(Locale.US)) } }
+                item { KitchenProgress(selectedData, selectedSession, repository) { refresh++ } }
+            }
+            item {
+                TextButton(onClick = { onOrdersForSession(selectedSession.uppercase(Locale.US)) }, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).heightIn(min = 48.dp)) {
+                    Icon(Icons.Outlined.ReceiptLong, null, Modifier.size(20.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("View $selectedSession orders")
                 }
-                item {
-                    DashboardSection("Meal summary", "Live subscriptions and today's available capacity") {
-                        Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-                            DashboardMetric("Active meals", active.toString(), Icons.Outlined.Groups, Modifier.weight(1f))
-                            DashboardMetric("Capacity", capacity.toString(), Icons.Outlined.Inventory2, Modifier.weight(1f))
-                        }
-                        Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-                            DashboardMetric("Remaining", metrics.optInt("remaining").toString(), Icons.Outlined.EventAvailable, Modifier.weight(1f))
-                            DashboardMetric("Service areas", metrics.optInt("areas").toString(), Icons.Outlined.LocationOn, Modifier.weight(1f))
-                        }
+            }
+        }
+    }
+}
+
+@Composable
+private fun KitchenPreparation(label: String, data: JSONObject?, error: String?, updated: String, retry: () -> Unit, repository: SupabaseProviderRepository, profile: JSONObject?) {
+    Surface(Modifier.fillMaxWidth().padding(horizontal = 16.dp), color = Color.White, shape = RoundedCornerShape(18.dp)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(if (label == "Lunch") Icons.Outlined.WbSunny else Icons.Outlined.DarkMode, null, tint = KitchenGreen, modifier = Modifier.size(22.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Today's $label", color = KitchenInk, fontSize = 17.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            }
+            when {
+                error != null -> { Text(error, color = Color(0xFFB3261E), fontSize = 13.sp); TextButton(onClick = retry) { Text("Retry counts") } }
+                data == null -> LinearProgressIndicator(Modifier.fillMaxWidth(), color = KitchenGreen)
+                data.optBoolean("preview_mode") -> Text("Kitchen is not active. These are not confirmed cooking quantities.", color = KitchenMuted, fontSize = 13.sp)
+                data.optJSONObject("metrics")?.has("active") != true || data.optJSONObject("metrics")?.isNull("active") == true -> {
+                    Text("Meal totals are unavailable. Refresh before preparing food.", color = Color(0xFFB3261E), fontSize = 13.sp)
+                    TextButton(onClick = retry) { Text("Retry counts") }
+                }
+                else -> {
+                    val metrics = data.optJSONObject("metrics")
+                    val active = metrics?.optInt("active") ?: 0
+                    val final = data.optBoolean("is_final")
+                    Surface(color = if(final) Color(0xFFEAF6EE) else Color(0xFFFFF3D9), shape = RoundedCornerShape(8.dp)) {
+                        Text(if (final) "Final counts" else "Provisional · closes ${operationsCutoff(data)}",
+                            color = if(final) KitchenGreen else Color(0xFF805200), fontSize = 12.sp, modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp))
                     }
-                }
-                item {
-                    DashboardSection("Main-course choices", "Exact quantities to prepare for ${slot.lowercase()}") {
-                        val choices = data?.optJSONArray("choices")
-                        if (choices == null || choices.length() == 0) {
-                            EmptyDashboardLine("No approved main courses or customer selections found for today.")
-                        } else for (index in 0 until choices.length()) {
-                            val choice = choices.optJSONObject(index) ?: continue
-                            ChoiceCount(choice.optString("name"), choice.optInt("count"), active)
-                        }
-                    }
-                }
-                item {
-                    DashboardSection("Exceptions", "Meals excluded from today's preparation count") {
-                        Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-                            DashboardMetric("Paused", metrics.optInt("paused").toString(), Icons.Outlined.PauseCircle, Modifier.weight(1f))
-                            DashboardMetric("Cancelled", metrics.optInt("cancelled").toString(), Icons.Outlined.Cancel, Modifier.weight(1f))
-                        }
-                    }
-                }
-                if (liveOrderStatusEnabled) item {
-                    DashboardSection("Kitchen & delivery progress", "Update these from the daily orders workspace") {
-                        ProgressLine("Preparing", metrics.optInt("preparing"), active, Icons.Outlined.SoupKitchen)
-                        ProgressLine("Packing", metrics.optInt("packing"), active, Icons.Outlined.Inventory2)
-                        ProgressLine("Ready", metrics.optInt("ready"), active, Icons.Outlined.TaskAlt)
-                        ProgressLine("Out for delivery", metrics.optInt("out_for_delivery"), active, Icons.Outlined.DeliveryDining)
-                        ProgressLine("Delivered", metrics.optInt("delivered"), active, Icons.Outlined.CheckCircle)
-                        if (metrics.optInt("unassigned_delivery") > 0) {
-                            Text("⚠ ${metrics.optInt("unassigned_delivery")} meals need a delivery-person assignment", color = Color(0xFFB35B00), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                        }
-                    }
-                }
-                if (liveOrderStatusEnabled) item {
-                    DashboardSection("Update customer tracking", "A single update applies to today's entire ${slot.lowercase()} batch and will appear in the customer app") {
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            TrackingButton("Preparing", "PREPARING", Modifier.weight(1f), updating) { updateTracking("PREPARING") }
-                            TrackingButton("Packing", "PACKING", Modifier.weight(1f), updating) { updateTracking("PACKING") }
-                        }
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            TrackingButton("On the way", "OUT_FOR_DELIVERY", Modifier.weight(1f), updating) { updateTracking("OUT_FOR_DELIVERY") }
-                            TrackingButton("Delivered", "DELIVERED", Modifier.weight(1f), updating) { updateTracking("DELIVERED") }
-                        }
-                        updateMessage?.let { Text(it, color = if (it.contains("could not", true)) MaterialTheme.colorScheme.error else DBrand, fontSize = 11.sp) }
-                    }
-                }
-                item {
-                    DashboardSection("Delivery team", "Route batches: one delivery person can carry and deliver up to 100 meals") {
-                        val people = data?.optJSONArray("delivery_people")
-                        if (people == null || people.length() == 0) EmptyDashboardLine("No active delivery people found.")
-                        else for (index in 0 until people.length()) {
-                            val person = people.optJSONObject(index) ?: continue
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Box(Modifier.size(38.dp).clip(CircleShape).background(DMist), contentAlignment = Alignment.Center) { Icon(Icons.Outlined.Person, null, tint = DBrand) }
-                                Spacer(Modifier.width(10.dp))
-                                Column(Modifier.weight(1f)) {
-                                    Text(person.optString("name").ifBlank { "Delivery partner" }, color = DInk, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                    Text(person.optString("phone"), color = DMuted, fontSize = 11.sp)
-                                }
-                                Text("${person.optInt("assigned")} meals", color = DBrand, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                                Spacer(Modifier.width(5.dp))
-                                TextButton(onClick = { assignmentCount = "100"; assigningPerson = person }, contentPadding = PaddingValues(horizontal = 7.dp)) { Text("Assign", fontSize = 10.sp) }
+                    Text("Updated $updated · IST", color = KitchenMuted, fontSize = 11.sp)
+                    Surface(color = KitchenGreen, shape = RoundedCornerShape(16.dp)) {
+                        Row(Modifier.fillMaxWidth().padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text("TOTAL MEALS", color = Color.White.copy(alpha = .85f), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                Text(active.toString(), color = Color.White, fontSize = 48.sp, fontWeight = FontWeight.ExtraBold)
+                                Text("Today's full preparation count", color = Color.White, fontSize = 12.sp)
                             }
+                            Icon(Icons.Outlined.Restaurant, null, Modifier.size(42.dp), tint = Color.White.copy(alpha = .85f))
                         }
-                        assignmentMessage?.let { Text(it, color = DBrand, fontSize = 11.sp) }
                     }
-                }
-                if (isFinal) item {
-                    DashboardSection("Final customer manifest", "Released after the ${if (slot == "LUNCH") "7:00 AM" else "4:00 PM"} cutoff for route preparation") {
-                        val manifest = data?.optJSONArray("manifest")
-                        if (manifest == null || manifest.length() == 0) EmptyDashboardLine("No finalized customer meals found for this ${slot.lowercase()} batch.")
-                        else for (index in 0 until manifest.length()) {
-                            val customer = manifest.optJSONObject(index) ?: continue
-                            val address = customer.optJSONObject("address")
-                            val addressText = if (address == null) "Address unavailable" else listOf(
-                                address.optString("house_number"), address.optString("address_line"), address.optString("locality"),
-                                address.optString("city"), address.optString("pincode")
-                            ).filter { it.isNotBlank() }.joinToString(", ").ifBlank { address.toString() }
-                            Surface(color = DMist, shape = RoundedCornerShape(13.dp)) {
-                                Column(Modifier.fillMaxWidth().padding(11.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                                    Row { Text(customer.optString("customer_name").ifBlank { "Customer" }, color = DInk, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)); Text(customer.optString("meal_type").lowercase().replaceFirstChar(Char::uppercase), color = DBrand, fontSize = 11.sp, fontWeight = FontWeight.Bold) }
-                                    Text(customer.optString("phone"), color = DMuted, fontSize = 11.sp)
-                                    Text(addressText, color = DMuted, fontSize = 11.sp, lineHeight = 15.sp)
-                                    Text("Menu: ${customer.optString("main_course").ifBlank { "Default main course" }}", color = DInk, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        KitchenStat("Paused", metrics?.optInt("paused") ?: 0, Color(0xFFFFF3DC), Color(0xFF936015), Modifier.weight(1f))
+                        KitchenStat("Cancelled", metrics?.optInt("cancelled") ?: 0, Color(0xFFFDEEEB), Color(0xFFAD493C), Modifier.weight(1f))
+                    }
+                    Text("Paused & cancelled meals excluded", color = KitchenMuted, fontSize = 11.sp)
+                    if ((metrics?.optInt("delivered") ?: 0) > 0) Text("Includes ${metrics?.optInt("delivered")} already delivered · not extra meals to cook", color = KitchenMuted, fontSize = 12.sp)
+                    HorizontalDivider(color = Color(0xFFE5EDE7))
+                    val portions = kitchenPortions(data)
+                    val counted = portions.sumOf { it.second }
+                    when {
+                        active == 0 -> Text("No meals to prepare for $label today.", color = KitchenMuted, fontSize = 13.sp)
+                        counted > active -> Text("Dish counts do not match the meal total. Refresh and check Orders before cooking.", color = Color(0xFFB3261E), fontSize = 13.sp)
+                        else -> {
+                            Text("What to cook", color = KitchenInk, fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                            portions.forEach { (name, count) ->
+                                Surface(color = Color(0xFFF2F7F1), shape = RoundedCornerShape(14.dp)) {
+                                    Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                        val photo = kitchenDishPhoto(profile, data.optString("date"), label, name)
+                                        if (photo.isNotBlank()) {
+                                            ProviderApprovedPhoto(repository, photo, name, Modifier.size(64.dp).clip(RoundedCornerShape(12.dp)), compact = true)
+                                        } else {
+                                            Box(Modifier.size(64.dp).background(Color(0xFFE3EEDC), RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
+                                                Icon(Icons.Outlined.Restaurant, "No photo for $name", tint = KitchenGreen, modifier = Modifier.size(30.dp))
+                                            }
+                                        }
+                                        Text(name, Modifier.weight(1f), color = KitchenInk, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                                        Column(horizontalAlignment = Alignment.End) {
+                                            Text(count.toString(), color = KitchenGreen, fontSize = 30.sp, fontWeight = FontWeight.ExtraBold)
+                                            Text("portions", color = KitchenMuted, fontSize = 11.sp)
+                                        }
+                                    }
                                 }
                             }
-                        }
-                        Text("For MVP, the app is the primary manifest. A WhatsApp summary/link can be added after connecting an approved WhatsApp Business provider.", color = DMuted, fontSize = 10.sp, lineHeight = 14.sp)
-                    }
-                }
-                item {
-                    DashboardSection("Estimated earnings", "Your agreed commission is deducted once from delivered meal value") {
-                        val breakdown = data?.optJSONArray("package_breakdown")
-                        if (breakdown != null) for (index in 0 until breakdown.length()) {
-                            breakdown.optJSONObject(index)?.let { item ->
-                                PackageEarningLine(item)
+                            val servingNotes = kitchenServingNotes(profile, data.optString("date"), label)
+                            if (servingNotes.isNotBlank()) {
+                                Text("Serving size · per person", color = KitchenInk, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                Text(servingNotes, color = KitchenMuted, fontSize = 12.sp)
                             }
-                        }
-                        if (breakdown != null && breakdown.length() > 0) HorizontalDivider(color = Color(0xFFE1EAE3))
-                        MoneyLine("Gross meal value", gross)
-                        MoneyLine("Zomeal commission (${dashboardRate(commissionRate)}%)", -commissionPaise)
-                        HorizontalDivider(color = Color(0xFFE1EAE3))
-                        MoneyLine("Estimated provider earnings", gross - commissionPaise, true)
-                        Text("This estimate excludes refunds, approved discounts and payment adjustments.", color = DMuted, fontSize = 10.sp)
-                        OutlinedButton(onClick = onEarnings, modifier = Modifier.fillMaxWidth().height(44.dp), shape = RoundedCornerShape(12.dp)) {
-                            Icon(Icons.Outlined.AccountBalanceWallet, null, modifier = Modifier.size(18.dp)); Spacer(Modifier.width(7.dp)); Text("View earnings & payouts", fontWeight = FontWeight.Bold)
+                            Text("Sides: check individual menus in Orders", color = KitchenMuted, fontSize = 12.sp)
+                            // Exact side-item quantities are not supplied by the current meal data.
+                            if (counted < active) Text("${active - counted} meals have no matched main course. Check Orders before preparing these portions.", color = Color(0xFFB3261E), fontSize = 12.sp)
                         }
                     }
                 }
@@ -297,88 +249,103 @@ fun ProviderDashboardScreen(repository: SupabaseProviderRepository, bannerMessag
     }
 }
 
-@Composable
-private fun TrackingButton(label: String, status: String, modifier: Modifier, disabled: Boolean, onClick: () -> Unit) {
-    OutlinedButton(onClick = onClick, enabled = !disabled, modifier = modifier.height(43.dp), shape = RoundedCornerShape(12.dp), contentPadding = PaddingValues(horizontal = 5.dp)) {
-        Text(label, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-    }
-}
-
-@Composable
-private fun MealSlotButton(code: String, label: String, icon: androidx.compose.ui.graphics.vector.ImageVector, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
-    Button(onClick = onClick, modifier = modifier.height(52.dp), shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.buttonColors(containerColor = if (selected) DBrand else Color.White, contentColor = if (selected) Color.White else DInk)) {
-        Icon(icon, code); Spacer(Modifier.width(7.dp)); Text(label, fontWeight = FontWeight.Bold)
-    }
-}
-
-@Composable
-private fun DashboardSection(title: String, subtitle: String, content: @Composable ColumnScope.() -> Unit) {
-    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).clip(RoundedCornerShape(18.dp)).background(Color.White).padding(15.dp), verticalArrangement = Arrangement.spacedBy(11.dp)) {
-        Text(title, color = DInk, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-        Text(subtitle, color = DMuted, fontSize = 11.sp)
-        content()
-    }
-}
-
-@Composable
-private fun DashboardMetric(label: String, value: String, icon: androidx.compose.ui.graphics.vector.ImageVector, modifier: Modifier) {
-    Row(modifier.clip(RoundedCornerShape(13.dp)).background(DMist).padding(11.dp), verticalAlignment = Alignment.CenterVertically) {
-        Icon(icon, null, tint = DBrand, modifier = Modifier.size(22.dp)); Spacer(Modifier.width(8.dp))
-        Column { Text(value, color = DInk, fontSize = 19.sp, fontWeight = FontWeight.ExtraBold); Text(label, color = DMuted, fontSize = 10.sp) }
-    }
-}
-
-@Composable
-private fun ChoiceCount(name: String, count: Int, total: Int) {
-    Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-        Row { Text(name, color = DInk, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f)); Text("$count meals", color = DBrand, fontSize = 12.sp, fontWeight = FontWeight.Bold) }
-        LinearProgressIndicator(progress = { if (total == 0) 0f else count.toFloat() / total }, modifier = Modifier.fillMaxWidth().height(6.dp).clip(CircleShape), color = DBrand, trackColor = DMist)
-    }
-}
-
-@Composable
-private fun ProgressLine(label: String, count: Int, total: Int, icon: androidx.compose.ui.graphics.vector.ImageVector) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Icon(icon, null, tint = DBrand, modifier = Modifier.size(20.dp)); Spacer(Modifier.width(9.dp)); Text(label, color = DInk, fontSize = 12.sp, modifier = Modifier.weight(1f)); Text("$count / $total", color = DBrand, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-    }
-}
-
-@Composable
-private fun DashboardNotice(text: String, error: Boolean) {
-    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp).clip(RoundedCornerShape(14.dp)).background(if (error) Color(0xFFFFEDEA) else Color(0xFFEAF5EC)).padding(13.dp), verticalAlignment = Alignment.Top) {
-        Icon(if (error) Icons.Outlined.ErrorOutline else Icons.Outlined.Schedule, null, tint = if (error) Color(0xFFB23A32) else DBrand, modifier = Modifier.size(20.dp)); Spacer(Modifier.width(8.dp)); Text(text, color = if (error) Color(0xFF8E302A) else Color(0xFF345C43), fontSize = 11.sp, lineHeight = 16.sp)
-    }
-}
-
-@Composable private fun EmptyDashboardLine(text: String) { Text(text, color = DMuted, fontSize = 12.sp, lineHeight = 17.sp) }
-
-@Composable
-private fun PackageEarningLine(item: JSONObject) {
-    val customers = item.optInt("customers")
-    val unitValue = NumberFormat.getCurrencyInstance(Locale("en", "IN")).format(item.optLong("average_value_paise") / 100.0)
-    val subtotal = NumberFormat.getCurrencyInstance(Locale("en", "IN")).format(item.optLong("gross_paise") / 100.0)
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Text(item.optString("label"), color = DInk, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-            Text("$customers customers × $unitValue meal value", color = DMuted, fontSize = 10.sp)
+/** Final manifests count individual meals; provisional counts come from the server aggregate. */
+internal fun kitchenDishPhoto(profile: JSONObject?, date: String, session: String, name: String): String {
+    val day = runCatching { java.time.LocalDate.parse(date).dayOfWeek.value }.getOrNull() ?: return ""
+    val rows = profile?.optJSONArray("weekly_menu") ?: return ""
+    val matches = mutableSetOf<String>()
+    for (index in 0 until rows.length()) {
+        val row = rows.optJSONObject(index) ?: continue
+        if (row.optInt("day_of_week") != day || !row.optString("meal_slot").equals(session, true)) continue
+        val items = row.optJSONArray("items") ?: continue
+        for (itemIndex in 0 until items.length()) {
+            val item = items.optJSONObject(itemIndex) ?: continue
+            if (!item.optString("category").equals("MAIN_COURSE", true) || !item.optString("name").trim().equals(name.trim(), true)) continue
+            item.optString("photo_path").takeUnless { it.isBlank() || it == "null" }?.let(matches::add)
         }
-        Text(subtotal, color = DBrand, fontSize = 12.sp, fontWeight = FontWeight.Bold)
     }
+    // Never borrow another day's/slot's photo or choose an ambiguous same-name image.
+    return matches.singleOrNull().orEmpty()
+}
+
+internal fun kitchenServingNotes(profile: JSONObject?, date: String, session: String): String {
+    val day = runCatching { java.time.LocalDate.parse(date).dayOfWeek.value }.getOrNull() ?: return ""
+    val rows = profile?.optJSONArray("weekly_menu") ?: return ""
+    val notes = mutableSetOf<String>()
+    for (index in 0 until rows.length()) {
+        val row = rows.optJSONObject(index) ?: continue
+        if (row.optInt("day_of_week") != day || !row.optString("meal_slot").equals(session, true)) continue
+        val items = row.optJSONArray("items") ?: continue
+        for (j in 0 until items.length()) {
+            val item = items.optJSONObject(j) ?: continue
+            val text = item.optString("name").substringAfter(" · Portions: ", "")
+            if (item.optString("category") != "MAIN_COURSE" && text.isNotBlank()) notes += text
+        }
+    }
+    return notes.joinToString("\n")
 }
 
 @Composable
-private fun MoneyLine(label: String, paise: Long, strong: Boolean = false) {
-    val amount = NumberFormat.getCurrencyInstance(Locale("en", "IN")).format(kotlin.math.abs(paise) / 100.0)
-    Row { Text(label, color = if (strong) DInk else DMuted, fontSize = if (strong) 14.sp else 12.sp, fontWeight = if (strong) FontWeight.Bold else FontWeight.Normal, modifier = Modifier.weight(1f)); Text((if (paise < 0) "- " else "") + amount, color = if (strong) DBrand else DInk, fontSize = if (strong) 16.sp else 12.sp, fontWeight = FontWeight.Bold) }
-}
-
-@Composable
-private fun ProviderBottomBar(onOrders: () -> Unit, onEarnings: () -> Unit, onProfile: () -> Unit) {
-    NavigationBar(containerColor = Color.White, tonalElevation = 6.dp, modifier = Modifier.height(64.dp)) {
-        NavigationBarItem(true, {}, { Icon(Icons.Outlined.Dashboard, null) }, label = { Text("Dashboard", fontSize = 9.sp) }, colors = NavigationBarItemDefaults.colors(selectedIconColor = DBrand, selectedTextColor = DBrand, indicatorColor = DMist))
-        NavigationBarItem(false, onOrders, { Icon(Icons.Outlined.ReceiptLong, null) }, label = { Text("Orders", fontSize = 9.sp) })
-        NavigationBarItem(false, onEarnings, { Icon(Icons.Outlined.AccountBalanceWallet, null) }, label = { Text("Earnings", fontSize = 9.sp) })
-        NavigationBarItem(false, onProfile, { Icon(Icons.Outlined.AccountCircle, null) }, label = { Text("Profile", fontSize = 9.sp) })
+private fun KitchenStat(label: String, count: Int, background: Color, ink: Color, modifier: Modifier = Modifier) {
+    Surface(modifier, color = background, shape = RoundedCornerShape(14.dp)) {
+        Column(Modifier.padding(12.dp)) {
+            Text(count.toString(), fontSize = 28.sp, fontWeight = FontWeight.ExtraBold, color = ink)
+            Text(label, fontSize = 12.sp, color = ink)
+        }
     }
 }
-private fun dashboardRate(value:Double):String=if(value%1.0==0.0)value.toInt().toString() else String.format(Locale.US,"%.2f",value).trimEnd('0').trimEnd('.')
+
+internal fun kitchenPortions(data: JSONObject): List<Pair<String, Int>> {
+    val manifestRows = data.optJSONArray("manifest")
+    val manifest = manifestRows?.let { rows -> org.json.JSONArray().apply {
+        for (index in 0 until rows.length()) rows.optJSONObject(index)?.takeIf(::isPreparationMeal)?.let { put(it) }
+    } }
+    val active = data.optJSONObject("metrics")?.optInt("active") ?: 0
+    if (data.optBoolean("is_final") && manifest != null && manifest.length() == active && active > 0) {
+        return (0 until manifest.length()).mapNotNull { index ->
+            manifest.optJSONObject(index)?.optString("main_course")?.takeUnless { it.isBlank() || it == "null" }
+        }.groupingBy { it }.eachCount().toList().sortedBy { it.first }
+    }
+    val choices = data.optJSONArray("choices") ?: return emptyList()
+    return (0 until choices.length()).mapNotNull { index ->
+        val row = choices.optJSONObject(index) ?: return@mapNotNull null
+        val name = row.optString("name")
+        if (name.isBlank() || name == "null") null else name to row.optInt("count").coerceAtLeast(0)
+    }.sortedBy { it.first }
+}
+
+private fun kitchenTimestamp(): String = SimpleDateFormat("h:mm a", Locale.ENGLISH).apply {
+    timeZone = TimeZone.getTimeZone("Asia/Kolkata")
+}.format(Date())
+
+private fun kitchenDate(value: String): String = runCatching {
+    val zone = TimeZone.getTimeZone("Asia/Kolkata")
+    val date = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply { timeZone = zone }.parse(value) ?: return@runCatching value
+    SimpleDateFormat("EEE, d MMM yyyy", Locale.ENGLISH).apply { timeZone = zone }.format(date)
+}.getOrDefault(value)
+
+@Composable
+private fun KitchenDelivery(data: JSONObject, onOrders: () -> Unit) {
+    val metrics = data.optJSONObject("metrics") ?: return
+    val active = metrics.optInt("active")
+    if (active <= 0) return
+    val unassigned = metrics.optInt("unassigned_delivery")
+    Surface(Modifier.fillMaxWidth().padding(horizontal = 16.dp), color = Color(0xFFF0F5F1), shape = RoundedCornerShape(18.dp)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("Delivery", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = KitchenInk)
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                KitchenStat("No rider", unassigned, Color(0xFFFFF3DC), Color(0xFF936015), Modifier.weight(1f))
+                KitchenStat("On route", metrics.optInt("out_for_delivery"), Color(0xFFEAF0FC), Color(0xFF395B9B), Modifier.weight(1f))
+                KitchenStat("Delivered", metrics.optInt("delivered"), Color(0xFFE3F3E8), KitchenGreen, Modifier.weight(1f))
+            }
+            val manifest = data.optJSONArray("manifest")
+            val riders = (0 until (manifest?.length() ?: 0)).mapNotNull { manifest?.optJSONObject(it) }
+                .filter { isPreparationMeal(it) && it.optString("delivery_person").let { name -> name.isNotBlank() && name != "null" } }
+                .groupBy { it.optString("delivery_person_id") to it.optString("delivery_person") }
+            riders.forEach { (rider, meals) ->
+                Text("${rider.second} · ${meals.size} meals", fontSize = 13.sp, color = KitchenInk)
+            }
+            TextButton(onClick = onOrders) { Text("Manage deliveries →") }
+        }
+    }
+}

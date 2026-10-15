@@ -212,7 +212,7 @@ class SupabaseProviderRepository(context: Context) {
      * workspace is reviewed. New prices, menus and photographs are staged as
      * pending rather than overwriting the approved catalogue in-place.
      */
-    fun submitActiveBusinessUpdate(payload: JSONObject, callback: (AuthResult) -> Unit) = requestAsync(
+    fun submitActiveBusinessUpdate(payload: JSONObject, onProgress: (String) -> Unit = {}, callback: (AuthResult) -> Unit) = requestAsync(
         path = "/rest/v1/rpc/provider_submit_business_update",
         body = JSONObject().put("payload", payload),
         authenticated = true
@@ -229,12 +229,11 @@ class SupabaseProviderRepository(context: Context) {
         }
         syncWeeklyPrices(ProviderDraft.toJson(), changeRequestId.ifBlank { null }) { weeklyResult ->
         if (!weeklyResult.success) { callback(weeklyResult); return@syncWeeklyPrices }
-        uploadAllSelectedMedia(providerId, changeRequestId.ifBlank { null }, onlyChanged = true) { mediaResult ->
+        uploadAllSelectedMedia(providerId, changeRequestId.ifBlank { null }, onlyChanged = true, onProgress = onProgress) { mediaResult ->
             if (!mediaResult.success) { callback(mediaResult); return@uploadAllSelectedMedia }
-            savePrimaryDeliveryContact(ProviderDraft.deliveryName, ProviderDraft.deliveryPhone) { deliveryResult ->
-                if (deliveryResult.success) ProviderDraft.acceptCurrentAsBaseline()
-                callback(if (deliveryResult.success) AuthResult(true, "Only your changed information was submitted for Zomeal approval. Your current listing remains active.") else deliveryResult)
-            }
+            // Delivery contacts are saved explicitly in Photos & delivery, not on menu submission.
+            ProviderDraft.acceptCurrentAsBaseline()
+            callback(AuthResult(true, "Changes submitted for Zomeal approval. Your current listing remains active."))
         }}
     }
 
@@ -376,11 +375,21 @@ class SupabaseProviderRepository(context: Context) {
         else callback(null, errorMessage(json, "Dashboard could not be loaded"))
     }
 
+    fun loadDeliveryShare(slot: String, date: String, riderId: String, callback: (JSONObject?, String?) -> Unit) = requestAsync(
+        path = "/rest/v1/rpc/provider_delivery_share",
+        body = JSONObject().put("target_slot", slot).put("target_date", date).put("target_rider", riderId), authenticated = true
+    ) { code, json -> if (code in 200..299) callback(json, null) else callback(null, errorMessage(json, "Delivery list could not be loaded")) }
+
     fun updateDailyMealStatus(slot: String, status: String, date: String? = null, callback: (AuthResult) -> Unit) = requestAsync(
         path = "/rest/v1/rpc/provider_update_daily_meal_status",
         body = JSONObject().put("target_slot", slot).put("target_date", date?.takeIf { it.isNotBlank() } ?: JSONObject.NULL).put("new_status", status),
         authenticated = true
     ) { code, json -> callback(if (code in 200..299) AuthResult(true) else AuthResult(false, errorMessage(json, "Meal status could not be updated"))) }
+
+    fun advanceKitchenStage(slot: String, date: String, stage: String, callback: (AuthResult) -> Unit) = requestAsync(
+        path = "/rest/v1/rpc/provider_advance_kitchen_stage",
+        body = JSONObject().put("target_slot", slot).put("target_date", date).put("new_stage", stage), authenticated = true
+    ) { code, json -> callback(if (code in 200..299) AuthResult(true) else AuthResult(false, errorMessage(json, "Kitchen progress could not be saved"))) }
 
     fun assignDeliveryBatch(personnelId: String, slot: String, count: Int, date: String? = null, callback: (AuthResult) -> Unit) = requestAsync(
         path = "/rest/v1/rpc/provider_assign_delivery_batch",
@@ -428,17 +437,42 @@ class SupabaseProviderRepository(context: Context) {
         body = JSONObject().put("target_provider", JSONObject.NULL), authenticated = true
     ) { code, json -> if (code in 200..299) callback(json, null) else callback(null, errorMessage(json, "Commission profile could not be loaded")) }
 
+    fun kitchenBook(month: String, callback: (JSONObject?, String?) -> Unit) = kitchenRpc("provider_kitchen_statement", JSONObject().put("target_month",month), callback)
+    fun transactionMonths(callback: (JSONObject?, String?) -> Unit) = kitchenRpc("provider_transaction_months", JSONObject(), callback)
+    fun transactionPage(month: String, time: String?, id: String?, callback: (JSONObject?, String?) -> Unit) = kitchenRpc("provider_transaction_page", JSONObject().put("target_month",month).put("before_time",time ?: JSONObject.NULL).put("before_id",id ?: JSONObject.NULL), callback)
+    fun staffMonth(month:String,callback:(JSONObject?,String?)->Unit)=kitchenRpc("provider_staff_month",JSONObject().put("target_month",month),callback)
+    fun saveStaff(payload:JSONObject,callback:(JSONObject?,String?)->Unit)=kitchenRpc("provider_staff_save",JSONObject().put("payload",payload),callback)
+    fun saveStaffSheet(rows:org.json.JSONArray,callback:(JSONObject?,String?)->Unit)=kitchenRpc("provider_staff_save_sheet",JSONObject().put("rows",rows),callback)
+    fun staffAttendance(payload:JSONObject,callback:(JSONObject?,String?)->Unit)=kitchenRpc("provider_staff_attend",JSONObject().put("payload",payload),callback)
+    fun approveStaffSalary(payload:JSONObject,callback:(JSONObject?,String?)->Unit)=kitchenRpc("provider_staff_approve_attendance",JSONObject().put("payload",payload),callback)
+    fun payStaffSalary(payload:JSONObject,callback:(JSONObject?,String?)->Unit)=kitchenRpc("provider_staff_pay",JSONObject().put("payload",payload),callback)
+    fun saveKitchenReview(payload: JSONObject, callback: (JSONObject?, String?) -> Unit) = kitchenRpc("provider_kitchen_review_save", JSONObject().put("payload",payload), callback)
+    fun kitchenRepeatSetting(rootId:String,revision:Int,enabled:Boolean,callback:(JSONObject?,String?)->Unit) = kitchenRpc("provider_kitchen_repeat_setting",JSONObject().put("root_id",rootId).put("expected_revision",revision).put("enabled",enabled),callback)
+    fun saveKitchenEntry(payload: JSONObject, callback: (JSONObject?, String?) -> Unit) = kitchenRpc("provider_kitchen_save",JSONObject().put("payload",payload),callback)
+    fun saveKitchenSheet(rows: org.json.JSONArray, callback: (JSONObject?, String?) -> Unit) = kitchenRpc("provider_kitchen_save_sheet",JSONObject().put("rows",rows),callback)
+    fun voidKitchenEntry(id: String, revision: Int, callback: (JSONObject?, String?) -> Unit) = kitchenRpc("provider_kitchen_void",JSONObject().put("target_id",id).put("target_revision",revision),callback)
+    fun repeatKitchenEntry(id: String, month: String, callback: (JSONObject?, String?) -> Unit) = kitchenRpc("provider_kitchen_repeat",JSONObject().put("target_id",id).put("target_month",month),callback)
+    fun loadDemoPreview(callback:(JSONObject?,String?)->Unit) = kitchenRpc("provider_demo_preview",JSONObject(),callback)
+    private fun kitchenRpc(name:String,body:JSONObject,callback:(JSONObject?,String?)->Unit) = requestAsync("/rest/v1/rpc/$name",body,true) { code,json ->
+        if(code in 200..299) callback(json,null) else callback(null,errorMessage(json,"Kitchen records could not be saved or loaded"))
+    }
+
     fun loadProviderProfileHub(callback: (JSONObject?, String?) -> Unit) = requestAsync(
         path = "/rest/v1/rpc/provider_profile_hub",
         body = JSONObject(), authenticated = true
     ) { code, json -> if (code in 200..299) callback(json, null) else callback(null, errorMessage(json, "Provider profile could not be loaded")) }
 
-    fun approvedMedia(path:String,callback:(Bitmap?)->Unit){
+    fun loadApprovedServiceAreas(callback: (JSONObject?, String?) -> Unit) = requestAsync(
+        path = "/rest/v1/rpc/provider_approved_service_areas", body = JSONObject(), authenticated = true
+    ) { code, json -> if (code in 200..299) callback(json, null) else callback(null, errorMessage(json, "Approved service areas could not be loaded")) }
+
+    fun approvedMedia(path:String,evidence:Boolean=false,callback:(Bitmap?)->Unit){
         if(path.isBlank()){callback(null);return}
         Thread{
             val bitmap=runCatching{
                 val encoded=path.split('/').joinToString("/"){URLEncoder.encode(it,"UTF-8").replace("+","%20")}
-                val connection=(URL("$baseUrl/storage/v1/object/authenticated/provider-media/$encoded").openConnection() as HttpURLConnection).apply{
+                val bucket=if(evidence)"complaint-evidence" else "provider-media"
+                val connection=(URL("$baseUrl/storage/v1/object/authenticated/$bucket/$encoded").openConnection() as HttpURLConnection).apply{
                     connectTimeout=12000;readTimeout=20000;setRequestProperty("apikey",anonKey);setRequestProperty("Authorization","Bearer ${prefs.getString("access_token","")}")
                 }
                 val result=if(connection.responseCode in 200..299)connection.inputStream.use(BitmapFactory::decodeStream) else null
@@ -459,6 +493,12 @@ class SupabaseProviderRepository(context: Context) {
             .put("target_note", note.ifBlank { JSONObject.NULL }), authenticated = true
     ) { code, json -> callback(if (code in 200..299) AuthResult(true, "Payout details sent for verification") else AuthResult(false, errorMessage(json, "Payout details could not be saved"))) }
 
+    fun mealFeedback(offset:Int,callback:(JSONObject?,String?)->Unit)=requestAsync(
+        "/rest/v1/rpc/meal_feedback_feed",JSONObject().put("target_offset",offset),true
+    ){code,json->if(code in 200..299)callback(json,null) else callback(null,errorMessage(json,"Feedback unavailable"))}
+    fun datedMenuChanges(payload:JSONObject?=null,callback:(JSONObject?,String?)->Unit)=requestAsync(
+        "/rest/v1/rpc/provider_dated_menu_changes",JSONObject().put("payload",payload?:JSONObject.NULL),true
+    ){code,json->if(code in 200..299)callback(json,null) else callback(null,errorMessage(json,"Menu changes unavailable"))}
     fun loadNotifications(callback: (JSONObject?, String?) -> Unit) = requestAsync(
         path = "/rest/v1/rpc/provider_notification_feed",
         body = JSONObject().put("target_limit", 75), authenticated = true
@@ -551,7 +591,7 @@ class SupabaseProviderRepository(context: Context) {
 
     private data class PendingMedia(val uri: String, val type: String, val dishName: String?, val alt: String)
 
-    private fun uploadAllSelectedMedia(providerId: String, changeRequestId: String? = null, onlyChanged: Boolean = false, callback: (AuthResult) -> Unit) {
+    private fun uploadAllSelectedMedia(providerId: String, changeRequestId: String? = null, onlyChanged: Boolean = false, onProgress: (String) -> Unit = {}, callback: (AuthResult) -> Unit) {
         val media = mutableListOf<PendingMedia>()
         ProviderDraft.profilePhoto?.let { media += PendingMedia(it, "OWNER_PROFILE", null, ProviderDraft.businessName + " owner") }
         ProviderDraft.kitchenPhoto?.let { media += PendingMedia(it, "KITCHEN", null, ProviderDraft.businessName + " kitchen") }
@@ -560,13 +600,14 @@ class SupabaseProviderRepository(context: Context) {
             dish.photo?.let { if (dish.name.isNotBlank()) media += PendingMedia(it, "MENU_ITEM", dish.name, dish.name) }
         } }
         val selected = media.distinctBy { it.uri + it.type + it.dishName }
-            .filter { !onlyChanged || ProviderDraft.isNewOrReplacedPhoto(it.uri) }
+            .filter { !onlyChanged || ((it.uri.startsWith("content:") || it.uri.startsWith("file:")) && ProviderDraft.isNewOrReplacedPhoto(it.uri)) }
         if (selected.isEmpty()) { callback(AuthResult(true)); return }
-        uploadNext(providerId, changeRequestId, selected, 0, callback)
+        uploadNext(providerId, changeRequestId, selected, 0, onProgress, callback)
     }
 
-    private fun uploadNext(providerId: String, changeRequestId: String?, media: List<PendingMedia>, index: Int, callback: (AuthResult) -> Unit) {
+    private fun uploadNext(providerId: String, changeRequestId: String?, media: List<PendingMedia>, index: Int, onProgress: (String) -> Unit, callback: (AuthResult) -> Unit) {
         if (index >= media.size) { callback(AuthResult(true)); return }
+        onProgress("Uploading photo ${index + 1} of ${media.size}. Keep the app open; photos become visible only after approval.")
         val item = media[index]
         val uri = android.net.Uri.parse(item.uri)
         Thread {
@@ -587,7 +628,7 @@ class SupabaseProviderRepository(context: Context) {
                             .put("media_kind", item.type).put("object_path", path).put("mime", mime)
                             .put("bytes", bytes.size).put("alt_text_value", item.alt), true
                     ) { code, json ->
-                        if (code in 200..299) uploadNext(providerId, changeRequestId, media, index + 1, callback)
+                        if (code in 200..299) uploadNext(providerId, changeRequestId, media, index + 1, onProgress, callback)
                         else callback(AuthResult(false, errorMessage(json, "Photo metadata could not be registered")))
                     }
                 }

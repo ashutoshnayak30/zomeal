@@ -77,6 +77,7 @@ async function main() {
   await db.query('update profiles set is_active=true where id=$1',[superId]);
   await asUser(superId);
   await require('./test-admin-workspace.cjs')(db,superId);
+  await require('./test-admin-demo.cjs')(db,superId);
   for(const phone of ['9999999993','+91 99999 99993','919999999993']) {
     const found=await rpc('super_admin_account_search',[phone,0]);assert.equal(found.total,2);
   }
