@@ -15,11 +15,11 @@ The three admin rows are request revisions with the same provider ID, not three 
 - Repair previews run inside a rolled-back subtransaction and show dietary conflicts without changing live state or sending notifications.
 - Provider profile reads the same current approved menu selector used by side snapshots. A Refresh published menu & prices button is also available in the local provider app source.
 
-## Manju repair blocker
+## Manju repair completed
 
-Production preview found two customers with saved VEG lunch choices but only NON_VEG replacements on Tuesday (Egg curry), Wednesday (Chicken curry), Friday (Fish Curry), Sunday (Egg pulao). Repair has NOT been committed. Do not bypass the dietary checks or relabel those dishes as veg. The kitchen must supply vegetarian alternatives, or the affected customers must explicitly change their choices through the normal app flow.
+The initial published-link-only diagnosis was incomplete. The approved payload already contained Aloo Panerr, Mushroom, Paneer masala and Veg pulao, plus Monday's Aloo patal. Legacy ordinal matching and duplicate merging lost these choice links. Migration 202610040003 restores exact payload alternatives and stable ordering before review/sync, without changing dietary classifications. Preview rolls back all changes.
 
-After compatible dishes are submitted and approved, the guarded approval publishes and syncs in one transaction. To repair a compatible already-approved revision, select it in admin and use Preview customer changes, then Publish & sync customer menus.
+The latest approved Manju menu was restored live: 14 meal slots, 19 main courses, five restored alternatives, zero dietary conflicts. Both affected customers were synced (76 eligible changed rows); both notification outbox entries completed without errors. Past/cutoff-locked meals and money remain unchanged. Older mislinked photo records are repaired separately by exact approved dish name, keeping them secondary to the latest photos. No customer reselection is needed.
 
 ## Verification
 

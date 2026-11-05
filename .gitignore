@@ -26,3 +26,8 @@
 /.env.*
 !/.env.example
 /admin/config.js
+
+# Local diagnostics, backups and generated deployment archives
+/.v2p/
+/work/
+/biki-*.zip

@@ -37,6 +37,12 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -60,6 +66,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.BasicTextField
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -160,13 +168,18 @@ class MainActivity : ComponentActivity(), PaymentResultWithDataListener {
         OpinionatedSoln.alertShownForStatus = true
         handleNotificationIntent(intent)
         CustomerPushNotifications.initialize(applicationContext)
-        setContent { ZomealTheme { ZomealApp() } }
+        setContent { ZomealTheme { CustomerMotionHost { ZomealApp() } } }
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
         handleNotificationIntent(intent)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        CustomerPushNotifications.initialize(applicationContext)
     }
 
     override fun onPaymentSuccess(razorpayPaymentId: String?, paymentData: PaymentData?) {
@@ -213,7 +226,7 @@ private fun SplashScreen() {
             .navigationBarsPadding()
     ) {
         val compact = maxHeight < 700.dp
-        val logoHeight = if (compact) 178.dp else 220.dp
+        val logoHeight = if (compact) 130.dp else 164.dp
         val plateSize = if (compact) 235.dp else 315.dp
 
         SplashBackground(Modifier.matchParentSize())
@@ -234,14 +247,18 @@ private fun SplashScreen() {
                 contentAlignment = Alignment.Center
             ) {
                 Image(
-                    painter = painterResource(R.drawable.zomeal_logo),
-                    contentDescription = "Zomeal — Monthly meals, made simple",
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize().scale(1.18f)
+                    painter = painterResource(R.drawable.zomeal_splash_logo),
+                    contentDescription = "Zomeal tiffin — Monthly meals, made simple",
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxSize()
                 )
             }
 
-            Spacer(Modifier.height(if (compact) 8.dp else 18.dp))
+            Text("zomeal", color = BrandDark, fontSize = if (compact) 28.sp else 34.sp, fontWeight = FontWeight.Black,
+                style = androidx.compose.ui.text.TextStyle(platformStyle = androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false)))
+            Text("Monthly meals, made simple.", color = Muted, fontSize = CustomerTypeScale.Caption,
+                style = androidx.compose.ui.text.TextStyle(platformStyle = androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false)))
+            Spacer(Modifier.height(if (compact) 12.dp else 18.dp))
             SplashBenefits(compact)
             Spacer(Modifier.weight(if (compact) 0.22f else 0.32f))
 
@@ -1418,11 +1435,11 @@ private fun ZomealBottomBar(selected: Int, onSelect: (Int) -> Unit) {
         Triple("Profile", Icons.Filled.Person, Icons.Outlined.Person),
         Triple("Pause Plan", Icons.Filled.PauseCircle, Icons.Outlined.PauseCircle)
     )
-    Box(Modifier.fillMaxWidth().navigationBarsPadding().background(Color.White)) {
+    CustomerNavigationSurface(listOf(0, 1, 4, 2, 3).indexOf(selected).coerceAtLeast(0), Modifier.fillMaxWidth().navigationBarsPadding().background(Color.White)) {
         NavigationBar(
             modifier = Modifier.fillMaxWidth().height(66.dp),
-            containerColor = Color.White,
-            tonalElevation = 8.dp,
+            containerColor = Color.Transparent,
+            tonalElevation = 0.dp,
             windowInsets = WindowInsets(0, 0, 0, 0)
         ) {
             // Stable route IDs keep existing Orders/Profile destinations unchanged.
@@ -1431,12 +1448,12 @@ private fun ZomealBottomBar(selected: Int, onSelect: (Int) -> Unit) {
                 NavigationBarItem(
                     selected = selected == index,
                     onClick = { onSelect(index) },
-                    icon = { Icon(if (selected == index) item.second else item.third, item.first, modifier = Modifier.size(20.dp)) },
+                    icon = { CustomerNavIcon(selected == index) { Icon(if (selected == index) item.second else item.third, item.first, modifier = Modifier.size(20.dp)) } },
                     label = { Text(item.first, style = MaterialTheme.typography.labelSmall, maxLines = 1) },
                     alwaysShowLabel = true,
                     colors = NavigationBarItemDefaults.colors(
                         selectedIconColor = Brand, selectedTextColor = Brand,
-                        indicatorColor = Mist, unselectedIconColor = Muted, unselectedTextColor = Muted
+                        indicatorColor = Color.Transparent, unselectedIconColor = Muted, unselectedTextColor = Muted
                     )
                 )
             }
@@ -1518,7 +1535,7 @@ private fun ProviderDetailsScreen(provider: Provider, onBack: () -> Unit, onActi
         }
     ) { padding ->
         LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(padding),
+            modifier = Modifier.fillMaxSize().padding(padding).customerEntrance(),
             contentPadding = PaddingValues(bottom = 18.dp),
             verticalArrangement = Arrangement.spacedBy(17.dp)
         ) {
@@ -2224,34 +2241,35 @@ private fun QuickMenuSetup(selected: String?, onVeg: () -> Unit, onNonVeg: () ->
         border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFDCE8D8))
     ) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("Set all 7 days instantly", color = Ink, fontSize = CustomerTypeScale.BodyLarge, fontWeight = FontWeight.ExtraBold)
-            Text("Choose a preference and Zomeal will create a balanced weekly menu. You can edit any day later.", color = Muted, fontSize = CustomerTypeScale.Compact, lineHeight = 16.sp)
-            Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+            Text("Choose meals for all 7 days", color = Ink, fontSize = CustomerTypeScale.BodyLarge, fontWeight = FontWeight.ExtraBold)
+            Text("Save time: tap one option below to fill your whole week. This replaces your current choices. You can then tap any day to change its meals.", color = Muted, fontSize = CustomerTypeScale.Compact, lineHeight = 18.sp)
+            Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
                 OutlinedButton(
                     onClick = onVeg,
-                    modifier = Modifier.weight(1f).height(44.dp),
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
                     shape = RoundedCornerShape(13.dp),
                     border = androidx.compose.foundation.BorderStroke(if (selected == "Veg") 2.dp else 1.dp, BrandDark),
                     colors = ButtonDefaults.outlinedButtonColors(containerColor = if (selected == "Veg") BrandDark else Color.White, contentColor = if (selected == "Veg") Color.White else BrandDark)
                 ) {
                     Icon(Icons.Outlined.Eco, null, modifier = Modifier.size(15.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text("Set All Veg", fontSize = CustomerTypeScale.Compact, fontWeight = FontWeight.Bold)
+                    Text("Fill 7 days with veg meals", fontSize = CustomerTypeScale.Compact, fontWeight = FontWeight.Bold)
                 }
                 OutlinedButton(
                     onClick = onNonVeg,
-                    modifier = Modifier.weight(1f).height(44.dp),
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
                     shape = RoundedCornerShape(13.dp),
                     border = androidx.compose.foundation.BorderStroke(if (selected == "Non-Veg") 2.dp else 1.dp, Color(0xFFB85A38)),
                     colors = ButtonDefaults.outlinedButtonColors(containerColor = if (selected == "Non-Veg") Color(0xFFB85A38) else Color.White, contentColor = if (selected == "Non-Veg") Color.White else Color(0xFF9A472E))
                 ) {
                     Icon(Icons.Outlined.Restaurant, null, modifier = Modifier.size(15.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text("Set All Non-Veg", fontSize = CustomerTypeScale.Compact, fontWeight = FontWeight.Bold)
+                    Text("Prefer non-veg for all 7 days", fontSize = CustomerTypeScale.Compact, fontWeight = FontWeight.Bold)
                 }
             }
+            Text("Choices depend on your kitchen’s menu. Non-veg may not be available every day. Prefer choosing yourself? Select a day below.", color = Muted, fontSize = CustomerTypeScale.Caption)
             if (selected != null) {
-                Text("All seven days are set to $selected. Review or customize below.", color = BrandDark, fontSize = CustomerTypeScale.Caption, fontWeight = FontWeight.Bold)
+                Text("Week filled using your $selected preference. Review each day below, then continue.", color = BrandDark, fontSize = CustomerTypeScale.Caption, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -3002,8 +3020,11 @@ private fun NoSubscriptionHomeScreen(hasSavedPlan:Boolean,onFindPlan: () -> Unit
 }
 
 @Composable private fun NoPlanHeader(onLogout: () -> Unit,onWallet:()->Unit) {
+    val context = LocalContext.current.applicationContext
+    val repository = remember(context) { SupabaseCustomerRepository(context) }
+    val greetingName = rememberCustomerName(repository).substringBefore(' ')
     Box(Modifier.fillMaxWidth().height(175.dp).background(Brush.linearGradient(listOf(BrandDark, Brand, Lime), start = Offset.Zero, end = Offset(900f, 360f)), RoundedCornerShape(bottomStart = 28.dp, bottomEnd = 28.dp))) {
-        Column(Modifier.align(Alignment.CenterStart).padding(start = 20.dp)) { Text("zomeal", color = Color.White, fontSize = CustomerTypeScale.Headline, fontWeight = FontWeight.Black); Text("Welcome back!", color = Color.White, fontSize = CustomerTypeScale.Heading, fontWeight = FontWeight.ExtraBold); Text("Your next homely meal is only a few taps away", color = Color.White.copy(alpha = .88f), fontSize = CustomerTypeScale.Caption) }
+        Column(Modifier.align(Alignment.CenterStart).padding(start = 20.dp)) { Text("zomeal", color = Color.White, fontSize = CustomerTypeScale.Headline, fontWeight = FontWeight.Black); Text(if (greetingName.isBlank()) "Welcome back!" else "Hello, $greetingName!", color = Color.White, fontSize = CustomerTypeScale.Heading, fontWeight = FontWeight.ExtraBold); Text("Your next homely meal is only a few taps away", color = Color.White.copy(alpha = .88f), fontSize = CustomerTypeScale.Caption) }
         IconButton(onClick = onLogout, modifier = Modifier.align(Alignment.TopEnd).padding(14.dp).size(40.dp).clip(CircleShape).background(Color.White.copy(alpha = .16f))) { Icon(Icons.Outlined.Logout, "Log out", tint = Color.White, modifier = Modifier.size(18.dp)) }
         IconButton(onClick = onWallet, modifier = Modifier.align(Alignment.BottomEnd).padding(14.dp).size(42.dp).clip(CircleShape).background(Color.White.copy(alpha = .16f))) { Icon(Icons.Outlined.AccountBalanceWallet, "Wallet", tint = Color.White, modifier = Modifier.size(20.dp)) }
     }
@@ -3923,7 +3944,9 @@ private fun ActiveSubscriberHome(provider: Provider, onBrowseProviders: () -> Un
         hostActivity?.lifecycle?.addObserver(observer)
         onDispose { hostActivity?.lifecycle?.removeObserver(observer) }
     }
-    LaunchedEffect(Unit) { while(true) { delay(30_000); homeNow = System.currentTimeMillis() } }
+    // Align refreshes to wall-clock minutes so the 22:00 and midnight menu
+    // boundaries update while this screen stays open, as well as on resume.
+    LaunchedEffect(Unit) { while(true) { delay(60_000L - System.currentTimeMillis() % 60_000L); homeNow = System.currentTimeMillis() } }
     val homeCalendar = Calendar.getInstance(java.util.TimeZone.getTimeZone("Asia/Kolkata")).apply { timeInMillis = homeNow }
     var walletPaise by remember { mutableStateOf<Long?>(null) }
     val repository=remember(context){SupabaseCustomerRepository(context)}
@@ -3952,6 +3975,11 @@ private fun ActiveSubscriberHome(provider: Provider, onBrowseProviders: () -> Un
     val homeDateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply { timeZone = homeCalendar.timeZone }
     val todayIso = homeDateFormat.format(homeCalendar.time)
     val tomorrowIso = homeDateFormat.format((homeCalendar.clone() as Calendar).apply { add(Calendar.DAY_OF_YEAR,1) }.time)
+    fun mealSides(date:String,slot:String,fallback:String):String {
+        val meal=persistedSubscription?.dailyMeals?.firstOrNull { it.serviceDate==date&&it.mealSlot.equals(slot,true) }
+        // Old historical records have no side snapshot: never label them with today's catalogue.
+        return meal?.sideText ?: if(meal!=null) "Side details unavailable" else fallback
+    }
     fun persistedMeal(date:String,slot:String):SavedCustomerMeal? = persistedSubscription?.dailyMeals
         ?.firstOrNull { it.serviceDate==date && it.mealSlot.equals(slot,true) && it.itemName.isNotBlank() }
         ?.let { SavedCustomerMeal(it.itemName,"",it.photoPath) }
@@ -3972,8 +4000,8 @@ private fun ActiveSubscriberHome(provider: Provider, onBrowseProviders: () -> Un
     val tomorrowDinnerMenu = remember(provider.weeklyMenu, tomorrowIndex) { providerMealSlot(provider.weeklyMenu, tomorrowIndex, "DINNER") }
     fun selectedChoice(menu: ProviderMealSlot, saved: SavedCustomerMeal?): MenuChoice =
         (menu.mainCourses.firstOrNull { it.name.equals(saved?.mainCourse,true) }
-            ?: menu.mainCourses.firstOrNull()
             ?: saved?.mainCourse?.takeIf { it.isNotBlank() }?.let { MenuChoice(it,Color(0xFFD8D7D2),Brand,photoPath=saved.photoPath) }
+            ?: menu.mainCourses.firstOrNull()
             ?: MenuChoice("Menu being updated", Color(0xFFD8D7D2), Brand)).let { choice ->
                 val itemPhoto=saved?.photoPath.orEmpty().takeIf{saved?.mainCourse.equals(choice.name,true)}.orEmpty()
                 val fallback = itemPhoto.ifBlank{provider.mealPhotoPath.takeUnless { it.equals("null", true) }.orEmpty()}
@@ -3998,7 +4026,12 @@ private fun ActiveSubscriberHome(provider: Provider, onBrowseProviders: () -> Un
     fun refreshMealExperiences(){
         repository.mealExperiences { rows,error -> mealExperiences=rows;mealExperienceError=error }
     }
-    LaunchedEffect(persistedSubscription?.id, showWalletScreen, selectedNav, showPauseScreen, showDailyMenuChange, resumed, todayIso) {
+    LaunchedEffect(persistedSubscription?.id, selectedNav, resumed, homeNow / 60_000L) {
+        if(selectedNav in listOf(0, 1, 2)) repository.activeSubscription { subscription, error ->
+            if(error == null && subscription != null) CustomerSubscriptionStore.current = subscription
+        }
+    }
+    LaunchedEffect(persistedSubscription?.id, showWalletScreen, selectedNav, showPauseScreen, showDailyMenuChange, resumed, todayIso, homeNow / 60_000L) {
         if(!showWalletScreen && selectedNav == 0) {
             refreshMealExperiences()
             repository.referralDashboard { data, _ ->
@@ -4046,10 +4079,10 @@ private fun ActiveSubscriberHome(provider: Provider, onBrowseProviders: () -> Un
     if (showPauseScreen) {
         PauseMealsScreen(
             onBack = { showPauseScreen = false },
-            onConfirm = { dates,slot,summary ->
+            onConfirm = { dates,slot,summary,group ->
                 val subscriptionId=persistedSubscription?.id.orEmpty()
                 if(subscriptionId.isBlank())pauseSummary="Your active subscription could not be found."
-                else repository.pauseMeals(subscriptionId,dates,slot){result,error->pauseSummary=if(error!=null)"Pause was not saved: $error" else "$summary · ${result?.optInt("updated_meals")?:0} meals updated"}
+                else repository.pauseMealGroup(subscriptionId,dates,slot,group){result,error->pauseSummary=if(error!=null)"Pause was not saved: $error" else "$summary · ${result?.optInt("updated_meals")?:0} meals updated"}
                 showPauseScreen = false
             }
         )
@@ -4132,7 +4165,7 @@ private fun ActiveSubscriberHome(provider: Provider, onBrowseProviders: () -> Un
         bottomBar = { ZomealBottomBar(selectedNav, ::selectBottomNavigation) }
     ) { padding ->
         LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(padding),
+            modifier = Modifier.fillMaxSize().padding(padding).customerEntrance(),
             contentPadding = PaddingValues(bottom = 22.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
@@ -4151,7 +4184,7 @@ private fun ActiveSubscriberHome(provider: Provider, onBrowseProviders: () -> Un
             pauseSummary?.let { summary -> item { PausedSubscriptionBanner(summary) { pauseSummary = null } } }
             item { TodayMenuHeader(showTomorrow = showingTomorrowMenu, date = homeMenuDate) { showFullWeeklyMenu = true } }
             item {
-                Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min).padding(horizontal = 14.dp), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
                     if ((persistedSubscription?.packageKind ?: CustomerMenuStore.packageKind) != "DINNER_ONLY") {
                         DailyMealCard(
                             slot = "Lunch",
@@ -4160,7 +4193,7 @@ private fun ActiveSubscriberHome(provider: Provider, onBrowseProviders: () -> Un
                             onReview = { selectedReviewMeal = experience("Lunch") },
                             canEdit = showingTomorrowMenu || homeHour < 8,
                             meal = (if (showingTomorrowMenu) homeLunchChoice else todayLunchChoice).name,
-                            sides = (listOf(if (showingTomorrowMenu) homeLunchCarb else todayLunchCarb) + (if (showingTomorrowMenu) tomorrowLunchMenu.included else todayLunchMenu.included)).filter { it.isNotBlank() }.joinToString(" · "),
+                            sides = mealSides(if(showingTomorrowMenu) tomorrowIso else todayIso,"LUNCH",(listOf(if (showingTomorrowMenu) homeLunchCarb else todayLunchCarb) + (if (showingTomorrowMenu) tomorrowLunchMenu.included else todayLunchMenu.included)).filter { it.isNotBlank() }.joinToString(" · ")),
                             accent = Color(0xFF16834A),
                             choice = if (showingTomorrowMenu) homeLunchChoice else todayLunchChoice,
                             onCancel = {
@@ -4180,13 +4213,13 @@ private fun ActiveSubscriberHome(provider: Provider, onBrowseProviders: () -> Un
                             onReview = { selectedReviewMeal = experience("Dinner") },
                             canEdit = showingTomorrowMenu || homeHour < 16,
                             meal = (if (showingTomorrowMenu) homeDinnerChoice else todayDinnerChoice).name,
-                            sides = (listOf(if (showingTomorrowMenu) homeDinnerCarb else todayDinnerCarb) + (if (showingTomorrowMenu) tomorrowDinnerMenu.included else todayDinnerMenu.included)).filter { it.isNotBlank() }.joinToString(" · "),
+                            sides = mealSides(if(showingTomorrowMenu) tomorrowIso else todayIso,"DINNER",(listOf(if (showingTomorrowMenu) homeDinnerCarb else todayDinnerCarb) + (if (showingTomorrowMenu) tomorrowDinnerMenu.included else todayDinnerMenu.included)).filter { it.isNotBlank() }.joinToString(" · ")),
                             accent = Color(0xFF6546A8),
                             choice = if (showingTomorrowMenu) homeDinnerChoice else todayDinnerChoice,
                             onCancel = {
                                 selectedMeal = "Dinner"
-                                if (showingTomorrowMenu || homeHour < 16) dialog = "cancel"
-                                else pauseSummary = "Dinner cancellation closed at 4:00 PM. Today's dinner is already finalized."
+                                if (showingTomorrowMenu || homeHour < 18) dialog = "cancel"
+                                else pauseSummary = "Dinner cancellation closed at 6:00 PM. Today's dinner is already finalized."
                             },
                             onChange = { selectedMeal = "Dinner"; showDailyMenuChange = true },
                             modifier = Modifier.weight(1f)
@@ -4197,12 +4230,6 @@ private fun ActiveSubscriberHome(provider: Provider, onBrowseProviders: () -> Un
             item {
                 HomeDiscoveryBanners(
                     onUpgrade = { selectedNav = 1 }, onReferral = { showWalletScreen = true }, onProviders = onBrowseProviders
-                )
-            }
-            if (reviewableMeal != null) item {
-                SubscriberQuickActions(
-                    reviewMeal = reviewableMeal,
-                    onReview = { selectedReviewMeal=reviewableMeal }
                 )
             }
             displayedDelivery?.let { assignment ->
@@ -4246,12 +4273,19 @@ private fun ActiveSubscriberHome(provider: Provider, onBrowseProviders: () -> Un
             if (subscriptionId.isBlank()) {
                 pauseSummary = "Your active subscription could not be found. Please sign in again."
                 dialog = null
-            } else repository.pauseMeals(subscriptionId, listOf(targetDate), selectedMeal) { result, error ->
-                pauseSummary = if (error != null) "Cancellation was not saved: $error"
-                else if ((result?.optInt("updated_meals") ?: 0) > 0) "$selectedMeal cancelled for ${if (showingTomorrowMenu) "tomorrow" else "today"}."
-                else "No meal was changed. Check the schedule and cancellation cutoff."
-                refreshMealExperiences()
+            } else repository.guestMenu(subscriptionId) { guestResult, guestError ->
+                val rows = guestResult?.optJSONArray("items") ?: org.json.JSONArray()
+                val activeGuests = (0 until rows.length()).any { n ->
+                    val guests = rows.getJSONObject(n).optJSONArray("guests") ?: org.json.JSONArray()
+                    (0 until guests.length()).any { guests.getJSONObject(it).optString("status") == "SCHEDULED" }
+                }
                 dialog = null
+                if(guestError != null) pauseSummary = "Could not check guest meals: $guestError"
+                else if(activeGuests) { showPauseScreen = true; pauseSummary = "Choose dates, then select your meals, guest meals or both." }
+                else repository.pauseMealGroup(subscriptionId, listOf(targetDate), selectedMeal, "OWN") { result, error ->
+                    pauseSummary = if(error != null) "Cancellation was not saved: $error" else "${result?.optInt("updated_meals") ?: 0} meals updated."
+                    refreshMealExperiences()
+                }
             }
         }
     )
@@ -4374,11 +4408,16 @@ private fun NotificationCentreScreen(onBack: () -> Unit, onDestination: (String)
             val row=rows.optJSONObject(index)?:continue
             val category=row.optString("category","Account")
             val icon=when(category){"Payment","Reward"->Icons.Outlined.AccountBalanceWallet;"Delivery"->Icons.Outlined.LocalShipping;"Menu"->Icons.Outlined.RestaurantMenu;else->Icons.Outlined.Notifications}
-            notifications.add(ZomealNotification(row.optString("id"),category,row.optString("title"),row.optString("message"),row.optString("created_at").replace("T"," · ").take(19),row.optString("destination","home"),icon,row.optBoolean("read")))
+            notifications.add(ZomealNotification(row.optString("id"),category,row.optString("title"),row.optString("message"),formatNotificationTimestamp(row.optString("created_at")),row.optString("destination","home"),icon,row.optBoolean("read")))
         }}
     }}
     var filter by remember { mutableStateOf("All") }
-    val visible = notifications.filter { filter == "All" || !it.read }
+    val visible = notifications.filter { when(filter) {
+        "Unread" -> !it.read
+        "Meals" -> it.category in listOf("Menu", "Delivery", "Reminder")
+        "Wallet" -> it.category in listOf("Payment", "Reward")
+        else -> true
+    } }
     val unread = notifications.count { !it.read }
     BackHandler(onBack = onBack)
 
@@ -4390,9 +4429,12 @@ private fun NotificationCentreScreen(onBack: () -> Unit, onDestination: (String)
         ) {
             item { NotificationHeader(unread, onBack) { notifications.indices.forEach { index -> notifications[index] = notifications[index].copy(read = true) };repository.markNotificationsRead() } }
             item {
-                Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf("All", "Unread").forEach { option ->
-                        FilterChip(selected = filter == option, onClick = { filter = option }, label = { Text(if (option == "Unread") "Unread ($unread)" else "All notifications", fontSize = CustomerTypeScale.Caption) }, modifier = Modifier.weight(1f), leadingIcon = if (filter == option) ({ Icon(Icons.Filled.Check, null, modifier = Modifier.size(13.dp)) }) else null)
+                LazyRow(contentPadding = PaddingValues(horizontal = 18.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(listOf("All", "Unread", "Meals", "Wallet")) { option ->
+                        FilterChip(selected = filter == option, onClick = { filter = option }, label = { Text(if (option == "Unread") "Unread ($unread)" else option, fontSize = CustomerTypeScale.Caption) },
+                            shape = RoundedCornerShape(20.dp),
+                            colors = FilterChipDefaults.filterChipColors(containerColor = Color.White, labelColor = Muted, selectedContainerColor = Color(0xFFE3F3E9), selectedLabelColor = BrandDark, selectedLeadingIconColor = Brand),
+                            leadingIcon = if (filter == option) ({ Icon(Icons.Filled.Check, null, modifier = Modifier.size(13.dp)) }) else null)
                     }
                 }
             }
@@ -4400,7 +4442,7 @@ private fun NotificationCentreScreen(onBack: () -> Unit, onDestination: (String)
             loadError?.let{message->item{Text(message,color=Color(0xFFB3261E),fontSize = CustomerTypeScale.Caption,modifier=Modifier.padding(horizontal=18.dp))}}
             if (!loading&&visible.isEmpty()) item { NotificationEmptyState() }
             visible.forEachIndexed { index, notification ->
-                if (index == 0 || notification.time.startsWith("Yesterday") || notification.time.startsWith("10 ")) item { Text(if (index == 0) "Recent" else "Earlier", color = Ink, fontSize = CustomerTypeScale.Body, fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(start = 18.dp, top = 3.dp)) }
+                if (index == 0) item { Text("Latest updates", color = Ink, fontSize = CustomerTypeScale.Body, fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(start = 18.dp, top = 3.dp)) }
                 item(key = notification.id) {
                     NotificationItem(
                         notification = notification,
@@ -4408,7 +4450,7 @@ private fun NotificationCentreScreen(onBack: () -> Unit, onDestination: (String)
                             val actualIndex = notifications.indexOfFirst { it.id == notification.id }
                             if (actualIndex >= 0) notifications[actualIndex] = notification.copy(read = true)
                             repository.markNotificationsRead(notification.id,true)
-                            onDestination(notification.destination)
+                            if(notification.destination != "notifications") onDestination(notification.destination)
                         },
                         onReadToggle = {
                             val actualIndex = notifications.indexOfFirst { it.id == notification.id }
@@ -4418,7 +4460,6 @@ private fun NotificationCentreScreen(onBack: () -> Unit, onDestination: (String)
                     )
                 }
             }
-            item { NotificationPreferenceHint { onDestination("profile") } }
         }
     }
 }
@@ -4440,23 +4481,27 @@ private fun NotificationHeader(unread: Int, onBack: () -> Unit, onMarkAllRead: (
 private fun NotificationItem(notification: ZomealNotification, onClick: () -> Unit, onReadToggle: () -> Unit) {
     val accent = when (notification.category) { "Payment", "Reward" -> Color(0xFF0B7D47); "Delivery" -> Color(0xFF1674A5); "Menu" -> Color(0xFF9A6A00); "Support" -> Color(0xFF6546A8); else -> Brand }
     Surface(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp).clickable(onClick = onClick),
-        color = if (notification.read) Color.White else accent.copy(alpha = .055f),
-        shape = RoundedCornerShape(17.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, if (notification.read) Border else accent.copy(alpha = .25f)),
-        shadowElevation = if (notification.read) 0.dp else 2.dp
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp),
+        // Opaque fill avoids shadow showing through translucent unread cards.
+        color = if (notification.read) Color.White else Color(0xFFF1F8F3),
+        shape = RoundedCornerShape(20.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, if (notification.read) Color(0xFFE5ECE7) else Color(0xFFD5E8DC)),
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp
     ) {
-        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.Top) {
+        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.Top) {
             Box {
                 Surface(color = accent.copy(alpha = .11f), shape = CircleShape) { Icon(notification.icon, null, tint = accent, modifier = Modifier.padding(10.dp).size(18.dp)) }
                 if (!notification.read) Box(Modifier.size(9.dp).clip(CircleShape).background(Color(0xFFE53935)).align(Alignment.TopEnd))
             }
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) { Text(notification.category, color = accent, fontSize = CustomerTypeScale.Caption, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)); Text(notification.time, color = Muted, fontSize = CustomerTypeScale.Compact) }
-                Text(notification.title, color = Ink, fontSize = CustomerTypeScale.Compact, fontWeight = if (notification.read) FontWeight.Bold else FontWeight.ExtraBold)
-                Text(notification.message, color = Muted, fontSize = CustomerTypeScale.Caption, lineHeight = 12.sp)
-                Row(verticalAlignment = Alignment.CenterVertically) { Text(when (notification.destination) { "wallet" -> "Open wallet"; "orders" -> "View order"; "weekly_menu" -> "Review menu"; "plan" -> "View plan"; "support" -> "View support reply"; else -> "Open profile" }, color = BrandDark, fontSize = CustomerTypeScale.Caption, fontWeight = FontWeight.Bold); Icon(Icons.Filled.KeyboardArrowRight, null, tint = Brand, modifier = Modifier.size(14.dp)) }
+                Text(notification.category.uppercase(), color = accent, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = .8.sp)
+                Text(notification.title, color = Ink, fontSize = 15.sp, lineHeight = 20.sp, fontWeight = if (notification.read) FontWeight.SemiBold else FontWeight.Bold)
+                Text(notification.message, color = Muted, fontSize = 13.sp, lineHeight = 19.sp)
+                Text(notification.time, color = Muted, fontSize = 11.sp, modifier = Modifier.padding(top = 3.dp))
+                if(notification.destination != "notifications") Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) { Text(when (notification.destination) { "wallet" -> "Open wallet"; "orders" -> "View order"; "weekly_menu" -> "Review menu"; "plan" -> "View plan"; "support" -> "View support reply"; "profile" -> "Open profile"; else -> "View home" }, color = BrandDark, fontSize = CustomerTypeScale.Caption, fontWeight = FontWeight.Bold); Icon(Icons.Filled.KeyboardArrowRight, null, tint = Brand, modifier = Modifier.size(14.dp)) }
             }
             IconButton(onClick = onReadToggle, modifier = Modifier.size(30.dp)) { Icon(if (notification.read) Icons.Outlined.MarkEmailUnread else Icons.Outlined.DoneAll, if (notification.read) "Mark unread" else "Mark read", tint = Muted, modifier = Modifier.size(15.dp)) }
         }
@@ -4486,6 +4531,8 @@ private fun WalletScreen(onBack: () -> Unit) {
     var subscriptionInviterReward by remember { mutableIntStateOf(0) }
     var rewardLimit by remember { mutableIntStateOf(1000) }
     var activity by remember { mutableStateOf(JSONArray()) }
+    var historyLoading by remember { mutableStateOf(true) }
+    var historyError by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(true) }
     var rechargeLoading by remember { mutableStateOf(false) }
     var rechargeAmount by rememberSaveable { mutableStateOf("5") }
@@ -4493,6 +4540,13 @@ private fun WalletScreen(onBack: () -> Unit) {
     val rechargePaise = advanceAmountPaise(rechargeAmount)
     val rechargeValid = rechargePaise != null && rechargePaise in 500L..1000000L
     LaunchedEffect(dashboardReload) {
+        historyLoading = true
+        historyError = null
+        repository.walletHistory { rows, error ->
+            historyLoading = false
+            historyError = error
+            if (rows != null) activity = rows
+        }
         repository.referralDashboard { data, error ->
             loading = false
             if (data != null) {
@@ -4506,7 +4560,6 @@ private fun WalletScreen(onBack: () -> Unit) {
                 verifiedNewCustomerReward = (data.optLong("verified_referred_reward_paise") / 100).toInt()
                 subscriptionInviterReward = (data.optLong("first_subscription_referrer_reward_paise") / 100).toInt()
                 rewardLimit = (data.optLong("cycle_cap_paise") / 100).toInt()
-                activity = data.optJSONArray("activity") ?: JSONArray()
             } else walletMessage = error ?: "Could not load your wallet. Please try again."
         }
     }
@@ -4548,8 +4601,7 @@ private fun WalletScreen(onBack: () -> Unit) {
         if (referralCode.isBlank()) { walletMessage = "Your referral code is still loading."; return }
         val signupMessage=if(verifiedNewCustomerReward>0)" Get ₹$verifiedNewCustomerReward in your meal wallet after verified signup." else ""
         val text = "Join Zomeal for home-style meals. Use my referral code $referralCode.$signupMessage $shareLink"
-        context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply { type = "text/plain"; putExtra(Intent.EXTRA_TEXT, text) }, "Share Zomeal via $channel"))
-        sharedChannels[channel] = true
+        walletMessage = shareZomealReferral(context, channel, text)
     }
 
     Scaffold(
@@ -4583,7 +4635,14 @@ private fun WalletScreen(onBack: () -> Unit) {
                     walletMessage = "Referral code copied."
                 }
             }, onShare = ::shareReferral) }
-            item { WalletTransactions(activity, loading) }
+            item {
+                if (historyError != null) {
+                    Column(Modifier.padding(horizontal = 18.dp)) {
+                        Text("Wallet history could not be loaded. Monthly totals are unavailable.", color = Muted)
+                        TextButton(onClick = { dashboardReload++ }) { Text("Retry history") }
+                    }
+                } else WalletTransactions(activity, historyLoading)
+            }
             item { WalletSecurityStrip() }
         }
     }
@@ -4715,7 +4774,9 @@ private fun ReferAndEarnCard(sharedChannels: Map<String, Boolean>, referralCode:
                     Triple("More", Icons.Outlined.Share, Brand)
                 ).forEach { channel ->
                     Column(Modifier.weight(1f).clickable { onShare(channel.first) }, horizontalAlignment = Alignment.CenterHorizontally) {
-                        Surface(color = channel.third.copy(alpha = .1f), shape = CircleShape) { Icon(if (sharedChannels[channel.first] == true) Icons.Filled.Check else channel.second, null, tint = channel.third, modifier = Modifier.padding(9.dp).size(18.dp)) }
+                        Surface(color = channel.third.copy(alpha = .1f), shape = CircleShape) {
+                            WalletShareAppIcon(channel.first, channel.second, channel.third)
+                        }
                         Text(channel.first, color = Muted, fontSize = CustomerTypeScale.Compact, maxLines = 1)
                     }
                 }
@@ -4751,20 +4812,49 @@ private fun AffiliateMetric(value: String, label: String, modifier: Modifier = M
 
 @Composable
 private fun WalletTransactions(activity: JSONArray, loading: Boolean) {
-    Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp)) {
-        Text("Recent Wallet Activity", color = Ink, fontSize = CustomerTypeScale.BodyLarge, fontWeight = FontWeight.ExtraBold)
-        Spacer(Modifier.height(8.dp))
-        Surface(color = Color.White, shape = RoundedCornerShape(17.dp), shadowElevation = 1.dp) {
-            Column {
-                when {
-                    loading -> Text("Loading activity…", color = Muted, fontSize = CustomerTypeScale.Caption, modifier = Modifier.padding(18.dp))
-                    activity.length() == 0 -> Text("No wallet activity yet. Share your code to start earning.", color = Muted, fontSize = CustomerTypeScale.Caption, modifier = Modifier.padding(18.dp))
-                    else -> (0 until activity.length()).forEach { index ->
-                        val entry = activity.optJSONObject(index) ?: JSONObject()
-                        val amount = (entry.optLong("amount_paise") / 100).toInt()
-                        val type = entry.optString("type")
-                        WalletTransaction(when(type){"RECHARGE"->Icons.Outlined.AddCard;"SUBSCRIPTION_DEBIT"->Icons.Outlined.Restaurant;else->Icons.Outlined.CardGiftcard}, when { type == "RECHARGE" -> "Money added"; type == "SUBSCRIPTION_DEBIT" -> "Meal payment"; type.startsWith("REFERR") -> "Referral reward"; else -> "Wallet activity" }, entry.optString("description", "Verified Zomeal activity"), "${if (amount >= 0) "+" else "−"} ₹${kotlin.math.abs(amount)}", if (amount >= 0) BrandDark else Color(0xFFB3261E))
-                        if (index < activity.length() - 1) HorizontalDivider(color = Border)
+    var expanded by rememberSaveable { mutableStateOf<String?>(null) }
+    val india = java.util.TimeZone.getTimeZone("Asia/Kolkata")
+    fun date(row: JSONObject): java.util.Date? = runCatching {
+        SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssX", Locale.US).parse(row.optString("created_at").replace(Regex("\\.\\d+"), "").replace("+00:00", "Z"))
+    }.getOrNull()
+    fun format(row: JSONObject, pattern: String) = date(row)?.let { SimpleDateFormat(pattern, Locale.ENGLISH).apply { timeZone = india }.format(it) } ?: "Date unavailable"
+    val rows = (0 until activity.length()).mapNotNull { activity.optJSONObject(it) }
+    val months = rows.groupBy { format(it, "yyyy-MM") }.toSortedMap(reverseOrder())
+    Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text("Monthly statements", color = Ink, fontSize = CustomerTypeScale.BodyLarge, fontWeight = FontWeight.ExtraBold)
+        Text("All credits and debits, together by month. Tap to view your statement. Dates are in India time.", color = Muted, fontSize = CustomerTypeScale.Caption)
+        if (loading) Text("Loading complete history…", color = Muted)
+        else {
+            if (months.isEmpty()) Text("No transactions yet.", color = Muted)
+            months.forEach { (key, entries) ->
+                val total = entries.filter { it.optLong("amount_paise") < 0 }.sumOf { -it.optLong("amount_paise") }
+                val credited = entries.filter { it.optLong("amount_paise") > 0 }.sumOf { it.optLong("amount_paise") }
+                Surface(color = Color.White, shape = RoundedCornerShape(17.dp), border = androidx.compose.foundation.BorderStroke(1.dp, Border)) {
+                    Column {
+                        Row(Modifier.fillMaxWidth().clickable { expanded = if (expanded == key) null else key }.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(format(entries.first(), "MMMM yyyy"), color = Ink, fontWeight = FontWeight.Bold)
+                                Text("${entries.size} transactions", color = Muted, fontSize = CustomerTypeScale.Caption)
+                            }
+                            Column(horizontalAlignment = Alignment.End) {
+                                Text("Total deducted", color = Muted, fontSize = CustomerTypeScale.Caption)
+                                Text("₹${paiseText(total)}", color = Color(0xFFB3261E), fontWeight = FontWeight.Bold)
+                            }
+                            Icon(if (expanded == key) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore, "Toggle month details", tint = Brand)
+                        }
+                        if (expanded == key) {
+                          Text("Credited ₹${paiseText(credited)}  ·  Debited ₹${paiseText(total)}", color = BrandDark, fontSize = CustomerTypeScale.Caption, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+                          entries.forEach { entry ->
+                            val amount = entry.optLong("amount_paise")
+                            val credit = amount > 0
+                            val type = entry.optString("type")
+                            HorizontalDivider(color = Border)
+                            WalletTransaction(if (credit) Icons.Outlined.AccountBalanceWallet else Icons.Outlined.Restaurant,
+                                when { type == "RECHARGE" -> "Credit · Money added"; type == "REFUND" -> "Credit · Refund"; type.startsWith("REFERR") -> "Credit · Referral reward"; credit -> "Credit · Wallet credit"; type == "SUBSCRIPTION_DEBIT" -> "Debit · Meal payment"; else -> "Debit · Wallet deduction" },
+                                entry.optString("description") + "\n" + format(entry, "dd MMM yyyy · h:mm a"),
+                                "${if (credit) "+" else "−"} ₹${paiseText(kotlin.math.abs(amount))}", if (credit) BrandDark else Color(0xFFB3261E))
+                          }
+                        }
                     }
                 }
             }
@@ -4862,6 +4952,12 @@ private fun MyPlanScreen(provider: Provider, onNav: (Int) -> Unit, onSupport: ()
     val repository = remember(context) { SupabaseCustomerRepository(context) }
     val subscription = CustomerSubscriptionStore.current
     val monthlyPackages = provider.packages.filter { it.durationDays == 30 }.sortedBy { it.pricePaise }
+    var showGuestMeals by remember { mutableStateOf(false) }
+    if(showGuestMeals && subscription != null) {
+        BackHandler { showGuestMeals = false }
+        GuestMealsScreen(repository, subscription.id) { showGuestMeals = false }
+        return
+    }
     var message by remember { mutableStateOf<String?>(null) }
     var scheduledUpgrade by remember(subscription?.id,subscription?.scheduledPackageChange?.toString()) { mutableStateOf(subscription?.scheduledPackageChange) }
     var showUpgradeDialog by remember { mutableStateOf(false) }
@@ -4870,7 +4966,7 @@ private fun MyPlanScreen(provider: Provider, onNav: (Int) -> Unit, onSupport: ()
     var editAddress by remember { mutableStateOf(false) }
     BackHandler { onNav(0) }
     Scaffold(containerColor = Color(0xFFFAFCFA), bottomBar = { ZomealBottomBar(1, onNav) }) { padding ->
-        LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(bottom = 18.dp), verticalArrangement = Arrangement.spacedBy(13.dp)) {
+        LazyColumn(Modifier.fillMaxSize().padding(padding).customerEntrance(), contentPadding = PaddingValues(bottom = 18.dp), verticalArrangement = Arrangement.spacedBy(13.dp)) {
             item { AppSectionHeader("My Plan", "Manage your active meal subscription", Icons.Outlined.CalendarMonth) { onNav(0) } }
             message?.let { item { WalletMessageBanner(it) { message = null } } }
             item { MyPlanHero(provider,onProviderDetails) }
@@ -4889,6 +4985,11 @@ private fun MyPlanScreen(provider: Provider, onNav: (Int) -> Unit, onSupport: ()
                 }
             }
             item { PlanTimelineCard(CustomerSubscriptionStore.current) }
+            if(subscription != null) item {
+                OutlinedButton(onClick = { showGuestMeals = true }, modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp)) {
+                    Text("Add / manage guest meals · up to 3 extra")
+                }
+            }
             if(subscription?.durationDays==7||scheduledUpgrade!=null){
                 item {
                     MonthlyUpgradeCard(scheduledUpgrade) {
@@ -4898,6 +4999,7 @@ private fun MyPlanScreen(provider: Provider, onNav: (Int) -> Unit, onSupport: ()
                 }
             }
             item { Text("Weekly Menu", color = Ink, fontSize = CustomerTypeScale.BodyLarge, fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(horizontal = 18.dp)) }
+            item { MenuUpdateNotice(repository) }
             item { MyPlanWeekPreview(provider, onWeeklyMenu) }
             item { PlanDeliveryAddress { editAddress = true } }
             item { PlanManagementActions(onPause = onPause, onChangeProvider = onBrowseProviders, onCancel = { showCancelDialog = true }, onSupport = onSupport) }
@@ -4984,10 +5086,12 @@ private fun PlanTimelineCard(subscription: PersistedSubscription?) {
 
 @Composable
 private fun MyPlanWeekPreview(provider: Provider, onEdit: () -> Unit) {
-    val rows = remember(provider.weeklyMenu) {
-        listOf("Mon", "Tue", "Wed", "Thu").mapIndexed { index, day ->
-            val lunch = providerMealSlot(provider.weeklyMenu, index, "LUNCH").mainCourses.firstOrNull()?.name
-            val dinner = providerMealSlot(provider.weeklyMenu, index, "DINNER").mainCourses.firstOrNull()?.name
+    val saved=CustomerSubscriptionStore.current?.weeklyMenu
+    val rows = remember(provider.weeklyMenu,saved?.toString()) {
+        fun selected(day:Int,slot:String):String?=(0 until (saved?.length()?:0)).mapNotNull { saved?.optJSONObject(it) }.firstOrNull { it.optInt("day_of_week")==day+1&&it.optString("meal_slot").equals(slot,true) }?.optString("item_name")?.takeIf { it.isNotBlank() }
+        listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun").mapIndexed { index, day ->
+            val lunch = selected(index,"LUNCH") ?: providerMealSlot(provider.weeklyMenu, index, "LUNCH").mainCourses.firstOrNull()?.name
+            val dinner = selected(index,"DINNER") ?: providerMealSlot(provider.weeklyMenu, index, "DINNER").mainCourses.firstOrNull()?.name
             day to listOfNotNull(lunch, dinner).joinToString(" / ").ifBlank { "Menu not published" }
         }
     }
@@ -5011,7 +5115,27 @@ private fun PlanDeliveryAddress(onChange: () -> Unit) {
 
 @Composable
 private fun PlanManagementActions(onPause: () -> Unit, onChangeProvider: () -> Unit, onCancel: () -> Unit, onSupport: () -> Unit) {
-    val actions = listOf(Triple(Icons.Outlined.PauseCircle, "Pause", onPause), Triple(Icons.Outlined.SwapHoriz, "Provider", onChangeProvider), Triple(Icons.Outlined.Cancel, "Cancel", onCancel), Triple(Icons.Outlined.SupportAgent, "Support", onSupport))
+    Surface(Modifier.fillMaxWidth().padding(horizontal = 18.dp), color = Mist, shape = RoundedCornerShape(16.dp)) {
+      Column {
+        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Outlined.SwapHoriz, null, tint = Brand, modifier = Modifier.size(24.dp))
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text("Change provider", color = BrandDark, fontSize = CustomerTypeScale.Body, fontWeight = FontWeight.Bold)
+                Text("Choose a different kitchen in your area. Review its package and menu before confirming.", color = Muted, fontSize = CustomerTypeScale.Caption)
+            }
+        }
+        Button(onClick = onChangeProvider, modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 16.dp).heightIn(min = 50.dp), shape = RoundedCornerShape(13.dp), colors = ButtonDefaults.buttonColors(containerColor = Brand)) {
+            Icon(Icons.Outlined.SwapHoriz, null)
+            Spacer(Modifier.width(8.dp))
+            Text("Change provider", fontWeight = FontWeight.Bold)
+            Spacer(Modifier.width(8.dp))
+            Icon(Icons.Outlined.ChevronRight, null)
+        }
+      }
+    }
+    Spacer(Modifier.height(10.dp))
+    val actions = listOf(Triple(Icons.Outlined.PauseCircle, "Pause", onPause), Triple(Icons.Outlined.Cancel, "Cancel", onCancel), Triple(Icons.Outlined.SupportAgent, "Support", onSupport))
     Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp), horizontalArrangement = Arrangement.spacedBy(7.dp)) { actions.forEach { action -> Surface(Modifier.weight(1f).clickable(onClick = action.third), color = Color.White, shape = RoundedCornerShape(14.dp), shadowElevation = 1.dp) { Column(Modifier.padding(vertical = 11.dp), horizontalAlignment = Alignment.CenterHorizontally) { Icon(action.first, null, tint = Brand, modifier = Modifier.size(18.dp)); Text(action.second, color = Ink, fontSize = CustomerTypeScale.Caption, fontWeight = FontWeight.Bold) } } } }
 }
 
@@ -5040,12 +5164,12 @@ private fun DailyMenuChangeScreen(
     val choices = if (isLunch) lunchChoices else dinnerChoices
     val carbOptions = if (isLunch) listOf("Rice", "Roti") else listOf("Roti", "Paratha", "Puri")
     val openingHour = if (isLunch) 15 else 23
-    val closingHour = if (isLunch) 8 else 16
+    val closingHour = if (isLunch) 8 else 18
     val currentHour = remember { Calendar.getInstance().get(Calendar.HOUR_OF_DAY) }
     val targetTomorrow = if (isLunch) currentHour >= 15 else currentHour >= 22
     val changeAllowed = if (targetTomorrow) currentHour >= openingHour else currentHour < closingHour
     val openingLabel = if (isLunch) "3:00 PM" else "11:00 PM"
-    val closingLabel = if (isLunch) "8:00 AM" else "4:00 PM"
+    val closingLabel = if (isLunch) "8:00 AM" else "6:00 PM"
     val targetTitle = if (targetTomorrow) "Tomorrow's" else "Today's"
     val targetLabel = remember(targetTomorrow) { SimpleDateFormat("EEE, dd MMM", Locale.ENGLISH).format(Calendar.getInstance().apply { if (targetTomorrow) add(Calendar.DAY_OF_YEAR, 1) }.time) }
     val timingLabel = if (targetTomorrow) "opens after $openingLabel" else "change before $closingLabel"
@@ -5176,7 +5300,24 @@ private fun DailyMenuChangeScreen(
 }
 
 @Composable
-private fun PauseMealsScreen(onBack: () -> Unit, onConfirm: (List<String>,String,String) -> Unit) {
+private fun PauseMealsScreen(onBack: () -> Unit, onConfirm: (List<String>,String,String,String) -> Unit) {
+    val pauseContext = LocalContext.current
+    val pauseRepository = remember { SupabaseCustomerRepository(pauseContext) }
+    var guestCheckDone by remember { mutableStateOf(false) }
+    var guestCheckError by remember { mutableStateOf<String?>(null) }
+    var hasGuests by remember { mutableStateOf(false) }
+    var pauseGroup by remember { mutableStateOf("") }
+    LaunchedEffect(Unit) {
+        pauseRepository.guestMenu(CustomerSubscriptionStore.current?.id.orEmpty()) { result, error ->
+            guestCheckError = error; guestCheckDone = true
+            val rows = result?.optJSONArray("items") ?: org.json.JSONArray()
+            hasGuests = (0 until rows.length()).any { index ->
+                val guests = rows.getJSONObject(index).optJSONArray("guests") ?: org.json.JSONArray()
+                (0 until guests.length()).any { guests.getJSONObject(it).optString("status") == "SCHEDULED" }
+            }
+            if(!hasGuests) pauseGroup = "OWN"
+        }
+    }
     val selectedDays = remember { mutableStateListOf<Int>().apply { add(1) } }
     var slot by remember { mutableStateOf("Both") }
     var showConfirm by remember { mutableStateOf(false) }
@@ -5193,7 +5334,7 @@ private fun PauseMealsScreen(onBack: () -> Unit, onConfirm: (List<String>,String
         bottomBar = {
             Surface(modifier = Modifier.navigationBarsPadding(), color = Color.White, shadowElevation = 9.dp) {
                 Button(
-                    onClick = { showConfirm = true }, enabled = selectedDays.isNotEmpty(),
+                    onClick = { showConfirm = true }, enabled = selectedDays.isNotEmpty() && guestCheckDone && guestCheckError == null && pauseGroup.isNotBlank(),
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 10.dp).height(50.dp),
                     shape = RoundedCornerShape(15.dp), colors = ButtonDefaults.buttonColors(containerColor = BrandDark)
                 ) { Icon(Icons.Outlined.PauseCircle, null, modifier = Modifier.size(17.dp)); Spacer(Modifier.width(7.dp)); Text("Review Pause Request", fontSize = CustomerTypeScale.Caption, fontWeight = FontWeight.ExtraBold) }
@@ -5206,6 +5347,15 @@ private fun PauseMealsScreen(onBack: () -> Unit, onConfirm: (List<String>,String
             item { PauseQuickDuration(selectedDays) }
             item { PauseDateCalendar(selectedDays, dateFormatter) }
             item { PauseMealSlotCard(slot) { slot = it } }
+            guestCheckError?.let { item { Text("Could not check guest meals: $it. Reopen this screen to retry.", color = Color.Red, modifier = Modifier.padding(18.dp)) } }
+            if(hasGuests) item {
+                Column(Modifier.padding(horizontal = 18.dp)) {
+                    Text("You have guest meals. Which should pause?", fontSize = 14.sp)
+                    listOf("OWN" to "My meals only", "GUESTS" to "Guest meals only", "BOTH" to "My meals and guest meals").forEach { (value,label) ->
+                        FilterChip(selected = pauseGroup == value, onClick = { pauseGroup = value }, label = { Text(label) })
+                    }
+                }
+            }
             item { PauseSummaryCard(selectedDays.size, slot, firstDate, lastDate) }
             item { PausePolicyCard() }
         }
@@ -5214,9 +5364,9 @@ private fun PauseMealsScreen(onBack: () -> Unit, onConfirm: (List<String>,String
     if (showConfirm) AlertDialog(
         onDismissRequest = { showConfirm = false },
         icon = { Icon(Icons.Outlined.PauseCircle, null, tint = Brand) },
-        title = { Text("Confirm meal pause", fontWeight = FontWeight.ExtraBold) },
+        title = { Text("Pause ${when(pauseGroup) { "GUESTS" -> "guest meals"; "BOTH" -> "your + guest meals"; else -> "your meals" }}?", fontWeight = FontWeight.ExtraBold) },
         text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { Text("Pause $slot meals on ${selectedDays.size} selected date${if (selectedDays.size == 1) "" else "s"}?", color = Ink, fontSize = CustomerTypeScale.Compact, fontWeight = FontWeight.Bold); Text(if (firstDate == lastDate) firstDate else "$firstDate to $lastDate", color = BrandDark, fontSize = CustomerTypeScale.Caption); Text("No meals will be delivered for the selected slots. Eligible unused meal credits remain available according to your provider’s pause policy.", color = Muted, fontSize = CustomerTypeScale.Caption) } },
-        confirmButton = { Button(onClick = { showConfirm = false; onConfirm(selectedDays.map{isoFormatter.format(calendarFor(it).time)},slot,"$slot meals paused on ${selectedDays.size} selected date${if (selectedDays.size == 1) "" else "s"} from ${dateFormatter.format(calendarFor(selectedDays.minOrNull() ?: 1).time)}") }, colors = ButtonDefaults.buttonColors(containerColor = BrandDark)) { Text("Confirm Pause", fontSize = CustomerTypeScale.Caption) } },
+        confirmButton = { Button(onClick = { showConfirm = false; onConfirm(selectedDays.map{isoFormatter.format(calendarFor(it).time)},slot,"$slot meals paused on ${selectedDays.size} selected date${if (selectedDays.size == 1) "" else "s"} from ${dateFormatter.format(calendarFor(selectedDays.minOrNull() ?: 1).time)}",pauseGroup) }, colors = ButtonDefaults.buttonColors(containerColor = BrandDark)) { Text("Confirm Pause", fontSize = CustomerTypeScale.Caption) } },
         dismissButton = { TextButton(onClick = { showConfirm = false }) { Text("Go back", color = Muted, fontSize = CustomerTypeScale.Caption) } }
     )
 }
@@ -5322,12 +5472,14 @@ private fun FullWeeklyMenuScreen(
                 val savedDinner = savedMeal(date, "DINNER")
                 val lunchMenu = publishedMenu(date, "LUNCH")
                 val dinnerMenu = publishedMenu(date, "DINNER")
-                val lunch = if (isTomorrow) tomorrowLunch else savedLunch?.itemName?.takeIf { it.isNotBlank() } ?: lunchMenu.mainCourses.firstOrNull()?.name ?: "Menu not published"
-                val dinner = if (isTomorrow) tomorrowDinner else savedDinner?.itemName?.takeIf { it.isNotBlank() } ?: dinnerMenu.mainCourses.firstOrNull()?.name ?: "Menu not published"
-                val lunchCarb = if (isTomorrow) tomorrowLunchCarb else lunchMenu.carbs.firstOrNull().orEmpty()
-                val dinnerCarb = if (isTomorrow) tomorrowDinnerCarb else dinnerMenu.carbs.firstOrNull().orEmpty()
+                val lunch = savedLunch?.itemName?.takeIf { it.isNotBlank() } ?: (if (isTomorrow) tomorrowLunch else lunchMenu.mainCourses.firstOrNull()?.name) ?: "Menu not published"
+                val dinner = savedDinner?.itemName?.takeIf { it.isNotBlank() } ?: (if (isTomorrow) tomorrowDinner else dinnerMenu.mainCourses.firstOrNull()?.name) ?: "Menu not published"
+                val lunchCarb = savedMeal(date,"LUNCH")?.let { it.sideText?:"Side details unavailable" }
+                    ?: (lunchMenu.carbs+lunchMenu.included).filter { it.isNotBlank() }.joinToString(" · ")
+                val dinnerCarb = savedMeal(date,"DINNER")?.let { it.sideText?:"Side details unavailable" }
+                    ?: (dinnerMenu.carbs+dinnerMenu.included).filter { it.isNotBlank() }.joinToString(" · ")
                 val lunchEligible = index <= 1 && (index > 0 || hour < 8)
-                val dinnerEligible = index <= 1 && (index > 0 || hour < 16)
+                val dinnerEligible = index <= 1 && (index > 0 || hour < 18)
                 item(key = dayNames[index]) {
                     FullWeekDayCard(
                         day = dayNames[index], date = dateFormatter.format(date.time),
@@ -5336,7 +5488,7 @@ private fun FullWeeklyMenuScreen(
                         lunchEligible = lunchEligible, dinnerEligible = dinnerEligible,
                         lunchPaused = savedLunch?.status.equals("PAUSED", true), dinnerPaused = savedDinner?.status.equals("PAUSED", true),
                         onEditLunch = { if (!lunchEligible) message = "Only today before 8:00 AM or tomorrow can be edited here." else onEditTomorrow("Lunch") },
-                        onEditDinner = { if (!dinnerEligible) message = "Only today before 4:00 PM or tomorrow can be edited here." else onEditTomorrow("Dinner") },
+                        onEditDinner = { if (!dinnerEligible) message = "Only today before 6:00 PM or tomorrow can be edited here." else onEditTomorrow("Dinner") },
                         onPauseLunch = onPauseMeals,
                         onPauseDinner = onPauseMeals
                     )
@@ -5502,11 +5654,11 @@ private fun LiveOrderTrackingScreen(provider: Provider, onBack: () -> Unit, onSu
 private fun RatingReviewScreen(provider: Provider, meal: CustomerMealExperience, onBack: () -> Unit, onSupport: () -> Unit, onSubmitted: () -> Unit) {
     val context=LocalContext.current.applicationContext
     val repository=remember(context){SupabaseCustomerRepository(context)}
-    var overallRating by remember { mutableIntStateOf(meal.rating?:0) }
-    val categoryRatings = remember { mutableStateMapOf("Taste" to 0, "Quantity" to 0, "Packaging" to 0, "Hygiene" to 0, "Delivery" to 0) }
-    val selectedTags = remember { mutableStateListOf<String>() }
-    var feedback by remember { mutableStateOf(meal.reviewText) }
-    var anonymous by remember { mutableStateOf(meal.anonymous) }
+    var overallRating by rememberSaveable(meal.mealId) { mutableIntStateOf(meal.rating?:0) }
+    val categoryRatings = remember(meal.mealId) { mutableStateMapOf("Taste" to 0, "Quantity" to 0, "Packaging" to 0, "Hygiene" to 0, "Delivery" to 0) }
+    val selectedTags = remember(meal.mealId) { mutableStateListOf<String>() }
+    var feedback by rememberSaveable(meal.mealId) { mutableStateOf(meal.reviewText) }
+    var anonymous by rememberSaveable(meal.mealId) { mutableStateOf(meal.anonymous) }
     var showSuccess by remember { mutableStateOf(false) }
     var showIssueReport by remember { mutableStateOf(false) }
     var submitting by remember { mutableStateOf(false) }
@@ -5516,16 +5668,18 @@ private fun RatingReviewScreen(provider: Provider, meal: CustomerMealExperience,
         selectedTags.clear();selectedTags.addAll(meal.tags)
     }
     if (showIssueReport) {
-        MealIssueRefundScreen(provider = provider, meal = meal.itemName, onBack = { showIssueReport = false }, onContactSupport = onSupport)
+        MealComplaintScreen(meal = meal, onBack = { showIssueReport = false })
         return
     }
-    BackHandler(onBack = onBack)
+    BackHandler { if(!submitting&&!showSuccess)onBack() }
 
     Scaffold(
-        containerColor = Color(0xFFFAFCFA),
+        modifier = Modifier.imePadding().customerEntrance(meal.mealId),
+        containerColor = Color(0xFFF5FAF6),
         bottomBar = {
             Surface(modifier = Modifier.navigationBarsPadding(), color = Color.White, shadowElevation = 9.dp) {
-                Button(onClick = {
+                CustomerSubmitButton(label = "Submit review", busy = submitting, onClick = {
+                    if(submitting || showSuccess) return@CustomerSubmitButton
                     submitting=true;submitError=null
                     val categories=JSONObject();categoryRatings.filterValues{it>0}.forEach{(key,value)->categories.put(key,value)}
                     repository.submitMealReview(meal.mealId,overallRating,categories,selectedTags.toList(),feedback,anonymous){result,error->
@@ -5533,44 +5687,34 @@ private fun RatingReviewScreen(provider: Provider, meal: CustomerMealExperience,
                         if(error!=null||result?.optBoolean("saved")!=true)submitError=error?:"Review could not be saved"
                         else showSuccess=true
                     }
-                }, enabled = overallRating > 0&&!submitting, modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 10.dp).height(50.dp), shape = RoundedCornerShape(15.dp), colors = ButtonDefaults.buttonColors(containerColor = BrandDark)) { if(submitting)CircularProgressIndicator(Modifier.size(17.dp),strokeWidth=2.dp,color=Color.White) else Icon(Icons.Outlined.RateReview, null, modifier = Modifier.size(17.dp)); Spacer(Modifier.width(7.dp)); Text(if(submitting)"Saving…" else "Submit Review", fontSize = CustomerTypeScale.Caption, fontWeight = FontWeight.ExtraBold) }
+                }, enabled = overallRating > 0 && !showSuccess, modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 10.dp))
             }
         }
     ) { padding ->
         LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(bottom = 18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            item { ReviewRatingHeader(onBack) }
+            item { Box(Modifier.padding(horizontal=18.dp)) { MealFeedbackHeader("Rate your meal", "Your feedback helps your kitchen improve", !submitting) { if(!submitting)onBack() } } }
             item { ReviewMealSummary(provider, meal) }
-            item { OverallRatingCard(overallRating) { overallRating = it } }
-            item { CategoryRatingsCard(categoryRatings) { category, rating -> categoryRatings[category] = rating } }
+            item { OverallRatingCard(overallRating) { if(!submitting)overallRating = it } }
+            item { CategoryRatingsCard(categoryRatings) { category, rating -> if(!submitting)categoryRatings[category] = rating } }
             item { FeedbackTagsCard(selectedTags) }
-            item { ReviewCommentCard(feedback) { feedback = it.take(500) } }
-            item { AnonymousReviewCard(anonymous) { anonymous = it } }
-            item { SeriousIssueCard { showIssueReport = true } }
+            item { ReviewCommentCard(feedback) { if(!submitting)feedback = it.take(500) } }
+            item { AnonymousReviewCard(anonymous) { if(!submitting)anonymous = it } }
+            item { SeriousIssueCard { if(!submitting)showIssueReport = true } }
             submitError?.let{message->item{Text(message,color=Color(0xFFB83131),fontSize=CustomerTypeScale.Caption,fontWeight=FontWeight.Bold,modifier=Modifier.padding(horizontal=22.dp))}}
             item { ReviewPrivacyNote() }
         }
     }
 
     if (showSuccess) AlertDialog(
-        onDismissRequest = { }, icon = { Icon(Icons.Filled.CheckCircle, null, tint = Brand, modifier = Modifier.size(30.dp)) },
+        onDismissRequest = { }, icon = { CustomerSuccessMark() },
         title = { Text("Thank you for your feedback!", fontWeight = FontWeight.ExtraBold) },
         text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { Text("Your $overallRating-star review for ${meal.itemName.ifBlank{"this meal"}} has been saved${if (anonymous) " anonymously" else ""}.", color = Muted, fontSize = CustomerTypeScale.Compact); Surface(color = Mist, shape = RoundedCornerShape(10.dp)) { Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Outlined.Favorite, null, tint = Brand, modifier = Modifier.size(17.dp)); Spacer(Modifier.width(7.dp)); Text("Your feedback helps Zomeal and the kitchen improve future meals.", color = BrandDark, fontSize = CustomerTypeScale.Caption, fontWeight = FontWeight.Bold) } } } },
         confirmButton = { Button(onClick = { showSuccess = false; onSubmitted() }, colors = ButtonDefaults.buttonColors(containerColor = BrandDark)) { Text("Back to Orders") } }
     )
 }
 
-@Composable private fun ReviewRatingHeader(onBack: () -> Unit) {
-    Box(Modifier.fillMaxWidth().height(138.dp).background(Brush.linearGradient(listOf(BrandDark, Brand, Lime), start = Offset.Zero, end = Offset(920f, 390f)), RoundedCornerShape(bottomStart = 27.dp, bottomEnd = 27.dp))) {
-        IconButton(onClick = onBack, modifier = Modifier.padding(start = 10.dp, top = 12.dp).size(40.dp).clip(CircleShape).background(Color.White.copy(alpha = .16f))) { Icon(Icons.Filled.ArrowBack, "Back", tint = Color.White, modifier = Modifier.size(18.dp)) }
-        Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) { Text("zomeal", color = Color.White, fontSize = CustomerTypeScale.Title, fontWeight = FontWeight.Black); Text("Rate Your Meal", color = Color.White, fontSize = CustomerTypeScale.Heading, fontWeight = FontWeight.ExtraBold); Text("Tell us about your experience", color = Color.White.copy(alpha = .88f), fontSize = CustomerTypeScale.Caption) }
-        Surface(color = Color.White.copy(alpha = .16f), shape = CircleShape, modifier = Modifier.align(Alignment.CenterEnd).padding(end = 16.dp)) { Icon(Icons.Outlined.StarRate, null, tint = Color.White, modifier = Modifier.padding(9.dp).size(19.dp)) }
-    }
-}
-
 @Composable private fun ReviewMealSummary(provider: Provider, meal: CustomerMealExperience) {
-    Surface(Modifier.fillMaxWidth().padding(horizontal = 18.dp), color = Color.White, shape = RoundedCornerShape(18.dp), shadowElevation = 2.dp) {
-        Row(Modifier.padding(13.dp), verticalAlignment = Alignment.CenterVertically) { Box(Modifier.size(67.dp).clip(RoundedCornerShape(13.dp)).background(provider.tint)) { DishArt(lunchChoices.first(), Modifier.fillMaxSize()) }; Spacer(Modifier.width(10.dp)); Column(Modifier.weight(1f)) { Text("Delivered · ${meal.mealSlot.lowercase().replaceFirstChar{it.uppercase()}}", color = BrandDark, fontSize = CustomerTypeScale.Caption, fontWeight = FontWeight.Bold); Text(meal.itemName.ifBlank{"Meal"}, color = Ink, fontSize = CustomerTypeScale.Body, fontWeight = FontWeight.ExtraBold); if(meal.description.isNotBlank())Text(meal.description, color = Muted, fontSize = CustomerTypeScale.Caption,maxLines=2,overflow=TextOverflow.Ellipsis); Text("${meal.providerName.ifBlank{provider.name}} · ${formatIsoDate(meal.serviceDate)}", color = Muted, fontSize = CustomerTypeScale.Caption, modifier = Modifier.padding(top = 4.dp)) }; Surface(color = Mist, shape = RoundedCornerShape(9.dp)) { Text(meal.mealId.take(8).uppercase(), color = BrandDark, fontSize = CustomerTypeScale.Compact, fontWeight = FontWeight.Bold, modifier = Modifier.padding(7.dp)) } }
-    }
+    Box(Modifier.padding(horizontal = 18.dp)) { MealEvidenceSummary(meal) }
 }
 
 @Composable private fun OverallRatingCard(rating: Int, onRating: (Int) -> Unit) {
@@ -5585,15 +5729,29 @@ private fun RatingReviewScreen(provider: Provider, meal: CustomerMealExperience,
 
 @Composable private fun CategoryRatingsCard(ratings: Map<String, Int>, onRating: (String, Int) -> Unit) {
     Surface(Modifier.fillMaxWidth().padding(horizontal = 18.dp), color = Color.White, shape = RoundedCornerShape(18.dp), border = androidx.compose.foundation.BorderStroke(1.dp, Border)) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) { Text("Rate each part", color = Ink, fontSize = CustomerTypeScale.Body, fontWeight = FontWeight.ExtraBold); Text("Optional, but useful for the kitchen", color = Muted, fontSize = CustomerTypeScale.Caption); ratings.forEach { (category, value) -> Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text(category, color = Ink, fontSize = CustomerTypeScale.Caption, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)); Row(horizontalArrangement = Arrangement.spacedBy(1.dp)) { (1..5).forEach { star -> IconButton(onClick = { onRating(category, star) }, modifier = Modifier.size(28.dp)) { Icon(if (star <= value) Icons.Filled.Star else Icons.Outlined.StarBorder, null, tint = if (star <= value) Color(0xFFFFB300) else Border, modifier = Modifier.size(18.dp)) } } } } }
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Rate each part", color = Ink, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            Text("Optional · tap again to clear a rating", color = Muted, fontSize = 11.sp)
+            listOf("Taste", "Quantity", "Packaging", "Hygiene", "Delivery").forEach { category ->
+                Column {
+                    Text(category, color = Ink, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                    Row(horizontalArrangement = Arrangement.spacedBy(0.dp)) {
+                        (1..5).forEach { star ->
+                            val value = ratings[category] ?: 0
+                            IconButton(onClick = { onRating(category, if(value == star) 0 else star) }, modifier = Modifier.size(48.dp)) {
+                                Icon(if (star <= value) Icons.Filled.Star else Icons.Outlined.StarBorder, "$category: $star stars", tint = if (star <= value) Color(0xFFFFB300) else Color(0xFFC6CEC9), modifier = Modifier.size(26.dp))
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
-}
-
 @Composable private fun FeedbackTagsCard(selected: MutableList<String>) {
     val tags = listOf("Tasty", "Fresh", "Good quantity", "Well packed", "On time", "Too spicy", "Small portion", "Needs improvement")
     Surface(Modifier.fillMaxWidth().padding(horizontal = 18.dp), color = Color.White, shape = RoundedCornerShape(17.dp)) {
-        Column(Modifier.padding(13.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { Text("Quick feedback", color = Ink, fontSize = CustomerTypeScale.Body, fontWeight = FontWeight.ExtraBold); tags.chunked(2).forEach { rowTags -> Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) { rowTags.forEach { tag -> FilterChip(selected = tag in selected, onClick = { if (tag in selected) selected.remove(tag) else selected.add(tag) }, label = { Text(tag, fontSize = CustomerTypeScale.Caption) }, modifier = Modifier.weight(1f), leadingIcon = if (tag in selected) ({ Icon(Icons.Filled.Check, null, modifier = Modifier.size(12.dp)) }) else null) } } } }
+        Column(Modifier.padding(13.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { Text("Quick feedback", color = Ink, fontSize = CustomerTypeScale.Body, fontWeight = FontWeight.ExtraBold); tags.chunked(2).forEach { rowTags -> Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) { rowTags.forEach { tag -> FilterChip(colors = FilterChipDefaults.filterChipColors(selectedContainerColor = Mist, selectedLabelColor = BrandDark, selectedLeadingIconColor = BrandDark), selected = tag in selected, onClick = { if (tag in selected) selected.remove(tag) else selected.add(tag) }, label = { Text(tag, fontSize = CustomerTypeScale.Caption) }, modifier = Modifier.weight(1f), leadingIcon = if (tag in selected) ({ Icon(Icons.Filled.Check, null, modifier = Modifier.size(12.dp)) }) else null) } } } }
     }
 }
 
@@ -5606,7 +5764,7 @@ private fun RatingReviewScreen(provider: Provider, meal: CustomerMealExperience,
 }
 
 @Composable private fun AnonymousReviewCard(anonymous: Boolean, onChange: (Boolean) -> Unit) {
-    Surface(Modifier.fillMaxWidth().padding(horizontal = 18.dp), color = Color.White, shape = RoundedCornerShape(15.dp)) { Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Outlined.VisibilityOff, null, tint = Brand, modifier = Modifier.size(18.dp)); Spacer(Modifier.width(9.dp)); Column(Modifier.weight(1f)) { Text("Post anonymously", color = Ink, fontSize = CustomerTypeScale.Caption, fontWeight = FontWeight.Bold); Text("Your name will not be visible to the provider", color = Muted, fontSize = CustomerTypeScale.Caption) }; Switch(checked = anonymous, onCheckedChange = onChange, modifier = Modifier.scale(.78f)) } }
+    Surface(Modifier.fillMaxWidth().padding(horizontal = 18.dp), color = Color.White, shape = RoundedCornerShape(15.dp)) { Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Outlined.VisibilityOff, null, tint = Brand, modifier = Modifier.size(18.dp)); Spacer(Modifier.width(9.dp)); Column(Modifier.weight(1f)) { Text("Post anonymously", color = Ink, fontSize = CustomerTypeScale.Caption, fontWeight = FontWeight.Bold); Text("Your name will not be visible to the provider", color = Muted, fontSize = CustomerTypeScale.Caption) }; Switch(checked = anonymous, onCheckedChange = onChange, colors = SwitchDefaults.colors(checkedTrackColor = BrandDark, checkedThumbColor = Color.White), modifier = Modifier.scale(.78f)) } }
 }
 
 @Composable private fun SeriousIssueCard(onSupport: () -> Unit) {
@@ -5615,163 +5773,6 @@ private fun RatingReviewScreen(provider: Provider, meal: CustomerMealExperience,
 
 @Composable private fun ReviewPrivacyNote() { Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp), verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Outlined.VerifiedUser, null, tint = Brand, modifier = Modifier.size(14.dp)); Spacer(Modifier.width(6.dp)); Text("Reviews follow Zomeal community guidelines and may be moderated for safety.", color = Muted, fontSize = CustomerTypeScale.Compact) } }
 
-@Composable
-private fun MealIssueRefundScreen(provider: Provider, meal: String, onBack: () -> Unit, onContactSupport: () -> Unit) {
-    var issue by remember { mutableStateOf("") }
-    var details by remember { mutableStateOf("") }
-    var resolution by remember { mutableStateOf("Wallet refund") }
-    var photoCount by remember { mutableIntStateOf(0) }
-    var submitted by remember { mutableStateOf(false) }
-    BackHandler(onBack = onBack)
-
-    Scaffold(
-        containerColor = Color(0xFFFAFCFA),
-        bottomBar = {
-            Surface(modifier = Modifier.navigationBarsPadding(), color = Color.White, shadowElevation = 9.dp) {
-                if (submitted) {
-                    Button(onClick = onBack, modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 10.dp).height(49.dp), shape = RoundedCornerShape(15.dp), colors = ButtonDefaults.buttonColors(containerColor = BrandDark)) {
-                        Text("Done", fontSize = CustomerTypeScale.Caption, fontWeight = FontWeight.ExtraBold)
-                    }
-                } else {
-                    Button(onClick = { submitted = true }, enabled = issue.isNotBlank(), modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 10.dp).height(49.dp), shape = RoundedCornerShape(15.dp), colors = ButtonDefaults.buttonColors(containerColor = BrandDark)) {
-                        Icon(Icons.Outlined.Send, null, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(7.dp)); Text("Submit Request", fontSize = CustomerTypeScale.Caption, fontWeight = FontWeight.ExtraBold)
-                    }
-                }
-            }
-        }
-    ) { padding ->
-        LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(bottom = 18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            item { IssueHeader(onBack) }
-            if (submitted) {
-                item { IssueSubmittedCard(issue, resolution) }
-                item { ComplaintProgressCard() }
-                item { RefundInformationCard(resolution) }
-                item { IssueSupportContactCard(onContactSupport) }
-            } else {
-                item { IssueOrderCard(provider, meal) }
-                item { IssueTypeCard(issue) { issue = it } }
-                item { IssueDescriptionCard(details) { details = it.take(500) } }
-                item { IssueEvidenceCard(photoCount) { if (photoCount < 3) photoCount++ } }
-                item { ResolutionChoiceCard(resolution) { resolution = it } }
-                if (issue == "Food safety") item { FoodSafetyWarning(onContactSupport) }
-                item { IssuePolicyNote() }
-            }
-        }
-    }
-}
-
-@Composable
-private fun IssueHeader(onBack: () -> Unit) {
-    Box(Modifier.fillMaxWidth().height(132.dp).background(Brush.linearGradient(listOf(BrandDark, Brand, Lime), start = Offset.Zero, end = Offset(900f, 360f)), RoundedCornerShape(bottomStart = 27.dp, bottomEnd = 27.dp))) {
-        IconButton(onClick = onBack, modifier = Modifier.padding(start = 10.dp, top = 12.dp).size(40.dp).clip(CircleShape).background(Color.White.copy(alpha = .16f))) { Icon(Icons.Filled.ArrowBack, "Back", tint = Color.White, modifier = Modifier.size(18.dp)) }
-        Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("zomeal", color = Color.White, fontSize = CustomerTypeScale.Title, fontWeight = FontWeight.Black)
-            Text("Meal Issue & Refund", color = Color.White, fontSize = CustomerTypeScale.Heading, fontWeight = FontWeight.ExtraBold)
-            Text("We’ll help make this right", color = Color.White.copy(alpha = .88f), fontSize = CustomerTypeScale.Caption)
-        }
-        Surface(color = Color.White.copy(alpha = .16f), shape = CircleShape, modifier = Modifier.align(Alignment.CenterEnd).padding(end = 16.dp)) { Icon(Icons.Outlined.SupportAgent, null, tint = Color.White, modifier = Modifier.padding(9.dp).size(19.dp)) }
-    }
-}
-
-@Composable
-private fun IssueOrderCard(provider: Provider, meal: String) {
-    Surface(Modifier.fillMaxWidth().padding(horizontal = 18.dp), color = Color.White, shape = RoundedCornerShape(18.dp), shadowElevation = 2.dp) {
-        Row(Modifier.padding(13.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(62.dp).clip(RoundedCornerShape(12.dp)).background(provider.tint)) { DishArt(lunchChoices.first(), Modifier.fillMaxSize()) }
-            Spacer(Modifier.width(10.dp))
-            Column(Modifier.weight(1f)) { Text("Delivered today · Lunch", color = BrandDark, fontSize = CustomerTypeScale.Caption, fontWeight = FontWeight.Bold); Text(meal, color = Ink, fontSize = CustomerTypeScale.Caption, fontWeight = FontWeight.ExtraBold); Text("${provider.name} · Order ZM-2386", color = Muted, fontSize = CustomerTypeScale.Caption); Text("₹216 meal value", color = Ink, fontSize = CustomerTypeScale.Caption, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 3.dp)) }
-            Icon(Icons.Filled.CheckCircle, null, tint = Brand, modifier = Modifier.size(18.dp))
-        }
-    }
-}
-
-@Composable
-private fun IssueTypeCard(selected: String, onSelect: (String) -> Unit) {
-    val issues = listOf("Missing item", "Wrong meal", "Poor quality", "Damaged pack", "Late delivery", "Food safety")
-    Surface(Modifier.fillMaxWidth().padding(horizontal = 18.dp), color = Color.White, shape = RoundedCornerShape(18.dp), border = androidx.compose.foundation.BorderStroke(1.dp, Border)) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("What went wrong?", color = Ink, fontSize = CustomerTypeScale.Body, fontWeight = FontWeight.ExtraBold)
-            Text("Select the issue that best describes your experience", color = Muted, fontSize = CustomerTypeScale.Caption)
-            issues.chunked(2).forEach { rowIssues ->
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                    rowIssues.forEach { value -> FilterChip(selected = selected == value, onClick = { onSelect(value) }, label = { Text(value, fontSize = CustomerTypeScale.Caption) }, modifier = Modifier.weight(1f), leadingIcon = if (selected == value) ({ Icon(Icons.Filled.Check, null, modifier = Modifier.size(12.dp)) }) else null) }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun IssueDescriptionCard(details: String, onChange: (String) -> Unit) {
-    Surface(Modifier.fillMaxWidth().padding(horizontal = 18.dp), color = Color.White, shape = RoundedCornerShape(17.dp)) {
-        Column(Modifier.padding(13.dp)) {
-            Row { Text("Describe the issue", color = Ink, fontSize = CustomerTypeScale.Body, fontWeight = FontWeight.ExtraBold, modifier = Modifier.weight(1f)); Text("${details.length}/500", color = Muted, fontSize = CustomerTypeScale.Compact) }
-            Spacer(Modifier.height(7.dp))
-            OutlinedTextField(value = details, onValueChange = onChange, modifier = Modifier.fillMaxWidth(), minLines = 3, maxLines = 5, placeholder = { Text("Tell us what happened and which items were affected…", fontSize = CustomerTypeScale.Caption) }, textStyle = LocalTextStyle.current.copy(fontSize = CustomerTypeScale.Caption), shape = RoundedCornerShape(12.dp))
-        }
-    }
-}
-
-@Composable
-private fun IssueEvidenceCard(photoCount: Int, onAdd: () -> Unit) {
-    Surface(Modifier.fillMaxWidth().padding(horizontal = 18.dp), color = Mist, shape = RoundedCornerShape(16.dp)) {
-        Row(Modifier.padding(13.dp), verticalAlignment = Alignment.CenterVertically) {
-            Surface(color = Brand, shape = RoundedCornerShape(11.dp)) { Icon(Icons.Outlined.AddAPhoto, null, tint = Color.White, modifier = Modifier.padding(9.dp).size(18.dp)) }
-            Spacer(Modifier.width(9.dp)); Column(Modifier.weight(1f)) { Text("Add photos", color = Ink, fontSize = CustomerTypeScale.Caption, fontWeight = FontWeight.Bold); Text("Food, packaging or receipt · up to 3 photos", color = Muted, fontSize = CustomerTypeScale.Caption) }
-            OutlinedButton(onClick = onAdd, enabled = photoCount < 3, modifier = Modifier.height(34.dp), shape = RoundedCornerShape(11.dp), contentPadding = PaddingValues(horizontal = 10.dp)) { Text(if (photoCount == 0) "Add" else "$photoCount added", fontSize = CustomerTypeScale.Caption, fontWeight = FontWeight.Bold) }
-        }
-    }
-}
-
-@Composable
-private fun ResolutionChoiceCard(selected: String, onSelect: (String) -> Unit) {
-    val choices = listOf(Triple("Wallet refund", "Fast credit after approval", Icons.Outlined.AccountBalanceWallet), Triple("Replacement", "Send a replacement meal", Icons.Outlined.Restaurant), Triple("Support callback", "Speak with our care team", Icons.Outlined.Phone))
-    Surface(Modifier.fillMaxWidth().padding(horizontal = 18.dp), color = Color.White, shape = RoundedCornerShape(18.dp), border = androidx.compose.foundation.BorderStroke(1.dp, Border)) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Preferred resolution", color = Ink, fontSize = CustomerTypeScale.Body, fontWeight = FontWeight.ExtraBold)
-            choices.forEach { choice ->
-                Surface(Modifier.fillMaxWidth().clickable { onSelect(choice.first) }, color = if (selected == choice.first) Mist else Color.White, shape = RoundedCornerShape(12.dp), border = androidx.compose.foundation.BorderStroke(1.dp, if (selected == choice.first) Brand else Border)) {
-                    Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) { RadioButton(selected = selected == choice.first, onClick = { onSelect(choice.first) }, modifier = Modifier.scale(.8f)); Icon(choice.third, null, tint = Brand, modifier = Modifier.size(17.dp)); Spacer(Modifier.width(8.dp)); Column { Text(choice.first, color = Ink, fontSize = CustomerTypeScale.Caption, fontWeight = FontWeight.Bold); Text(choice.second, color = Muted, fontSize = CustomerTypeScale.Compact) } }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun FoodSafetyWarning(onContact: () -> Unit) {
-    Surface(Modifier.fillMaxWidth().padding(horizontal = 18.dp), color = Color(0xFFFFF0EE), shape = RoundedCornerShape(15.dp), border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFF0C3BD))) {
-        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Outlined.Warning, null, tint = Color(0xFFC93636), modifier = Modifier.size(20.dp)); Spacer(Modifier.width(9.dp)); Column(Modifier.weight(1f)) { Text("Food-safety concern", color = Color(0xFFAC2929), fontSize = CustomerTypeScale.Caption, fontWeight = FontWeight.ExtraBold); Text("Do not consume the meal. Keep the packaging and contact us immediately.", color = Muted, fontSize = CustomerTypeScale.Caption) }; Text("Call now", color = Color(0xFFAC2929), fontSize = CustomerTypeScale.Caption, fontWeight = FontWeight.Bold, modifier = Modifier.clickable(onClick = onContact).padding(5.dp)) }
-    }
-}
-
-@Composable
-private fun IssuePolicyNote() {
-    Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp), verticalAlignment = Alignment.Top) { Icon(Icons.Outlined.VerifiedUser, null, tint = Brand, modifier = Modifier.size(14.dp)); Spacer(Modifier.width(6.dp)); Text("Requests are reviewed using order, delivery and provider information. Eligible refunds are credited to your Zomeal Wallet.", color = Muted, fontSize = CustomerTypeScale.Compact, lineHeight = 16.sp) }
-}
-
-@Composable
-private fun IssueSubmittedCard(issue: String, resolution: String) {
-    Surface(Modifier.fillMaxWidth().padding(horizontal = 18.dp), color = Mist, shape = RoundedCornerShape(19.dp), border = androidx.compose.foundation.BorderStroke(1.dp, Brand.copy(alpha = .25f))) {
-        Column(Modifier.fillMaxWidth().padding(17.dp), horizontalAlignment = Alignment.CenterHorizontally) { Surface(color = Brand, shape = CircleShape) { Icon(Icons.Filled.Check, null, tint = Color.White, modifier = Modifier.padding(12.dp).size(24.dp)) }; Spacer(Modifier.height(8.dp)); Text("Request submitted", color = BrandDark, fontSize = CustomerTypeScale.Title, fontWeight = FontWeight.ExtraBold); Text("Ticket ZM-SUP-1048", color = Ink, fontSize = CustomerTypeScale.Caption, fontWeight = FontWeight.Bold); Text("${if (issue.isBlank()) "Meal issue" else issue} · $resolution", color = Muted, fontSize = CustomerTypeScale.Caption); Text("We’ll update you within 30 minutes", color = BrandDark, fontSize = CustomerTypeScale.Caption, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 6.dp)) }
-    }
-}
-
-@Composable
-private fun ComplaintProgressCard() {
-    val steps = listOf("Request received" to true, "Kitchen review" to false, "Resolution approved" to false, "Refund or replacement" to false)
-    Surface(Modifier.fillMaxWidth().padding(horizontal = 18.dp), color = Color.White, shape = RoundedCornerShape(18.dp), border = androidx.compose.foundation.BorderStroke(1.dp, Border)) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) { Text("Complaint progress", color = Ink, fontSize = CustomerTypeScale.Body, fontWeight = FontWeight.ExtraBold); steps.forEach { step -> Row(verticalAlignment = Alignment.CenterVertically) { Surface(color = if (step.second) Brand else Border, shape = CircleShape, modifier = Modifier.size(18.dp)) { if (step.second) Icon(Icons.Filled.Check, null, tint = Color.White, modifier = Modifier.padding(4.dp)) }; Spacer(Modifier.width(9.dp)); Text(step.first, color = if (step.second) BrandDark else Muted, fontSize = CustomerTypeScale.Caption, fontWeight = if (step.second) FontWeight.Bold else FontWeight.Normal); Spacer(Modifier.weight(1f)); Text(if (step.second) "Done" else "Pending", color = Muted, fontSize = CustomerTypeScale.Compact) } }
-        }
-    }
-}
-
-@Composable
-private fun RefundInformationCard(resolution: String) {
-    Surface(Modifier.fillMaxWidth().padding(horizontal = 18.dp), color = Color(0xFFFFFAED), shape = RoundedCornerShape(16.dp)) {
-        Row(Modifier.padding(13.dp), verticalAlignment = Alignment.CenterVertically) { Icon(if (resolution == "Wallet refund") Icons.Outlined.AccountBalanceWallet else Icons.Outlined.Info, null, tint = Brand, modifier = Modifier.size(20.dp)); Spacer(Modifier.width(9.dp)); Column { Text("Requested: $resolution", color = Ink, fontSize = CustomerTypeScale.Caption, fontWeight = FontWeight.ExtraBold); Text(if (resolution == "Wallet refund") "Eligible amount: up to ₹216 · credited after approval" else "Our team will confirm availability and next steps", color = Muted, fontSize = CustomerTypeScale.Caption) } }
-    }
-}
 
 @Composable
 private fun IssueSupportContactCard(onContact: () -> Unit) {
@@ -5782,6 +5783,42 @@ private fun IssueSupportContactCard(onContact: () -> Unit) {
 
 @Composable
 private fun OrdersScreen(provider: Provider, onNav: (Int) -> Unit, onSupport: () -> Unit) {
+    val context=LocalContext.current
+    val feedbackRepository=remember{SupabaseCustomerRepository(context)}
+    var feedbackMeals by remember{mutableStateOf<List<CustomerMealExperience>>(emptyList())}
+    var feedbackError by remember{mutableStateOf<String?>(null)}
+    var complaintMeal by remember{mutableStateOf<CustomerMealExperience?>(null)}
+    var ratingMeal by remember{mutableStateOf<CustomerMealExperience?>(null)}
+    var historyMonths by remember { mutableStateOf<List<Pair<String,Int>>>(emptyList()) }
+    var historyMonth by remember { mutableStateOf<String?>(null) }
+    var historyMeals by remember { mutableStateOf<List<CustomerMealExperience>>(emptyList()) }
+    var historyLoading by remember { mutableStateOf(true) }
+    var historyError by remember { mutableStateOf<String?>(null) }
+    var historyReload by remember { mutableStateOf(0) }
+    LaunchedEffect(historyReload) {
+        feedbackRepository.deliveredMonths { json,error ->
+            historyError=error
+            val rows=json?.optJSONArray("items")?:JSONArray()
+            historyMonths=(0 until rows.length()).map { rows.getJSONObject(it).let { row -> row.getString("month") to row.getInt("count") } }
+            historyLoading=false
+        }
+    }
+    LaunchedEffect(historyMonth,historyReload) {
+        val requested=historyMonth
+        historyMeals=emptyList()
+        if(requested!=null) {
+            historyLoading=true
+            historyError=null
+            feedbackRepository.mealExperiences(requested) { rows,error ->
+                if(historyMonth==requested){historyMeals=rows;historyError=error;historyLoading=false}
+            }
+        } else {
+            historyLoading=false
+        }
+    }
+    LaunchedEffect(Unit){feedbackRepository.mealExperiences{rows,error->feedbackMeals=rows;feedbackError=error}}
+    complaintMeal?.let{MealComplaintScreen(it){complaintMeal=null};return}
+    ratingMeal?.let{RatingReviewScreen(provider,it,onBack={ratingMeal=null},onSupport=onSupport,onSubmitted={ratingMeal=null;historyReload++;feedbackRepository.mealExperiences{rows,error->feedbackMeals=rows;feedbackError=error}});return}
     var filter by remember { mutableStateOf("Upcoming") }
     var selected by remember { mutableStateOf<PersistedDailyMeal?>(null) }
     val allMeals = CustomerSubscriptionStore.current?.dailyMeals.orEmpty()
@@ -5796,9 +5833,9 @@ private fun OrdersScreen(provider: Provider, onNav: (Int) -> Unit, onSupport: ()
         }
     }.sortedBy { it.serviceDate } }
     Scaffold(containerColor = Color(0xFFFAFCFA), bottomBar = { ZomealBottomBar(2, onNav) }) { padding ->
-        LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(bottom = 18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        LazyColumn(Modifier.fillMaxSize().padding(padding).customerEntrance(), contentPadding = PaddingValues(bottom = 18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             item { AppSectionHeader("Orders", "View upcoming and past meals", Icons.Outlined.ReceiptLong) { onNav(0) } }
-            item { OrderSummaryStrip(allMeals) }
+            item { OrderSummaryStrip(allMeals,historyMonths.sumOf { it.second }) }
             item {
                 LazyRow(Modifier.fillMaxWidth(), contentPadding = PaddingValues(horizontal = 18.dp), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                     items(listOf("Upcoming", "Delivered", "Paused", "Cancelled")) { value ->
@@ -5806,15 +5843,51 @@ private fun OrdersScreen(provider: Provider, onNav: (Int) -> Unit, onSupport: ()
                     }
                 }
             }
-            if (orders.isEmpty()) item { EmptyStateCard("No $filter orders", "Your meals will appear here.") }
-            items(orders) { order ->
+            if(filter=="Delivered") {
+                item { Row(Modifier.fillMaxWidth().padding(horizontal=18.dp),verticalAlignment=Alignment.CenterVertically) {
+                    Text("Delivered meal history",modifier=Modifier.weight(1f),fontWeight=FontWeight.Bold,color=Ink)
+                    TextButton(onClick={historyReload++}) { Text("Refresh") }
+                } }
+                historyError?.let { message -> item { Text(message,color=Color(0xFFB3261E),modifier=Modifier.padding(horizontal=18.dp)) } }
+                if(historyLoading) item { LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal=18.dp),color=Brand) }
+                if(!historyLoading && historyError==null && historyMonths.isEmpty()) item { EmptyStateCard("No delivered meals yet","Your completed meals will be saved here by month.") }
+                historyMonths.forEach { (month,count) ->
+                    item(key="month-$month") {
+                        val label=runCatching { java.time.YearMonth.parse(month).format(java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy",Locale.ENGLISH)) }.getOrDefault(month)
+                        Surface(Modifier.fillMaxWidth().padding(horizontal=18.dp).clickable { historyMonth=if(historyMonth==month)null else month },color=if(historyMonth==month)Mist else Color.White,shape=RoundedCornerShape(18.dp),border=androidx.compose.foundation.BorderStroke(1.dp,Border)) {
+                            Row(Modifier.padding(16.dp),verticalAlignment=Alignment.CenterVertically) {
+                                Icon(Icons.Outlined.CalendarMonth,null,tint=Brand)
+                                Spacer(Modifier.width(12.dp))
+                                Column(Modifier.weight(1f)) { Text(label,fontWeight=FontWeight.Bold,color=Ink);Text("$count delivered meals",color=Muted,fontSize=CustomerTypeScale.Caption) }
+                                Icon(if(historyMonth==month)Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,"Show meals",tint=Brand)
+                            }
+                        }
+                    }
+                    if(historyMonth==month) items(historyMeals,key={"history-${it.mealId}"}) { meal ->
+                        Surface(Modifier.fillMaxWidth().padding(horizontal=18.dp),color=Color.White,shape=RoundedCornerShape(18.dp),border=androidx.compose.foundation.BorderStroke(1.dp,Border)) {
+                            Column(Modifier.padding(12.dp)) {
+                                MealEvidenceSummary(meal)
+                                Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                                    OutlinedButton(onClick={complaintMeal=meal},modifier=Modifier.weight(1f)){Text("Get support",fontSize=CustomerTypeScale.Caption)}
+                                    Button(onClick={ratingMeal=meal},modifier=Modifier.weight(1f)){Text(if(meal.rating==null)"Rate meal" else "View review",fontSize=CustomerTypeScale.Caption)}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if (filter!="Delivered" && orders.isEmpty()) item { EmptyStateCard("No $filter orders", "Your meals will appear here.") }
+            feedbackError?.let{message->item{Text(message,color=Color(0xFFB3261E),modifier=Modifier.padding(18.dp))}}
+            items(if(filter=="Delivered") emptyList() else orders) { order ->
                 val slot = "${order.mealSlot.lowercase().replaceFirstChar { it.uppercase() }} · ${formatIsoDate(order.serviceDate)}"
                 val status = order.status.lowercase().replace('_',' ').replaceFirstChar { it.uppercase() }
-                OrderHistoryCard(provider, slot, order.itemName.ifBlank { "Menu item not assigned" }, status, onDetails = { selected = order }, onSupport = onSupport)
+                OrderHistoryCard(provider, slot, order.itemName.ifBlank { "Menu item not assigned" }, status,
+                    onDetails = { val found=feedbackMeals.firstOrNull{it.mealId==order.id};if(found!=null&&found.status=="DELIVERED")ratingMeal=found else selected=order },
+                    onSupport = { val found=feedbackMeals.firstOrNull{it.mealId==order.id};if(found!=null)complaintMeal=found else feedbackError="Meal support details are unavailable. Please reopen Orders to retry." })
             }
         }
     }
-    selected?.let { order -> AlertDialog(onDismissRequest = { selected = null }, icon = { Icon(Icons.Outlined.RestaurantMenu, null, tint = Brand) }, title = { Text(order.itemName.ifBlank { "Meal details" }, fontWeight = FontWeight.Bold) }, text = { Text("${order.mealSlot.lowercase().replaceFirstChar { it.uppercase() }} · ${formatIsoDate(order.serviceDate)}\nStatus: ${order.status.lowercase().replace('_',' ').replaceFirstChar { it.uppercase() }}", fontSize = CustomerTypeScale.Compact) }, confirmButton = { Button(onClick = { selected = null }) { Text("Done") } }, dismissButton = { TextButton(onClick = { selected = null; onSupport() }) { Text("Get help") } }) }
+    selected?.let { order -> AlertDialog(modifier = Modifier.customerEntrance(order.id), onDismissRequest = { selected = null }, icon = { Icon(Icons.Outlined.RestaurantMenu, null, tint = Brand) }, title = { Text(order.itemName.ifBlank { "Meal details" }, fontWeight = FontWeight.Bold) }, text = { Text("${order.mealSlot.lowercase().replaceFirstChar { it.uppercase() }} · ${formatIsoDate(order.serviceDate)}\nStatus: ${order.status.lowercase().replace('_',' ').replaceFirstChar { it.uppercase() }}", fontSize = CustomerTypeScale.Compact) }, confirmButton = { Button(onClick = { selected = null }) { Text("Done") } }, dismissButton = { TextButton(onClick = { selected = null; onSupport() }) { Text("Get help") } }) }
 }
 
 @Composable
@@ -5886,10 +5959,10 @@ private fun MonthlyUpgradeDialog(
     )
 }
 
-@Composable private fun OrderSummaryStrip(meals: List<PersistedDailyMeal>) {
+@Composable private fun OrderSummaryStrip(meals: List<PersistedDailyMeal>, deliveredTotal: Int? = null) {
     val todayIso = remember { SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Calendar.getInstance().time) }
     val next = meals.filter { it.serviceDate >= todayIso && it.status.uppercase() !in setOf("DELIVERED","PAUSED","CANCELLED","CANCELED","SKIPPED") }.minByOrNull { it.serviceDate }
-    val delivered = meals.count { it.status.equals("DELIVERED", true) }
+    val delivered = deliveredTotal ?: meals.count { it.status.equals("DELIVERED", true) }
     val paused = meals.count { it.status.equals("PAUSED", true) }
     Surface(Modifier.fillMaxWidth().padding(horizontal = 18.dp), color = Mist, shape = RoundedCornerShape(18.dp)) {
         Row(Modifier.padding(vertical = 13.dp)) { ReviewPlanFact(Icons.Outlined.Schedule, "Next meal", next?.let { formatIsoDate(it.serviceDate) } ?: "None scheduled", Modifier.weight(1f)); ReviewDivider(); ReviewPlanFact(Icons.Outlined.CheckCircle, "Delivered", "$delivered meals", Modifier.weight(1f)); ReviewDivider(); ReviewPlanFact(Icons.Outlined.PauseCircle, "Paused", "$paused meals", Modifier.weight(1f)) }
@@ -5960,7 +6033,7 @@ private fun ProfileScreen(
     var requestSubmitted by remember { mutableStateOf<String?>(null) }
     var requestError by remember { mutableStateOf<String?>(null) }
     Scaffold(containerColor = Color(0xFFFAFCFA), bottomBar = { ZomealBottomBar(3, onNav) }) { padding ->
-        LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(bottom = 18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        LazyColumn(Modifier.fillMaxSize().padding(padding).customerEntrance(), contentPadding = PaddingValues(bottom = 18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             item { AppSectionHeader("Profile", "Your account, preferences and security", Icons.Outlined.Person) { onNav(0) } }
             item { ProfileIdentityCard() }
             item { SectionTitle("Account") }
@@ -6158,10 +6231,23 @@ private fun ProfileAddressDialog(onDismiss: () -> Unit,onChangePincode:(String)-
     )
 }
 
+@Composable private fun rememberCustomerName(repository: SupabaseCustomerRepository): String {
+    var name by remember(repository) { mutableStateOf(repository.savedFullName.trim()) }
+    val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    DisposableEffect(repository, lifecycle) {
+        fun refresh() { repository.profileDetails { _, error -> if (error == null) name = repository.savedFullName.trim() } }
+        val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_RESUME) refresh() }
+        lifecycle.addObserver(observer)
+        refresh()
+        onDispose { lifecycle.removeObserver(observer) }
+    }
+    return name
+}
+
 @Composable private fun ProfileIdentityCard() {
     val context = LocalContext.current.applicationContext
     val repository = remember(context) { SupabaseCustomerRepository(context) }
-    val name = repository.savedFullName.ifBlank { "Zomeal customer" }
+    val name = rememberCustomerName(repository).ifBlank { "Add your name in Edit profile" }
     val phone = repository.savedPhone.takeIf { it.length == 10 }?.let { "+91 ${it.take(2)}XXXXXX${it.takeLast(2)}" }.orEmpty()
     val initials = name.split(' ').filter { it.isNotBlank() }.take(2).joinToString("") { it.take(1).uppercase() }.ifBlank { "Z" }
     Surface(Modifier.fillMaxWidth().padding(horizontal = 18.dp), color = Color.White, shape = RoundedCornerShape(20.dp), shadowElevation = 2.dp) {
@@ -6188,9 +6274,40 @@ private fun ProfileAddressDialog(onDismiss: () -> Unit,onChangePincode:(String)-
 
 @Composable
 private fun SubscriberHeader(provider: Provider, onNotifications: () -> Unit, onWallet: () -> Unit) {
+    val badgeContext = LocalContext.current
+    val badgeRepository = remember(badgeContext) { SupabaseCustomerRepository(badgeContext.applicationContext) }
+    val badgeLifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    var unreadAlerts by remember { mutableIntStateOf(0) }
+    var unreadWallet by remember { mutableIntStateOf(0) }
+    DisposableEffect(badgeLifecycle, badgeRepository) {
+        fun refreshBadges() {
+            badgeRepository.notificationFeed { rows, _ ->
+                if (rows != null) {
+                    var alerts = 0
+                    var wallet = 0
+                    for (index in 0 until rows.length()) {
+                        val row = rows.optJSONObject(index) ?: continue
+                        if (!row.optBoolean("read")) {
+                            alerts++
+                            if (row.optString("category") in listOf("Payment", "Reward") || row.optString("destination") == "wallet") wallet++
+                        }
+                    }
+                    unreadAlerts = alerts
+                    unreadWallet = wallet
+                }
+            }
+        }
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) refreshBadges()
+        }
+        badgeLifecycle.lifecycle.addObserver(observer)
+        refreshBadges()
+        onDispose { badgeLifecycle.lifecycle.removeObserver(observer) }
+    }
+    fun badgeCount(count: Int): String? = if (count == 0) null else if (count > 99) "99+" else count.toString()
     val context = LocalContext.current.applicationContext
     val repository = remember(context) { SupabaseCustomerRepository(context) }
-    val customerName = repository.savedFullName.substringBefore(' ').ifBlank { "there" }
+    val customerName = rememberCustomerName(repository).substringBefore(' ').ifBlank { "there" }
     val deliveryArea = CustomerProfileStore.completeAddress.ifBlank { repository.savedPincode.ifBlank { "Add your delivery address" } }
     Box {
         Box(Modifier.fillMaxWidth().height(205.dp).background(Brush.horizontalGradient(listOf(BrandDark, Brand, Lime)), RoundedCornerShape(bottomStart = 30.dp, bottomEnd = 30.dp)))
@@ -6202,9 +6319,9 @@ private fun SubscriberHeader(provider: Provider, onNotifications: () -> Unit, on
                     Spacer(Modifier.height(8.dp))
                     Text("Hello, $customerName!", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
-                HomeHeaderAction(Icons.Outlined.Notifications, "Notifications", onNotifications, caption = "Alerts")
+                HomeHeaderAction(Icons.Outlined.Notifications, "Notifications, $unreadAlerts unread", onNotifications, badge = badgeCount(unreadAlerts), caption = "Alerts")
                 Spacer(Modifier.width(10.dp))
-                HomeHeaderAction(Icons.Outlined.AccountBalanceWallet, "Wallet", onWallet, caption = "Wallet")
+                HomeHeaderAction(Icons.Outlined.AccountBalanceWallet, "Wallet, $unreadWallet unread updates", onWallet, badge = badgeCount(unreadWallet), caption = "Wallet")
             }
             Spacer(Modifier.height(12.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -6226,8 +6343,8 @@ private fun HomeHeaderAction(icon: ImageVector, label: String, onClick: () -> Un
                 Icon(icon, label, tint = Color.White, modifier = Modifier.size(18.dp))
             }
             badge?.let {
-                Surface(color = Color(0xFFE53935), shape = CircleShape, modifier = Modifier.size(16.dp).align(Alignment.TopEnd).offset(x = 3.dp, y = (-3).dp)) {
-                    Box(contentAlignment = Alignment.Center) { Text(it, color = Color.White, fontSize = CustomerTypeScale.Compact, fontWeight = FontWeight.Bold) }
+                Surface(color = Color(0xFFE53935), shape = CircleShape, modifier = Modifier.defaultMinSize(minWidth = 22.dp, minHeight = 22.dp).align(Alignment.TopEnd).offset(x = 3.dp, y = (-3).dp)) {
+                    Box(Modifier.padding(horizontal = 4.dp), contentAlignment = Alignment.Center) { Text(it, color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold) }
                 }
             }
         }
@@ -6304,7 +6421,7 @@ private fun DailyMealCard(
         "SCHEDULED", "CONFIRMED", "PENDING" -> "Scheduled"
         else -> "Schedule unavailable"
     }
-    Surface(modifier, color = Color.White, shape = RoundedCornerShape(20.dp), border = androidx.compose.foundation.BorderStroke(1.dp, accent.copy(alpha = .18f))) {
+    Surface(modifier.fillMaxHeight().customerEntrance(slot), color = Color.White, shape = RoundedCornerShape(20.dp), border = androidx.compose.foundation.BorderStroke(1.dp, accent.copy(alpha = .18f))) {
         Column(Modifier.padding(10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(if(slot == "Lunch") Icons.Outlined.LightMode else Icons.Outlined.DarkMode, null, tint = accent, modifier = Modifier.size(16.dp))
@@ -6316,6 +6433,7 @@ private fun DailyMealCard(
             Spacer(Modifier.height(6.dp))
             Text(meal, color = Ink, fontSize = 14.sp, lineHeight = 18.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
             Text(sides, color = Muted, fontSize = 12.sp, lineHeight = 16.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Spacer(Modifier.weight(1f))
             Text(label, color = accent, fontSize = 11.sp, lineHeight = 15.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 5.dp, bottom = 2.dp))
             if(delivered && review != null) {
                 OutlinedButton(onClick = onReview, modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp), shape = RoundedCornerShape(12.dp)) {
@@ -6494,7 +6612,7 @@ private fun LoginScreen(onContinue: (String) -> Unit, onCreateAccount: () -> Uni
             Box(Modifier.fillMaxWidth().height(if (compact) 205.dp else 265.dp), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Image(
-                        painter = painterResource(R.drawable.zomeal_logo),
+                        painter = painterResource(R.drawable.zomeal_customer_logo),
                         contentDescription = "Zomeal",
                         contentScale = ContentScale.Fit,
                         modifier = Modifier.width(if (compact) 205.dp else 235.dp).height(if (compact) 105.dp else 130.dp)
@@ -6566,9 +6684,16 @@ private fun RegistrationPincodeScreen(pincode:String,mobile:String,onPincodeChan
     BackHandler { if(!submitting)onBack() }
     val valid=pincode.matches(Regex("[1-9][0-9]{5}"))&&mobile.matches(Regex("[6-9][0-9]{9}"))
     Scaffold(modifier=Modifier.systemBarsPadding().imePadding(),containerColor=Color(0xFFFAFCF8),topBar={
-        Row(Modifier.fillMaxWidth().padding(10.dp),verticalAlignment=Alignment.CenterVertically){
-            IconButton(onClick=onBack,enabled=!submitting){Icon(Icons.Filled.ArrowBack,"Back to your details",tint=BrandDark)}
-            Column{Text("Your delivery area",fontWeight=FontWeight.Bold,color=Ink,fontSize=18.sp);Text("Step 2 of 3 · Next: verify your mobile",color=Muted,fontSize=12.sp)}
+        Box(Modifier.fillMaxWidth().background(Brush.horizontalGradient(listOf(BrandDark,Brand,Lime)),RoundedCornerShape(bottomStart=28.dp,bottomEnd=28.dp))){
+            Column(Modifier.padding(horizontal=20.dp,vertical=16.dp),verticalArrangement=Arrangement.spacedBy(12.dp)){
+                Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically){
+                    IconButton(onClick=onBack,enabled=!submitting,modifier=Modifier.clip(CircleShape).background(Color.White.copy(alpha=.14f))){Icon(Icons.Filled.ArrowBack,"Back to your details",tint=Color.White)}
+                    Text("zomeal",color=Color.White,fontSize=27.sp,fontWeight=FontWeight.Black,modifier=Modifier.weight(1f),textAlign=androidx.compose.ui.text.style.TextAlign.Center)
+                    Surface(color=BrandDark.copy(alpha=.7f),shape=RoundedCornerShape(12.dp)){Text("2 of 3",color=Color.White,fontSize=12.sp,fontWeight=FontWeight.Bold,modifier=Modifier.padding(horizontal=10.dp,vertical=8.dp))}
+                }
+                Text("Find kitchens near you",color=Color.White,fontSize=21.sp,fontWeight=FontWeight.ExtraBold)
+                Text("Your details  ✓   ·   Delivery area   ·   Verify mobile",color=Color.White.copy(alpha=.95f),fontSize=12.sp,lineHeight=18.sp)
+            }
         }
     },bottomBar={
         Surface(color=Color.White,shadowElevation=4.dp){Column(Modifier.padding(horizontal=22.dp,vertical=14.dp),verticalArrangement=Arrangement.spacedBy(8.dp)){
@@ -6576,21 +6701,33 @@ private fun RegistrationPincodeScreen(pincode:String,mobile:String,onPincodeChan
                 if(submitting){CircularProgressIndicator(Modifier.size(18.dp),strokeWidth=2.dp,color=Color.White);Spacer(Modifier.width(8.dp))}
                 Text(if(submitting)"Sending OTP…" else "Send OTP & continue",fontSize=16.sp,fontWeight=FontWeight.Bold)
             }
-            Text("OTP verifies your mobile number—not your address. We’ll check kitchen availability after verification.",fontSize=12.sp,lineHeight=17.sp,color=Muted)
+            Text("Next: verify your mobile number",fontSize=12.sp,color=Muted,modifier=Modifier.fillMaxWidth(),textAlign=androidx.compose.ui.text.style.TextAlign.Center)
         }}
     }){padding->
-        Column(Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(horizontal=24.dp,vertical=12.dp),verticalArrangement=Arrangement.spacedBy(17.dp)){
-            Box(Modifier.fillMaxWidth(.8f).align(Alignment.CenterHorizontally)){TourIllustration(0,onboardingAnimationsEnabled())}
-            Text("Enter your area\npincode",fontSize=28.sp,lineHeight=34.sp,fontWeight=FontWeight.ExtraBold,color=Ink)
-            Text("Use the 6-digit pincode where you want your meals delivered. We’ll show service providers available in that area.",fontSize=15.sp,lineHeight=22.sp,color=Muted)
-            OutlinedTextField(value=pincode,onValueChange={onPincodeChange(it.filter(Char::isDigit).take(6))},enabled=!submitting,
-                label={Text("Delivery area pincode")},placeholder={Text("6 digits")},singleLine=true,keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Number),
-                textStyle=LocalTextStyle.current.copy(fontSize=26.sp,letterSpacing=4.sp),modifier=Modifier.fillMaxWidth(),shape=RoundedCornerShape(16.dp),
-                isError=pincode.length==6&&!pincode.matches(Regex("[1-9][0-9]{5}")))
-            if(pincode.length==6&&!pincode.matches(Regex("[1-9][0-9]{5}")))Text("Enter a valid pincode beginning with 1–9.",color=Color(0xFFD64545),fontSize=13.sp)
-            Surface(color=Mist,shape=RoundedCornerShape(14.dp)){Column(Modifier.padding(14.dp),verticalArrangement=Arrangement.spacedBy(5.dp)){
-                Text("We’ll send an OTP to +91 $mobile",fontSize=14.sp,fontWeight=FontWeight.Bold,color=Ink)
-                TextButton(onClick=onBack,enabled=!submitting){Text("Edit name or mobile number",color=BrandDark)}
+        Column(Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(horizontal=18.dp,vertical=24.dp),verticalArrangement=Arrangement.spacedBy(18.dp)){
+            Surface(color=Color.White,shape=RoundedCornerShape(24.dp),border=androidx.compose.foundation.BorderStroke(1.dp,Border),shadowElevation=2.dp){
+                Column(Modifier.padding(horizontal=16.dp,vertical=22.dp),verticalArrangement=Arrangement.spacedBy(16.dp)){
+                    Surface(color=Mist,shape=RoundedCornerShape(16.dp),modifier=Modifier.align(Alignment.CenterHorizontally)){Icon(Icons.Outlined.LocationOn,null,tint=Brand,modifier=Modifier.padding(14.dp).size(30.dp))}
+                    Text("Enter your area pincode",fontSize=21.sp,lineHeight=27.sp,fontWeight=FontWeight.ExtraBold,color=Ink,textAlign=androidx.compose.ui.text.style.TextAlign.Center,modifier=Modifier.fillMaxWidth())
+                    Text("Where should we deliver your meals?",fontSize=14.sp,lineHeight=20.sp,color=Muted,textAlign=androidx.compose.ui.text.style.TextAlign.Center,modifier=Modifier.fillMaxWidth())
+                    PincodeInput(pincode,compact=false,enabled=!submitting,onDone={if(valid&&!submitting)onContinue()},onValueChange=onPincodeChange)
+                    Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically){
+                        Text("6-digit delivery pincode",fontSize=12.sp,color=Muted,modifier=Modifier.weight(1f))
+                        TextButton(onClick={onPincodeChange("")},enabled=!submitting&&pincode.isNotEmpty()){Text("Clear",fontSize=12.sp)}
+                    }
+                    if(pincode.length==6&&!pincode.matches(Regex("[1-9][0-9]{5}")))Text("Enter a valid pincode beginning with 1–9.",color=Color(0xFFD64545),fontSize=13.sp)
+                    Surface(color=Mist,shape=RoundedCornerShape(12.dp)){Row(Modifier.padding(12.dp),horizontalArrangement=Arrangement.spacedBy(8.dp)){
+                        Icon(Icons.Outlined.Storefront,null,tint=Brand,modifier=Modifier.size(19.dp))
+                        Text("We’ll show service providers that deliver to your area after OTP verification.",fontSize=12.sp,lineHeight=18.sp,color=Muted)
+                    }}
+                }
+            }
+            Surface(color=Color.White,shape=RoundedCornerShape(18.dp),border=androidx.compose.foundation.BorderStroke(1.dp,Border)){Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(6.dp)){
+                Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(10.dp)){
+                    Icon(Icons.Outlined.PhoneAndroid,null,tint=Brand,modifier=Modifier.size(23.dp))
+                    Column{Text("OTP will be sent to",fontSize=12.sp,color=Muted);Text("+91 $mobile",fontSize=16.sp,fontWeight=FontWeight.Bold,color=Ink)}
+                }
+                TextButton(onClick=onBack,enabled=!submitting){Text("Change mobile number",color=BrandDark,fontSize=13.sp)}
             }}
             error?.let{Text(it,color=Color(0xFFD64545),fontSize=14.sp,lineHeight=20.sp)}
         }
@@ -6714,9 +6851,9 @@ private fun SignupHero(compact: Boolean) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Box(Modifier.width(if (compact) 158.dp else 184.dp).height(if (compact) 88.dp else 104.dp)) {
                 Image(
-                    painter = painterResource(R.drawable.zomeal_logo),
+                    painter = painterResource(R.drawable.zomeal_customer_logo),
                     contentDescription = "Zomeal",
-                    contentScale = ContentScale.Crop,
+                    contentScale = ContentScale.Fit,
                     modifier = Modifier.fillMaxSize()
                 )
             }
@@ -6740,30 +6877,48 @@ private fun RegistrationFieldHeader(icon: ImageVector, title: String, subtitle: 
 }
 
 @Composable
-private fun PincodeInput(value: String, compact: Boolean, onValueChange: (String) -> Unit) {
+private fun PincodeInput(value: String, compact: Boolean, enabled:Boolean=true, onDone:()->Unit={}, onValueChange: (String) -> Unit) {
+    val focusRequester=remember{FocusRequester()}
+    val keyboard=LocalSoftwareKeyboardController.current
+    var focused by remember{mutableStateOf(false)}
+    var field by remember{mutableStateOf(TextFieldValue(value,TextRange(value.length)))}
+    LaunchedEffect(value){if(field.text!=value)field=TextFieldValue(value,TextRange(value.length))}
+    val invalid=value.length==6&&!value.matches(Regex("[1-9][0-9]{5}"))
     BasicTextField(
-        value = value,
-        onValueChange = { onValueChange(it.filter(Char::isDigit).take(6)) },
-        modifier = Modifier.fillMaxWidth(),
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+        value = field,
+        onValueChange = { updated ->
+            val clean=updated.text.filter{it in '0'..'9'}.take(6)
+            val cursor=updated.text.take(updated.selection.start).count{it in '0'..'9'}.coerceAtMost(clean.length)
+            field=TextFieldValue(clean,TextRange(cursor));onValueChange(clean)
+        },
+        enabled=enabled,singleLine=true,
+        modifier = Modifier.fillMaxWidth().focusRequester(focusRequester).onFocusChanged{focused=it.isFocused}.semantics{contentDescription="Delivery area pincode, six digits"},
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number,imeAction=androidx.compose.ui.text.input.ImeAction.Done),
+        keyboardActions=androidx.compose.foundation.text.KeyboardActions(onDone={if(value.matches(Regex("[1-9][0-9]{5}"))&&enabled){keyboard?.hide();onDone()}}),
         cursorBrush = androidx.compose.ui.graphics.SolidColor(Color.Transparent),
         decorationBox = { innerTextField ->
             Box {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(if (compact) 7.dp else 10.dp)) {
+                // One real editable value keeps paste, deletion and accessibility working.
+                Box(Modifier.matchParentSize().alpha(0f)){innerTextField()}
+                Row(Modifier.fillMaxWidth().clearAndSetSemantics{}, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     repeat(6) { index ->
+                        val active=focused&&index==field.selection.start.coerceAtMost(5)
                         Surface(
-                            modifier = Modifier.weight(1f).height(if (compact) 42.dp else 48.dp),
-                            color = Color.White,
-                            shape = RoundedCornerShape(11.dp),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, if (index == value.length) Brand.copy(alpha = .55f) else Border)
+                            modifier = Modifier.weight(1f).heightIn(min=if(compact)50.dp else 58.dp).clickable(enabled=enabled){
+                                val position=index.coerceAtMost(field.text.length)
+                                field=field.copy(selection=TextRange(position,(position+1).coerceAtMost(field.text.length)))
+                                focusRequester.requestFocus();keyboard?.show()
+                            },
+                            color = if(active)Color(0xFFEAF6EB) else if(index<value.length)Mist else Color(0xFFFAFCFA),
+                            shape = RoundedCornerShape(12.dp),
+                            border = androidx.compose.foundation.BorderStroke(if(active||invalid)2.dp else 1.dp, if(invalid)Color(0xFFD64545) else if(active)Brand else Border)
                         ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Text(value.getOrNull(index)?.toString() ?: "—", color = if (index < value.length) BrandDark else Border, fontSize = CustomerTypeScale.Title, fontWeight = FontWeight.Bold)
+                            Box(Modifier.padding(vertical=12.dp),contentAlignment = Alignment.Center) {
+                                Text(value.getOrNull(index)?.toString() ?: "–", color = if (index < value.length) BrandDark else Color(0xFFBACCBF), fontSize = 23.sp, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
                 }
-                Box(Modifier.size(1.dp)) { innerTextField() }
             }
         }
     )
@@ -7098,9 +7253,9 @@ private fun OtpVerificationScreen(mobile: String, onVerified: (String,(String?) 
                 contentAlignment = Alignment.Center
             ) {
                 Image(
-                    painter = painterResource(R.drawable.zomeal_logo),
+                    painter = painterResource(R.drawable.zomeal_customer_logo),
                     contentDescription = "Zomeal",
-                    contentScale = ContentScale.Crop,
+                    contentScale = ContentScale.Fit,
                     modifier = Modifier.fillMaxSize()
                 )
             }
@@ -7248,8 +7403,14 @@ private fun HomeDiscoveryBanners(onUpgrade:()->Unit, onReferral:()->Unit, onProv
     var banners by remember { mutableStateOf<List<HomeBanner>>(emptyList()) }
     var refresh by remember { mutableIntStateOf(0) }
     var externalLink by remember { mutableStateOf<String?>(null) }
+    var bannerResumed by remember(activity) { mutableStateOf(activity?.lifecycle?.currentState?.isAtLeast(Lifecycle.State.RESUMED) ?: true) }
+    val bannerInteraction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+    val bannerPressed by bannerInteraction.collectIsPressedAsState()
     DisposableEffect(activity) {
-        val observer = LifecycleEventObserver { _,event -> if(event == Lifecycle.Event.ON_RESUME) refresh++ }
+        val observer = LifecycleEventObserver { _,event ->
+            bannerResumed = activity?.lifecycle?.currentState?.isAtLeast(Lifecycle.State.RESUMED) ?: false
+            if(event == Lifecycle.Event.ON_RESUME) refresh++
+        }
         activity?.lifecycle?.addObserver(observer)
         onDispose { activity?.lifecycle?.removeObserver(observer) }
     }
@@ -7282,6 +7443,16 @@ private fun HomeDiscoveryBanners(onUpgrade:()->Unit, onReferral:()->Unit, onProv
     }
     if(banners.isEmpty()) return
     val pager = androidx.compose.foundation.pager.rememberPagerState(pageCount = { banners.size })
+    val bannerDragged by pager.interactionSource.collectIsDraggedAsState()
+    LaunchedEffect(banners.map { it.id }, bannerResumed, bannerDragged, bannerPressed, externalLink) {
+        if (banners.size < 2 || !bannerResumed || bannerDragged || bannerPressed || externalLink != null) return@LaunchedEffect
+        while (true) {
+            delay(4_000L)
+            if (!pager.isScrollInProgress && pager.pageCount > 1) {
+                pager.animateScrollToPage((pager.currentPage + 1) % pager.pageCount)
+            }
+        }
+    }
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         androidx.compose.foundation.pager.HorizontalPager(state = pager, contentPadding = PaddingValues(horizontal = 18.dp), pageSpacing = 10.dp, key = { banners[it].id }) { index ->
             val banner = banners.getOrNull(index) ?: return@HorizontalPager
@@ -7303,7 +7474,7 @@ private fun HomeDiscoveryBanners(onUpgrade:()->Unit, onReferral:()->Unit, onProv
                     }
                 }
             }
-            Surface(color = Mist, shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth().aspectRatio(8f/3f).clickable(enabled = banner.destination != "NONE", onClickLabel = banner.title, onClick = onTap)) {
+            Surface(color = Mist, shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth().aspectRatio(8f/3f).clickable(interactionSource = bannerInteraction, indication = androidx.compose.foundation.LocalIndication.current, enabled = banner.destination != "NONE", onClickLabel = banner.title, onClick = onTap)) {
                 Box(contentAlignment = Alignment.Center) {
                     val image = bitmap
                     if(image != null) Image(image.asImageBitmap(),banner.title,modifier = Modifier.fillMaxSize(),contentScale = ContentScale.Fit)

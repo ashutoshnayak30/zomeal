@@ -522,7 +522,7 @@ fun WeeklyMenuScreen(
     LaunchedEffect(Unit) {
         ProviderDraft.menus.forEach { day ->
             (day.lunch + day.dinner).forEach { dish ->
-                if (dish.photo != null && !isProviderPhotoReadable(context, dish.photo)) dish.photo = null
+                if (dish.photo?.let { it.startsWith("content:") || it.startsWith("file:") } == true && !isProviderPhotoReadable(context, dish.photo)) dish.photo = null
             }
         }
     }
@@ -530,6 +530,7 @@ fun WeeklyMenuScreen(
     var activeDish by remember { mutableStateOf<DishDraft?>(null) }
     var saving by remember { mutableStateOf(false) }
     var dayMessage by remember { mutableStateOf<String?>(null) }
+    var confirmSubmit by remember { mutableStateOf(false) }
     val markCurrentDirty = { ProviderDraft.savedMenuDays[selected] = false; dayMessage = null }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         uri?.let { selectedUri ->
@@ -563,12 +564,12 @@ fun WeeklyMenuScreen(
                 saving = false
                 if (result.success) {
                     dayMessage = "${days[dayBeingSaved]} menu saved to Zomeal."
-                    val nextUnfinished = ((dayBeingSaved + 1) until 7).firstOrNull { !ProviderDraft.savedMenuDays[it] }
+                    val nextUnfinished = if (activeEdit) (dayBeingSaved + 1).takeIf { it < 7 } else ((dayBeingSaved + 1) until 7).firstOrNull { !ProviderDraft.savedMenuDays[it] }
                         ?: (0 until dayBeingSaved).firstOrNull { !ProviderDraft.savedMenuDays[it] }
                     if (nextUnfinished != null) {
                         selected = nextUnfinished
                         advanceRequest++
-                    } else onNext()
+                    } else if (!activeEdit) onNext()
                 } else {
                     ProviderDraft.savedMenuDays[dayBeingSaved] = false
                     dayMessage = result.message ?: "Could not save ${days[dayBeingSaved]}. Please try again."
@@ -577,11 +578,24 @@ fun WeeklyMenuScreen(
         }
     }
     val allDaysSaved = ProviderDraft.savedMenuDays.all { it }
-    FlowScaffold(4, if (activeEdit) "Edit weekly menu" else "Monday–Sunday menus", if (activeEdit) "Choose one day, then review lunch and dinner. Each main course has its own food type, description and photo; side dishes are shown under that meal." else "Complete and submit one day at a time. Every saved day is stored in Zomeal, so you can resume from the next unfinished day later.", onBack, if (activeEdit && allDaysSaved) onNext else saveCurrentDay,
-        nextLabel = if (submittingUpdate) "Saving menu draft…" else if (activeEdit && allDaysSaved) "Finish & save menu draft" else if (saving) "Saving ${days[selected]}…" else if (completedDays == 6 && !ProviderDraft.savedMenuDays[selected]) "Save ${days[selected]} & continue" else "Save ${days[selected]} & next",
+    if (confirmSubmit) AlertDialog(
+        onDismissRequest = { confirmSubmit = false },
+        title = { Text("Submit menu changes?", fontSize = 18.sp) },
+        text = { Text("All saved days and other saved business edits will go to Zomeal for approval. Your current approved menu stays live until approval.") },
+        confirmButton = { TextButton(onClick = { confirmSubmit = false; onNext() }) { Text("Submit for approval") } },
+        dismissButton = { TextButton(onClick = { confirmSubmit = false }) { Text("Keep editing") } }
+    )
+    FlowScaffold(4, "Weekly menu", "Edit a day, save it, then continue. Submit once when finished.", onBack, saveCurrentDay,
+        nextLabel = if (saving) "Saving ${days[selected]}…" else if (selected == 6) "Save Sunday" else "Save ${days[selected]} & next day",
         nextEnabled = !saving && !submittingUpdate,
         listState = menuListState) {
-        if (activeEdit) InfoCard("Save each changed day into this draft. When you finish all sections, return to Manage business and submit everything together as one request. Your approved menu stays live during review.")
+        if (activeEdit) {
+            Text("1. Save each edited day   2. Submit once", fontSize = 13.sp, color = PBrand, fontWeight = FontWeight.SemiBold)
+            Button(onClick = { confirmSubmit = true }, enabled = allDaysSaved && !saving && !submittingUpdate, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = PBrand)) {
+                Text(if (submittingUpdate) "Submitting…" else "Submit changes for approval", fontSize = 14.sp)
+            }
+            Text("Changing only one day? Save that day, then submit here. Unchanged days stay as they are. Includes other saved business edits.", fontSize = 12.sp, color = PMuted)
+        }
         Section("Choose day") {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 days.chunked(4).forEachIndexed { rowIndex, row ->
@@ -590,7 +604,7 @@ fun WeeklyMenuScreen(
                             val actual = rowIndex * 4 + index
                             FilterChip(
                                 selected = selected == actual,
-                                onClick = { if (!saving) { selected = actual; dayMessage = null } },
+                                onClick = { if (!saving && !submittingUpdate) { selected = actual; dayMessage = null } },
                                 label = { Text((if (ProviderDraft.savedMenuDays[actual]) "✓ " else "") + day.take(3)) },
                                 modifier = Modifier.weight(1f)
                             )
@@ -607,7 +621,7 @@ fun WeeklyMenuScreen(
             MealMenuEditor("Dinner", ProviderDraft.menus[selected].dinner, ProviderDraft.menus[selected].dinnerFixed, { ProviderDraft.menus[selected].dinnerFixed = it; markCurrentDirty() }, markCurrentDirty, if (offersLunch) null else nextDayMainCourseFocus) { dish -> activeDish = dish; picker.launch("image/*") }
         }
         dayMessage?.let { InfoCard(it) }
-        InfoCard("$completedDays of 7 days submitted. Green checkmarks show days safely stored in Zomeal. All seven days are required before account activation, and every photo stays hidden until approved.")
+        Text("$completedDays/7 days saved · Saving a day does not submit it for approval.", fontSize = 12.sp, color = PMuted)
     }
 }
 
@@ -618,7 +632,7 @@ private fun MealMenuEditor(title: String, dishes: SnapshotStateList<DishDraft>, 
             Surface(color = PMist, shape = RoundedCornerShape(14.dp)) {
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Main course ${index + 1}", color = PBrand, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                        Text("Main course ${index + 1}", color = PBrand, fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
                         if (dishes.size > 1) IconButton(onClick = { dishes.remove(dish); onDirty() }) { Icon(Icons.Outlined.Delete, "Remove", tint = Color(0xFFB23A32)) }
                     }
                     Field("Dish name *", dish.name, { dish.name = it; onDirty() }, "e.g. Paneer butter masala", modifier = if (index == 0 && firstDishFocusRequester != null) Modifier.focusRequester(firstDishFocusRequester) else Modifier)
@@ -638,7 +652,6 @@ private fun MealMenuEditor(title: String, dishes: SnapshotStateList<DishDraft>, 
                             )
                         }
                     }
-                    Field("Description (optional)", dish.description, { dish.description = it; onDirty() }, "Ingredients, nutrition or allergen note", singleLine = false)
                     OutlinedButton(onClick = { onPhoto(dish) }, modifier = Modifier.fillMaxWidth()) {
                         Icon(if (dish.photo == null) Icons.Outlined.AddAPhoto else Icons.Outlined.CheckCircle, null)
                         Spacer(Modifier.width(7.dp)); Text(if (dish.photo == null) "Upload this dish photo" else "Photo selected · Change")
@@ -647,7 +660,14 @@ private fun MealMenuEditor(title: String, dishes: SnapshotStateList<DishDraft>, 
             }
         }
         TextButton(onClick = { dishes.add(DishDraft()); onDirty() }) { Icon(Icons.Outlined.Add, null); Text("Add another main course") }
-        Field("Fixed / included items", fixed, onFixed, "Dal, rice/roti, salad")
+        Field("Side dishes (separate with commas)", includedItems(fixed), { if (!it.contains(';') && !it.contains(":") && !it.contains('\n')) onFixed(withIncludedItems(fixed, it)) }, "Rice, dal, salad")
+        Text("Portion per person", color = PBrand, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+        Text("Set only items you serve. These are serving sizes, not total cooking quantities.", color = PMuted, fontSize = 12.sp)
+        sideDishNames(fixed).forEach { item ->
+            Field("$item portion (optional)", portionValue(fixed, item), { value ->
+                if (value.length <= 40 && !value.contains(';') && !value.contains('\n')) onFixed(withPortion(fixed, item, value))
+            }, "e.g. 3 scoops, 4 pieces or 1 bowl")
+        }
     }
 }
 

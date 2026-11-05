@@ -1,5 +1,5 @@
 import { corsHeaders, errorMessage, jsonResponse } from "../_shared/http.ts";
-import { optionalUser, serviceClient } from "../_shared/supabase.ts";
+import { serviceClient } from "../_shared/supabase.ts";
 
 const STAFF_ROLES = ["ADMIN", "OPERATIONS", "FINANCE"] as const;
 type StaffRole = typeof STAFF_ROLES[number];
@@ -27,13 +27,20 @@ Deno.serve(async (request) => {
   if (request.method !== "POST") return jsonResponse({ message: "Method not allowed" }, 405);
 
   try {
+    const authorization = request.headers.get("Authorization") || "";
+    const bearer = /^Bearer\s+(\S+)$/i.exec(authorization);
+    if (!bearer) return jsonResponse({ message: "A valid user session is required" }, 401);
     const client = serviceClient();
-    const caller = await optionalUser(request);
-    if (!caller) return jsonResponse({ message: "Your session has expired" }, 401);
+    // Validate with Auth, not decoded JWT claims or client-supplied role metadata.
+    // Keep this gate ahead of every service-role query and auth.admin operation.
+    const { data: callerData, error: authError } = await client.auth.getUser(bearer[1]);
+    const caller = callerData?.user;
+    if (authError || !caller || caller.is_anonymous) return jsonResponse({ message: "Your session has expired or is not eligible" }, 401);
     const body = await request.json().catch(() => ({}));
     const action = String(body.action || "list").toLowerCase();
 
     if (action === "finalize_otp") {
+      if (!caller.email || !caller.email_confirmed_at) return jsonResponse({ message: "Verify your invited email before activating staff access" }, 403);
       const email = String(caller.email || "").trim().toLowerCase();
       const { data: invitation, error: invitationError } = await client
         .from("admin_staff_invitations")

@@ -34,6 +34,8 @@ android {
         buildConfigField("String", "SUPABASE_URL", "\"$supabaseUrl\"")
         buildConfigField("String", "SUPABASE_ANON_KEY", "\"$supabaseAnonKey\"")
         buildConfigField("boolean", "DEVELOPMENT_AUTH", "false")
+        // Public endpoint only. Never place Google credentials in the APK.
+        buildConfigField("String", "KITCHEN_VOICE_URL", "\"${localProperties.getProperty("KITCHEN_VOICE_URL", "").replace("\\", "\\\\").replace("\"", "\\\"")}\"")
     }
     buildTypes {
         debug { buildConfigField("boolean", "DEVELOPMENT_AUTH", "true") }
@@ -48,6 +50,7 @@ android {
 }
 
 dependencies {
+    testImplementation("junit:junit:4.13.2")
     val composeBom = platform("androidx.compose:compose-bom:2024.12.01")
     implementation(composeBom)
     androidTestImplementation(composeBom)

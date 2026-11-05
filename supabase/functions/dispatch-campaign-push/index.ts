@@ -36,7 +36,7 @@ Deno.serve(async request => {
       let delivered=!row.token,invalid=false,code:string|null=row.token?null:"DEVICE_DISABLED";
       try {
         if(row.token){
-          const response=await fetch(`https://fcm.googleapis.com/v1/projects/${firebase.project}/messages:send`,{method:"POST",signal:AbortSignal.timeout(10000),headers:{Authorization:`Bearer ${firebase.token}`,"Content-Type":"application/json"},body:JSON.stringify({message:{token:row.token,notification:{title:row.title,body:row.body},data:{title:row.title,body:row.body,destination:row.destination,notification_id:row.notification_id},android:{priority:"high",ttl:"86400s",notification:{channel_id:row.app_kind==="PROVIDER"?"zomeal_provider_updates":"zomeal_updates",tag:row.notification_id}}}})});
+          const response=await fetch(`https://fcm.googleapis.com/v1/projects/${firebase.project}/messages:send`,{method:"POST",signal:AbortSignal.timeout(10000),headers:{Authorization:`Bearer ${firebase.token}`,"Content-Type":"application/json"},body:JSON.stringify({message:{token:row.token,...(row.app_kind==="PROVIDER"?{notification:{title:row.title,body:row.body}}:{}),data:{title:row.title,body:row.body,destination:row.destination,notification_id:row.notification_id},android:{priority:"high",ttl:"86400s",...(row.app_kind==="PROVIDER"?{notification:{channel_id:"zomeal_provider_updates",tag:row.notification_id}}:{})}}})});
           delivered=response.ok;
           if(!delivered){const result=await response.json();code=String(result.error?.status || response.status);invalid=(result.error?.details || []).some((d:{errorCode?:string})=>d.errorCode==="UNREGISTERED");}
         }

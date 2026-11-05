@@ -44,7 +44,7 @@ private val tourSteps=listOf(
     TourStep("CHOOSE A PACKAGE","Choose lunch, dinner\nor both","Select your meal package, then choose a 7-day weekly trial or a 30-day monthly plan where available.","Check the price for your selected package and period."),
     TourStep("SET YOUR MENU","Choose your meals\nfor all 7 days","Pick your lunch and dinner dishes from the provider’s menu. Review and save each day to complete your weekly menu.","Use the quick-selection options or choose day by day."),
     TourStep("REVIEW & PAY","Review your plan.\nChoose how to pay.","Check your menu, delivery address, start date and payment amount. Pay securely, or save your details and pay later.","Saving a plan does not activate the subscription."),
-    TourStep("MANAGE YOUR MEALS","Pause or edit meals\nwhen plans change","Open Pause Plan to skip eligible meals before the cut-off. Edit available meal choices and use Wallet to check charges or recharge.","Lunch cut-off: 8 AM · Dinner cut-off: 4 PM (IST).")
+    TourStep("MANAGE YOUR MEALS","Pause or edit meals\nwhen plans change","Open Pause Plan to skip eligible meals before the cut-off. Edit available meal choices and use Wallet to check charges or recharge.","Lunch cut-off: 8 AM · Dinner cut-off: 6 PM (IST).")
 )
 
 internal class CustomerOnboardingPreferences(context:Context) {

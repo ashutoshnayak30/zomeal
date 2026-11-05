@@ -76,7 +76,7 @@ Deno.serve(async request => {
     for (const device of devices) {
       const response = await fetch(`https://fcm.googleapis.com/v1/projects/${account.project_id}/messages:send`, {
         method: "POST", headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ message: { token: device.token, notification: { title, body: messageBody }, data: { title, body: messageBody, destination }, android: { priority: "high", notification: { channel_id: appKind === "PROVIDER" ? "zomeal_provider_updates" : "zomeal_updates" } } } }),
+        body: JSON.stringify({ message: { token: device.token, ...(appKind === "PROVIDER" ? { notification: { title, body: messageBody } } : {}), data: { title, body: messageBody, destination }, android: { priority: "high", ...(appKind === "PROVIDER" ? { notification: { channel_id: "zomeal_provider_updates" } } : {}) } } }),
       });
       if (response.ok) sent++;
       else { const detail = await response.text(); failures.push(detail.slice(0, 240)); if (/UNREGISTERED|registration-token-not-registered/i.test(detail)) invalid.push(device.id); }

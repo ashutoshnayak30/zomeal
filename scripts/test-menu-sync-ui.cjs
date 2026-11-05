@@ -1,0 +1,26 @@
+const assert=require('node:assert/strict'),fs=require('node:fs'),{JSDOM}=require('jsdom');
+const ids=['changeRequestList','changeDetailHost','changeNavCount','pageTitle','crumb','refreshChanges','backToChanges','saveChangeEdits','approveChange','rejectChange','changeSearch'];
+const dom=new JSDOM('<div id="dashboard"><nav id="nav"></nav><section id="overviewView" class="view"></section><section id="changeDetailView" class="view"></section>'+ids.map(id=>`<div id="${id}"></div>`).join('')+'</div>',{runScripts:'outside-only'}),w=dom.window,calls=[];
+w.structuredClone=structuredClone;w.confirm=()=>true;w.hideViews=()=>{};w.showToast=()=>{};w.navigate=()=>{};
+const record={id:'date1',provider_name:'<img src=x>',old_name:'Paneer',new_name:'Dal',dietary_type:'VEG',meal_slot:'LUNCH',service_dates:['2026-10-10'],status:'PENDING',affected_customers:2};
+w.ZomealAPI={accountAccess:async()=>true,providerChangeDetail:async()=>({request:{id:'req',status:'APPROVED',payload:{menus:[]}},before:{}}),menuSync:async(id,apply=false)=>{calls.push([id,apply]);return {customers:1,changes:[{day:1,slot:'LUNCH',old_item:'old',new_item:'new',old_name:'<script>bad</script>',new_name:'Dal'}],conflicts:[]}},datedMenuChanges:async(...args)=>{calls.push(args);return {items:[record]}}};
+w.eval(fs.readFileSync('admin/changes.js','utf8'));w.eval(fs.readFileSync('admin/dated-menu-changes.js','utf8'));
+const tick=()=>new Promise(r=>setTimeout(r,15));
+(async()=>{
+ await w.ZomealChanges.open('req');w.document.querySelector('[data-preview]').click();await tick();assert.equal(w.document.querySelector('[data-impact] script'),null);
+ w.document.querySelector('[data-sync]').click();await tick();assert.ok(calls.some(c=>c[0]==='req'&&c[1]===true));
+ assert.ok(w.document.querySelector('[data-sync]').classList.contains('publish-primary'));
+ assert.match(w.document.querySelector('.menu-publish-card h3').textContent,/sync complete/);
+ w.ZomealAPI.providerChangeQueue=async()=>[1,2,3].map(n=>({id:'request'+n,provider_id:'same-kitchen',provider_name:'Manju kitchen',status:'APPROVED',requested_at:`2026-10-0${n}T10:00:00Z`,menu_item_count:28,photo_count:0}));
+ await w.ZomealChanges.load();
+ assert.equal(w.document.querySelectorAll('.request-history').length,1);
+ assert.equal(w.document.querySelector('#changeRequestList .review-change').dataset.id,'request3');
+ assert.equal(w.document.querySelectorAll('.request-history .review-change').length,2);
+ w.ZomealAPI.providerChangeDetail=async()=>({request:{id:'old',status:'APPROVED',payload:{menus:[]}},before:{},publication:{live:false,can_sync:false,issue:'Older request: open newest'}});
+ await w.ZomealChanges.open('old');assert.equal(w.document.querySelector('[data-sync]').disabled,true);
+ w.document.querySelector('#nav button').click();await tick();assert.equal(w.document.querySelector('.feedback-card img'),null);
+ w.document.querySelector('[data-decision="REJECTED"]').click();await tick();assert.ok(!calls.some(c=>c[1]==='REJECTED'));
+ w.document.querySelector('[data-decision="APPROVED"]').click();await tick();assert.ok(calls.some(c=>c[0]==='date1'&&c[1]==='APPROVED'));
+ w.document.querySelector('#dashboard').classList.add('hidden');await tick();assert.equal(w.document.querySelector('.feedback-grid').textContent,'');
+ console.log('PASS: approved-menu repair action, impact preview escaping, dated navigation/review/note validation and logout clearing');w.close();
+})().catch(e=>{console.error(e);w.close();process.exitCode=1});

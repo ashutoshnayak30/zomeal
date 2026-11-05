@@ -1,0 +1,42 @@
+const assert=require('node:assert/strict');
+module.exports=async(db,admin)=>{
+ await db.exec('begin');
+ try{
+  const u='94000000-0000-4000-8000-000000000001',p='94000000-0000-4000-8000-000000000002',pkg='94000000-0000-4000-8000-000000000003';
+  await db.query("insert into auth.users(id,phone) values($1,'919898989898')",[u]);
+  await db.query("insert into providers(id,legal_name,display_name,slug,dietary_type) values($1,'Reminder test','Reminder kitchen','reminder-test','BOTH')",[p]);
+  await db.query("insert into packages(id,provider_id,name,kind,dietary_type,duration_days) values($1,$2,'Both','LUNCH_AND_DINNER','BOTH',30)",[pkg,p]);
+  const sub=(await db.query("insert into customer_subscriptions(customer_id,provider_id,package_id,status,start_date,end_date,package_price_paise) values($1,$2,$3,'ACTIVE','2090-01-01','2090-01-30',300000) returning id",[u,p,pkg])).rows[0].id;
+  const dish=(await db.query("insert into menu_items(provider_id,name,category,dietary_type,created_by) values($1,'Paneer curry','MAIN_COURSE','VEG',$2) returning id",[p,u])).rows[0].id;
+  await db.query('insert into customer_wallets(customer_id,balance_paise) values($1,100000)',[u]);
+  await db.query("insert into push_device_tokens(user_id,token,app_kind) values($1,'reminder-test-device','CUSTOMER')",[u]);
+  for(const slot of ['LUNCH','DINNER'])await db.query("insert into subscription_meals(subscription_id,provider_id,customer_id,service_date,meal_slot,selected_menu_item_id,meal_value_paise) values($1,$2,$3,'2090-01-01',$4,$5,7500)",[sub,p,u,slot,dish]);
+  const run=time=>db.query('select process_personal_meal_reminders($1)',[`2090-01-01T${time}+05:30`]);
+  const notes=async()=>(await db.query('select * from customer_notifications where customer_id=$1 order by dedupe_key',[u])).rows;
+  await run('10:30:00');assert.equal((await notes()).length,0,'disabled by default');
+  await db.exec('update meal_reminder_settings set enabled=true');
+  await run('10:29:59');assert.equal((await notes()).length,0);
+  await run('10:30:00');await run('10:30:01');assert.equal((await notes()).length,1,'one lunch');
+  assert.match((await notes())[0].message,/Paneer curry.*Reminder kitchen/);
+  assert.match((await notes())[0].title,/scheduled/);
+  await db.query("update customer_subscriptions set status='PAUSED',pause_reason='INSUFFICIENT_WALLET' where id=$1",[sub]);
+  await db.query("update subscription_meals set status='PAUSED' where subscription_id=$1 and meal_slot='DINNER'",[sub]);
+  await db.query('update customer_wallets set balance_paise=0 where customer_id=$1',[u]);
+  await run('18:29:59');assert.equal((await notes()).length,1);
+  await run('18:30:00');await run('18:45:00');assert.equal((await notes()).length,2,'one dinner');
+  assert.match((await notes())[0].message,/skipped after cutoff stay skipped/);
+  assert.equal((await notes())[0].destination,'wallet');
+  assert.equal((await db.query('select count(*)::int n from meal_push_outbox o join customer_notifications n on n.id=o.notification_id where n.customer_id=$1',[u])).rows[0].n,2,'same inbox rows queued for phone');
+  assert.equal((await db.query("select status from subscription_meals where subscription_id=$1 and meal_slot='DINNER'",[sub])).rows[0].status,'PAUSED');
+  assert.equal(Number((await db.query('select balance_paise from customer_wallets where customer_id=$1',[u])).rows[0].balance_paise),0);
+  for(const role of ['anon','authenticated'])assert.equal((await db.query("select has_function_privilege($1,'process_personal_meal_reminders(timestamptz)','execute') ok",[role])).rows[0].ok,false);
+  await db.query("select set_config('request.jwt.claim.sub',$1,false)",[admin]);
+  const settings=(await db.query('select admin_meal_reminders() result')).rows[0].result.items;
+  assert.equal(settings.length,2);
+  settings.forEach(s=>s.send_time=s.slot==='LUNCH'?'11:15':'19:00');
+  const updated=(await db.query('select admin_meal_reminders($1::jsonb) result',[JSON.stringify(settings)])).rows[0].result.items;
+  assert.equal(updated.find(s=>s.slot==='LUNCH').send_time,'11:15:00');
+  assert.equal(updated.find(s=>s.slot==='DINNER').send_time,'19:00:00');
+  console.log('PASS: meal-reminder times, personal dish, daily deduplication, inbox + phone queue, low-wallet variant, no meal/wallet mutations, private worker');
+ }finally{await db.exec('rollback');}
+};

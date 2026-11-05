@@ -1,0 +1,5 @@
+*
+!package.json
+!domain.mjs
+!server.mjs
+!Dockerfile

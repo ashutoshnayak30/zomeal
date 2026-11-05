@@ -1,0 +1,48 @@
+const assert=require('node:assert/strict');
+module.exports=async(db)=>{
+ await db.exec('begin');
+ try {
+  const user='71000000-0000-4000-8000-000000000001', provider='71000000-0000-4000-8000-000000000002',pkg='71000000-0000-4000-8000-000000000003';
+  await db.query('insert into auth.users(id,phone) values($1,$2)',[user,'919876543210']);
+  await db.query("insert into providers(id,legal_name,display_name,slug,dietary_type) values($1,'Push test','Push test','push-test','BOTH')",[provider]);
+  await db.query("insert into packages(id,provider_id,name,kind,dietary_type,duration_days) values($1,$2,'Both','LUNCH_AND_DINNER','BOTH',30)",[pkg,provider]);
+  const sub=(await db.query("insert into customer_subscriptions(customer_id,provider_id,package_id,status,start_date,end_date,delivery_address,package_price_paise) values($1,$2,$3,'ACTIVE','2090-01-01','2090-01-30','{}',300000) returning id",[user,provider,pkg])).rows[0].id;
+  await db.query('insert into customer_wallets(customer_id,balance_paise) values($1,100000)',[user]);
+  await db.query("insert into push_device_tokens(user_id,token,app_kind) values($1,'test-token-not-real-123456789','CUSTOMER')",[user]);
+  for(const [slot,status,price] of [['LUNCH','SCHEDULED',7550],['DINNER','SCHEDULED',6025]])await db.query("insert into subscription_meals(subscription_id,provider_id,customer_id,service_date,meal_slot,status,meal_value_paise,delivery_address) values($1,$2,$3,'2090-01-01',$4,$5,$6,'{}')",[sub,provider,user,slot,status,price]);
+  const run=async(time)=>(await db.query('select process_due_customer_meal_charges($1) result',[`2090-01-01T${time}+05:30`])).rows[0].result;
+  const balance=async()=>(await db.query('select balance_paise from customer_wallets where customer_id=$1',[user])).rows[0].balance_paise;
+  assert.equal((await run('14:29:59')).charged,0);
+  assert.equal((await run('14:30:00')).charged,1);
+  assert.equal(Number(await balance()),92450);
+  assert.equal((await run('14:30:00')).charged,0);
+  assert.equal((await run('21:59:59')).charged,0);
+  assert.equal((await run('22:00:00')).charged,1);
+  assert.equal(Number(await balance()),86425);
+  assert.equal((await run('22:05:00')).charged,0);
+  const notes=(await db.query("select title,message from customer_notifications where customer_id=$1 and dedupe_key like 'MEAL_DEBIT_%' order by title",[user])).rows;
+  assert.equal(notes.length,2);
+  assert.match(notes[0].message,/₹60\.25.*dinner.*₹864\.25/);
+  assert.match(notes[1].message,/₹75\.50.*lunch.*₹924\.50/);
+  const batch=(await db.query('select claim_meal_push_batch() result')).rows[0].result;
+  assert.equal(batch.length,2);
+  assert.equal((await db.query('select claim_meal_push_batch() result')).rows[0].result.length,0);
+  await db.query('select finish_meal_push($1,$2,true,false,null)',[batch[0].id,batch[0].lease_id]);
+  assert.equal((await db.query('select count(*)::int n from meal_push_outbox where completed_at is not null')).rows[0].n,1);
+  for(const [slot,status] of [['LUNCH','PAUSED'],['DINNER','CANCELLED']])await db.query("insert into subscription_meals(subscription_id,provider_id,customer_id,service_date,meal_slot,status,meal_value_paise,delivery_address) values($1,$2,$3,'2090-01-02',$4,$5,5000,'{}')",[sub,provider,user,slot,status]);
+  assert.equal((await db.query("select process_due_customer_meal_charges('2090-01-02 23:00+05:30') result")).rows[0].result.charged,0);
+  await db.query("insert into subscription_meals(subscription_id,provider_id,customer_id,service_date,meal_slot,status,meal_value_paise,delivery_address) values($1,$2,$3,'2090-01-03','LUNCH','SCHEDULED',999999,'{}')",[sub,provider,user]);
+  assert.equal((await db.query("select process_due_customer_meal_charges('2090-01-03 14:30+05:30') result")).rows[0].result.charged,0);
+  assert.equal((await db.query("select count(*)::int n from customer_notifications where customer_id=$1 and dedupe_key like 'MEAL_DEBIT_%'",[user])).rows[0].n,2);
+  assert.equal((await db.query("select authorize_meal_push_dispatch('invalid') ok")).rows[0].ok,false);
+  await db.query("select set_config('request.jwt.claim.sub',$1,false)",[user]);
+  const register=async(token)=>(await db.query('select register_customer_push_device($1) result',[token])).rows[0].result;
+  assert.equal((await register('test-token-not-real-123456789')).registered,true);
+  await db.query('update push_device_tokens set enabled=false where user_id=$1',[user]);
+  assert.equal((await register('test-token-not-real-123456789')).refresh_required,true);
+  assert.equal((await register('fresh-token-not-real-123456789')).registered,true);
+  assert.equal((await db.query("select has_function_privilege('anon','public.register_customer_push_device(text)','execute') ok")).rows[0].ok,false);
+  for(const role of ['anon','authenticated'])assert.equal((await db.query("select has_function_privilege($1,'public.claim_meal_push_batch()','execute') ok",[role])).rows[0].ok,false);
+  console.log('PASS: 14:30/22:00 IST boundaries, exact paise notifications, idempotent debits, pause/cancel/insufficient exclusions, push leases and private RPCs');
+ }finally{await db.exec('rollback');}
+};

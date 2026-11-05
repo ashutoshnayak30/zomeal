@@ -1,0 +1,66 @@
+const assert=require('node:assert/strict');
+module.exports=async(db,admin)=>{
+ await db.exec('begin');
+ try{
+ const a='83000000-0000-4000-8000-000000000001',b='83000000-0000-4000-8000-000000000002',k='83000000-0000-4000-8000-000000000003';
+ await db.query("insert into auth.users(id,phone) values($1,'918888888881'),($2,'918888888882')",[a,b]);
+ await db.query("update profiles set full_name='Schedule test',registration_pincode='751019' where id=$1",[a]);
+ await db.query("insert into providers(id,legal_name,display_name,slug,dietary_type) values($1,'Schedule','Schedule kitchen','schedule-kitchen','VEG')",[k]);
+ await db.query('insert into provider_members(provider_id,user_id) values($1,$2)',[k,b]);
+ await db.query("insert into user_roles(user_id,role) values($1,'PROVIDER')",[b]);
+ await db.query('insert into customer_wallets(customer_id,balance_paise) values($1,49999)',[a]);
+ await db.query("insert into push_device_tokens(user_id,token,app_kind) values($1,'schedule-test-customer-token','CUSTOMER'),($2,'schedule-test-provider-token','PROVIDER')",[a,b]);
+ const rpc=async(name,args=[])=>(await db.query(`select ${name}(${args.map((_,i)=>'$'+(i+1)).join(',')}) result`,args)).rows[0].result;
+ const as=async id=>db.query("select set_config('request.jwt.claim.sub',$1,false)",[id]);
+ const rejected=async(fn,pattern)=>{await db.exec('savepoint expected_failure');await assert.rejects(fn,pattern);await db.exec('rollback to savepoint expected_failure');};
+ await as(a);
+ await rejected(()=>rpc('admin_notification_schedules'),/Administrator access/);
+ await as(admin);
+ assert.equal((await rpc('admin_campaign_preview',['CUSTOMER','PINCODE',['751019'],''])).users.some(u=>u.user_id===a),true);
+ assert.equal((await rpc('admin_campaign_preview',['CUSTOMER','USERS',[b],''])).count,0,'provider-only excluded from customer campaigns');
+ assert.equal((await rpc('admin_campaign_preview',['PROVIDER','PROVIDER',[k],''])).count,1);
+ const base={app_kind:'CUSTOMER',audience:'USERS',target_values:[a],title:'Drink water',message:'Test only',start_at:new Date(Date.now()+60000).toISOString(),ends_at:new Date(Date.now()+86400000).toISOString(),daytime_only:false};
+ await rejected(()=>rpc('admin_save_notification_schedule',[{...base,interval_hours:1}]),/2, 6, 12/);
+ const id=await rpc('admin_save_notification_schedule',[base]);
+ await db.query("update notification_schedules set next_run_at=now()-interval '1 minute' where id=$1",[id]);
+ await rpc('process_notification_schedules');await rpc('process_notification_schedules');
+ assert.equal((await db.query('select count(*)::int n from notification_schedule_runs where schedule_id=$1',[id])).rows[0].n,1);
+ let batch=await rpc('claim_campaign_push_batch');assert.equal(batch.length,1);assert.equal(batch[0].app_kind,'CUSTOMER');
+ assert.equal((await rpc('claim_campaign_push_batch')).length,0,'lease blocks concurrent duplicate');
+ await rpc('finish_campaign_push',[batch[0].id,batch[0].lease_id,true,false,null]);
+ assert.equal((await rpc('admin_notification_schedules')).runs.find(r=>r.schedule_id===id).accepted,1);
+ const partner=await rpc('admin_save_notification_schedule',[{...base,app_kind:'PROVIDER',audience:'PROVIDER',target_values:[k],interval_hours:2}]);
+ await db.query("update notification_schedules set next_run_at=now()-interval '9 hours' where id=$1",[partner]);
+ await rpc('process_notification_schedules');
+ assert.equal((await db.query('select count(*)::int n from provider_notifications where recipient_user_id=$1',[b])).rows[0].n,1);
+ assert.equal((await db.query('select next_run_at>now() ok from notification_schedules where id=$1',[partner])).rows[0].ok,true,'missed backlog skipped');
+ await rpc('admin_notification_schedule_state',[partner,'PAUSED']);
+ assert.equal((await rpc('claim_campaign_push_batch')).length,0,'pause stops pending sends');
+ await rpc('admin_notification_schedule_state',[partner,'ACTIVE']);
+ await db.query("update notification_schedules set next_run_at=now()-interval '1 minute' where id=$1",[partner]);
+ await rpc('process_notification_schedules');batch=await rpc('claim_campaign_push_batch');
+ assert.equal(batch[0].app_kind,'PROVIDER');
+ await rpc('finish_campaign_push',[batch[0].id,batch[0].lease_id,false,true,'NOT_FOUND']);
+ assert.equal((await db.query('select enabled from push_device_tokens where user_id=$1',[b])).rows[0].enabled,false);
+ await rpc('admin_notification_schedule_state',[partner,'CANCELLED']);
+ await rejected(()=>rpc('admin_notification_schedule_state',[partner,'ACTIVE']),/Invalid state/);
+ const low=await rpc('admin_save_notification_schedule',[{...base,audience:'LOW_WALLET',target_values:[],interval_hours:6}]);
+ await db.query('update customer_wallets set balance_paise=50000 where customer_id=$1',[a]);
+ await db.query("update notification_schedules set next_run_at=now()-interval '1 minute' where id=$1",[low]);
+ await rpc('process_notification_schedules');
+ assert.equal((await db.query("select count(*)::int n from customer_notifications where customer_id=$1 and dedupe_key like 'CAMPAIGN_%'",[a])).rows[0].n,1,'wallet threshold reevaluated at send');
+ const quiet=await rpc('admin_save_notification_schedule',[{...base,daytime_only:true}]);
+ await db.query("update notification_schedules set next_run_at=now()-interval '1 minute' where id=$1",[quiet]);
+ await rpc('process_notification_schedules');
+ const outside=(await db.query("select (now() at time zone 'Asia/Kolkata')::time<time '08:00' or (now() at time zone 'Asia/Kolkata')::time>=time '21:00' outside")).rows[0].outside;
+ assert.equal((await db.query('select count(*)::int n from notification_schedule_runs where schedule_id=$1',[quiet])).rows[0].n,outside?0:1);
+ if(outside)assert.equal((await db.query("select (next_run_at at time zone 'Asia/Kolkata')::time=time '08:00' ok from notification_schedules where id=$1",[quiet])).rows[0].ok,true);
+ const expired=await rpc('admin_save_notification_schedule',[base]);
+ await db.query("update notification_schedules set next_run_at=now()-interval '2 hours',ends_at=now()-interval '1 hour' where id=$1",[expired]);
+ await rpc('process_notification_schedules');assert.equal((await db.query('select state from notification_schedules where id=$1',[expired])).rows[0].state,'COMPLETED');
+ assert.equal((await db.query('select count(*)::int n from notification_schedule_runs where schedule_id=$1',[expired])).rows[0].n,0);
+ for(const role of ['anon','authenticated'])for(const fn of ['process_notification_schedules()','claim_campaign_push_batch()','campaign_recipients(text,text,text[])']){
+ assert.equal((await db.query('select has_function_privilege($1,$2,\'execute\') ok',[role,'public.'+fn])).rows[0].ok,false);}
+ console.log('PASS: campaign authorization, specific/customer/provider audiences, threshold, recurrence, deduplication, queue leasing, pause/resume/cancel and FCM invalid-token handling');
+ }finally{await db.exec('rollback');}
+};

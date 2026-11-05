@@ -26,6 +26,8 @@ private val MMist = Color(0xFFF0F7F2)
 
 @Composable
 fun ManageBusinessScreen(
+    repository: SupabaseProviderRepository,
+    onViewApproved: () -> Unit,
     message: String?,
     loading: Boolean,
     onBack: () -> Unit,
@@ -55,10 +57,10 @@ fun ManageBusinessScreen(
         topBar = {
             Surface(shadowElevation = 2.dp) {
                 Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = onBack) { Icon(Icons.Outlined.ArrowBack, "Dashboard", tint = MBrand) }
+                    IconButton(onClick = onBack, enabled = !loading) { Icon(Icons.Outlined.ArrowBack, "Dashboard", tint = MBrand) }
                     Column(Modifier.weight(1f)) {
                         Text("Manage business", color = MInk, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                        Text("Profile, packages, menus and photos", color = MMuted, fontSize = 11.sp)
+                        Text("Profile, packages, menus and photos", color = MMuted, fontSize = ProviderType.caption)
                     }
                     Text("zomeal", color = MBrand, fontSize = 17.sp, fontWeight = FontWeight.ExtraBold)
                 }
@@ -75,9 +77,11 @@ fun ManageBusinessScreen(
                     Text(ProviderDraft.businessName.ifBlank { "Your provider profile" }, color = Color.White, fontSize = 21.sp, fontWeight = FontWeight.ExtraBold)
                     Text("${ProviderDraft.category} · ${ProviderDraft.city}", color = Color.White.copy(alpha = .82f), fontSize = 12.sp)
                     Spacer(Modifier.height(10.dp))
-                    Text("Changes to packages, menus and photographs are reviewed before customers see them. Your current approved listing stays live meanwhile.", color = Color.White.copy(alpha = .9f), fontSize = 11.sp, lineHeight = 16.sp)
+                    Text("Changes to packages, menus and photographs are reviewed before customers see them. Your current approved listing stays live meanwhile.", color = Color.White.copy(alpha = .9f), fontSize = ProviderType.caption, lineHeight = 16.sp)
                 }
             }
+            item { ProviderBusinessReviewPanel(repository, onViewApproved) }
+            item { DatedMenuChangeCard(repository) }
             message?.let { text -> item { ManageNotice(text) } }
             if (loading) item { LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = MBrand) }
             item {
@@ -85,9 +89,10 @@ fun ManageBusinessScreen(
                 ManageCard(
                     icon = Icons.Outlined.AddLocationAlt,
                     title = "Serviceable areas",
-                    summary = "${pincodes.size} approved or verified pincode${if (pincodes.size == 1) "" else "s"}",
-                    detail = pincodes.joinToString(" · ").ifBlank { "No serviceable pincode added" },
+                    summary = "${pincodes.size} verified pincode${if (pincodes.size == 1) "" else "s"}",
+                    detail = pincodes.joinToString(" · ").ifBlank { "No serviceable pincode added" } + "\nPincode verification is not admin approval. New areas stay pending until approved.",
                     action = "Add serviceable pincodes",
+                    enabled = !loading,
                     onClick = onEditServiceAreas
                 )
             }
@@ -98,6 +103,7 @@ fun ManageBusinessScreen(
                     summary = ProviderDraft.contactName.ifBlank { "Contact details incomplete" },
                     detail = listOf(ProviderDraft.address, ProviderDraft.city, ProviderDraft.state).filter { it.isNotBlank() }.joinToString(", "),
                     action = "Edit profile",
+                    enabled = !loading,
                     onClick = onEditProfile
                 )
             }
@@ -106,8 +112,9 @@ fun ManageBusinessScreen(
                     icon = Icons.Outlined.Inventory2,
                     title = "Packages & prices",
                     summary = "${enabledPackages.size} package${if (enabledPackages.size == 1) "" else "s"}",
-                    detail = enabledPackages.joinToString("  ·  ").ifBlank { "No active package selected" },
+                    detail = enabledPackages.joinToString("\n").ifBlank { "No package selected in this draft" },
                     action = "Manage packages",
+                    enabled = !loading,
                     onClick = onEditPackages
                 )
             }
@@ -118,6 +125,7 @@ fun ManageBusinessScreen(
                     summary = "$totalDishes main-course entries",
                     detail = "Monday–Sunday · Lunch and dinner · $dishPhotos dish photos selected",
                     action = "View & edit menu",
+                    enabled = !loading,
                     onClick = onEditMenus
                 )
             }
@@ -125,9 +133,10 @@ fun ManageBusinessScreen(
                 ManageCard(
                     icon = Icons.Outlined.AddAPhoto,
                     title = "Business photos & delivery",
-                    summary = "$businessPhotos of 3 business photos selected",
-                    detail = "Provider profile, kitchen, complete meal and delivery contact",
+                    summary = "$businessPhotos of 3 business photos in this workspace",
+                    detail = "Selected photos are not live until uploaded and approved. Use View approved customer-facing data above to check the published photos.",
                     action = "Manage photos",
+                    enabled = !loading,
                     onClick = onEditPhotos
                 )
             }
@@ -138,7 +147,7 @@ fun ManageBusinessScreen(
                         Spacer(Modifier.width(8.dp)); Text("Verified account number", color = MInk, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                     }
                     Text("+91 ${ProviderDraft.ownerPhone}", color = MInk, fontSize = 13.sp)
-                    Text("For account safety, changing the verified login number requires a separate OTP verification flow. Delivery contact numbers can be edited under Photos & delivery.", color = MMuted, fontSize = 10.sp, lineHeight = 15.sp)
+                    Text("For account safety, changing the verified login number requires a separate OTP verification flow. Delivery contact numbers can be edited under Photos & delivery.", color = MMuted, fontSize = ProviderType.caption, lineHeight = 15.sp)
                 }
             }
             item {
@@ -146,7 +155,7 @@ fun ManageBusinessScreen(
                     Button(
                         onClick = onSubmitAll,
                         enabled = !loading,
-                        modifier = Modifier.fillMaxWidth().height(54.dp),
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 54.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = MBrand),
                         shape = RoundedCornerShape(15.dp)
                     ) {
@@ -154,7 +163,7 @@ fun ManageBusinessScreen(
                         Spacer(Modifier.width(8.dp))
                         Text(if (loading) "Submitting…" else "Submit all changes for review", fontWeight = FontWeight.Bold)
                     }
-                    Text("Profile, packages, all seven menu days and new photos will be sent together as one admin request.", color = MMuted, fontSize = 10.sp, lineHeight = 14.sp)
+                    Text("Profile, packages, all seven menu days and new photos will be sent together as one admin request.", color = MMuted, fontSize = ProviderType.caption, lineHeight = 14.sp)
                 }
             }
             item { Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars)) }
@@ -163,9 +172,9 @@ fun ManageBusinessScreen(
 }
 
 @Composable
-private fun ManageCard(icon: ImageVector, title: String, summary: String, detail: String, action: String, onClick: () -> Unit) {
+private fun ManageCard(icon: ImageVector, title: String, summary: String, detail: String, action: String, enabled: Boolean = true, onClick: () -> Unit) {
     Column(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Color.White).clickable(onClick = onClick).padding(16.dp),
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Color.White).clickable(enabled = enabled, onClick = onClick).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -177,7 +186,7 @@ private fun ManageCard(icon: ImageVector, title: String, summary: String, detail
             }
             Icon(Icons.Outlined.ChevronRight, null, tint = MBrand)
         }
-        Text(detail.ifBlank { "Information not added yet" }, color = MMuted, fontSize = 11.sp, lineHeight = 16.sp)
+        Text(detail.ifBlank { "Information not added yet" }, color = MMuted, fontSize = ProviderType.caption, lineHeight = 16.sp)
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Outlined.Edit, null, tint = MBrand, modifier = Modifier.size(16.dp))
             Spacer(Modifier.width(6.dp)); Text(action, color = MBrand, fontSize = 12.sp, fontWeight = FontWeight.Bold)
@@ -192,6 +201,6 @@ private fun ManageNotice(text: String) {
     val background = if (failed) Color(0xFFFFEDEA) else Color(0xFFE7F5EA)
     Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(background).padding(13.dp), verticalAlignment = Alignment.Top) {
         Icon(if (failed) Icons.Outlined.ErrorOutline else Icons.Outlined.Info, null, tint = color, modifier = Modifier.size(19.dp))
-        Spacer(Modifier.width(8.dp)); Text(text, color = color, fontSize = 11.sp, lineHeight = 16.sp)
+        Spacer(Modifier.width(8.dp)); Text(text, color = color, fontSize = ProviderType.caption, lineHeight = 16.sp)
     }
 }

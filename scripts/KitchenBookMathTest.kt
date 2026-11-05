@@ -1,0 +1,21 @@
+package com.zomeal.provider
+fun main(){
+ check(kitchenPaise("12.34")==1234L)
+ check(kitchenPaise("-2")==null)
+ check(kitchenPaise("2.345")==null)
+ check(kitchenPaise("1000001")==null)
+ check(kitchenStockValue("2.5","50")==12500L)
+ check(kitchenStockValue("0.125","1")==13L)
+ check(kitchenStockValue("0","20")==null)
+ check(kitchenStockValue("-2","20")==null)
+ check(kitchenStockValue("1000000","1000000")==null)
+ check(kitchenBreakEven(3000000,7500,4500)==1000L)
+ check(kitchenBreakEven(100,101,1)==1L)
+ check(kitchenBreakEven(101,101,1)==2L)
+ check(kitchenBreakEven(3000000,4500,4500)==null)
+ check(kitchenBreakEven(0,100,0)==0L)
+ check(kitchenCsvCell("=CMD()") == "\"'=CMD()\"")
+ check(kitchenCsvCell("Rice, dal")=="\"Rice, dal\"")
+ check(kitchenCsvCell("a\"b")=="\"a\"\"b\"")
+ println("PASS: exact paise validation, break-even rounding, zero/negative contribution and CSV formula safety")
+}

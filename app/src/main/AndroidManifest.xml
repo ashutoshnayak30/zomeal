@@ -2,18 +2,35 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <queries>
+        <package android:name="com.whatsapp" />
+        <package android:name="com.whatsapp.w4b" />
+        <package android:name="com.instagram.android" />
+        <intent>
+            <action android:name="android.intent.action.SENDTO" />
+            <data android:scheme="smsto" />
+        </intent>
+    </queries>
     <application
         android:allowBackup="true"
         android:label="Zomeal"
+        android:icon="@mipmap/ic_zomeal_app"
+        android:roundIcon="@mipmap/ic_zomeal_app"
         android:theme="@style/Theme.Zomeal">
+        <meta-data android:name="com.google.firebase.messaging.default_notification_channel_id" android:value="zomeal_updates" />
+        <meta-data android:name="com.google.firebase.messaging.default_notification_icon" android:resource="@drawable/ic_zomeal_status" />
         <activity
             android:name=".MainActivity"
+            android:icon="@mipmap/ic_zomeal_app"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <provider android:name="androidx.core.content.FileProvider" android:authorities="${applicationId}.complaintphotos" android:exported="false" android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/complaint_photo_paths" />
+        </provider>
         <service
             android:name=".ZomealMessagingService"
             android:exported="false">

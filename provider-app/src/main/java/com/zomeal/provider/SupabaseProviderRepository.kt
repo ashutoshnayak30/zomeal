@@ -27,6 +27,50 @@ class SupabaseProviderRepository(context: Context) {
 
     val developmentAuthEnabled: Boolean get() = BuildConfig.DEVELOPMENT_AUTH
 
+    val voiceConfigured: Boolean get() = runCatching {
+        val u = java.net.URI(BuildConfig.KITCHEN_VOICE_URL)
+        u.scheme == "https" && !u.host.isNullOrBlank() && u.rawUserInfo == null && u.rawQuery == null && u.rawFragment == null
+    }.getOrDefault(false)
+
+    /** Sends only after explicit review consent. No retries and no bookkeeping writes. */
+    fun voiceDraft(pcm: ByteArray, language: String, mode: String, callback: (JSONObject?, String?) -> Unit) {
+        if (!voiceConfigured || !isAuthenticated) { callback(null, "Voice pilot is not configured, or your session has expired."); return }
+        val token = prefs.getString("access_token", null).orEmpty()
+        Thread {
+            var connection: HttpURLConnection? = null
+            var result: JSONObject? = null
+            var problem: String? = null
+            try {
+                connection = (URL(BuildConfig.KITCHEN_VOICE_URL.trimEnd('/') + "/v1/draft").openConnection() as HttpURLConnection).apply {
+                    requestMethod = "POST"; instanceFollowRedirects = false
+                    connectTimeout = 15000; readTimeout = 145000; doOutput = true
+                    setRequestProperty("Content-Type", "application/json")
+                    setRequestProperty("Authorization", "Bearer $token")
+                }
+                val body = JSONObject().put("language", language).put("mode", mode)
+                    .put("audio", android.util.Base64.encodeToString(pcm, android.util.Base64.NO_WRAP)).toString().toByteArray()
+                connection.setFixedLengthStreamingMode(body.size)
+                connection.outputStream.use { it.write(body) }
+                val status = connection.responseCode
+                val stream = if (status in 200..299) connection.inputStream else connection.errorStream
+                val text = stream?.bufferedReader()?.use { reader ->
+                    val chars = CharArray(65537); var count = 0
+                    while (count < chars.size) { val n = reader.read(chars, count, chars.size - count); if (n < 0) break; count += n }
+                    require(count < chars.size) { "Response too large" }; String(chars, 0, count)
+                }.orEmpty()
+                val json = JSONObject(text)
+                if (status in 200..299 && json.optBoolean("requires_review") && !json.optBoolean("saved") && json.optString("mode") == mode && json.has("items")) result = json
+                else problem = json.optString("message", "Voice entry unavailable. Nothing was saved.").take(300)
+            } catch (_: Exception) { problem = "Voice request failed. Nothing was saved. Check your connection before trying again." }
+            finally { connection?.disconnect() }
+            val finalResult = result; val finalProblem = problem
+            main.post {
+                if (isAuthenticated && prefs.getString("access_token", null) == token) callback(finalResult, finalProblem)
+                else callback(null, "Session changed. Please reopen voice entry.")
+            }
+        }.start()
+    }
+
     private fun saveSession(json: JSONObject) {
         val userId = json.optJSONObject("user")?.optString("id").orEmpty()
             .ifBlank { prefs.getString("user_id", null).orEmpty() }
@@ -438,6 +482,10 @@ class SupabaseProviderRepository(context: Context) {
     ) { code, json -> if (code in 200..299) callback(json, null) else callback(null, errorMessage(json, "Commission profile could not be loaded")) }
 
     fun kitchenBook(month: String, callback: (JSONObject?, String?) -> Unit) = kitchenRpc("provider_kitchen_statement", JSONObject().put("target_month",month), callback)
+    fun inventoryReview(days:Int,callback:(JSONObject?,String?)->Unit)=kitchenRpc("provider_inventory_review",JSONObject().put("review_days",days),callback)
+    fun recipeBook(callback:(JSONObject?,String?)->Unit)=kitchenRpc("provider_recipe_book",JSONObject(),callback)
+    fun saveRecipe(payload:JSONObject,callback:(JSONObject?,String?)->Unit)=kitchenRpc("provider_recipe_save",JSONObject().put("payload",payload),callback)
+    fun saveInventory(payload:JSONObject,callback:(JSONObject?,String?)->Unit)=kitchenRpc("provider_inventory_save",JSONObject().put("payload",payload),callback)
     fun transactionMonths(callback: (JSONObject?, String?) -> Unit) = kitchenRpc("provider_transaction_months", JSONObject(), callback)
     fun transactionPage(month: String, time: String?, id: String?, callback: (JSONObject?, String?) -> Unit) = kitchenRpc("provider_transaction_page", JSONObject().put("target_month",month).put("before_time",time ?: JSONObject.NULL).put("before_id",id ?: JSONObject.NULL), callback)
     fun staffMonth(month:String,callback:(JSONObject?,String?)->Unit)=kitchenRpc("provider_staff_month",JSONObject().put("target_month",month),callback)

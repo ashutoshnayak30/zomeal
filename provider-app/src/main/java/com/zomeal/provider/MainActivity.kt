@@ -54,7 +54,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private enum class Screen { Login, Otp, Registration, Business, Service, Packages, Menu, Operations, Review, Submitted, SubmissionDetails, Dashboard, ManageBusiness, ChangesSubmitted, DailyOrders, Earnings, Profile, UploadedData, PayoutDetails, Notifications }
+private enum class Screen { Login, Otp, Registration, Business, Service, Packages, Menu, Operations, Review, Submitted, SubmissionDetails, Dashboard, ManageBusiness, ChangesSubmitted, DailyOrders, Earnings, KitchenCosts, Profile, UploadedData, PayoutDetails, Notifications }
 
 private fun draftResumeScreen(): Screen = when {
     ProviderDraft.businessName.isBlank() || ProviderDraft.contactName.isBlank() || ProviderDraft.address.isBlank() -> Screen.Business
@@ -72,6 +72,7 @@ private fun draftResumeScreen(): Screen = when {
 private fun ProviderApp() {
     val context = LocalContext.current
     val repository = remember { SupabaseProviderRepository(context) }
+    var ordersInitialSlot by rememberSaveable { mutableStateOf("AUTO") }
     var screen by rememberSaveable { mutableStateOf(if (repository.isAuthenticated) Screen.Registration else Screen.Login) }
     var phone by rememberSaveable { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }
@@ -81,6 +82,7 @@ private fun ProviderApp() {
     var managingActiveProvider by rememberSaveable { mutableStateOf(false) }
     var manageMessage by remember { mutableStateOf<String?>(null) }
     var dashboardMessage by remember { mutableStateOf<String?>(null) }
+    var bikiRefresh by remember { mutableIntStateOf(0) }
     fun openActiveEditor(destination: Screen) {
         loading = true; manageMessage = null
         repository.loadSubmittedApplication(markPhotoBaseline = !managingActiveProvider) { payload ->
@@ -101,8 +103,8 @@ private fun ProviderApp() {
         }
     }
     fun submitActiveChanges(onDone: () -> Unit) {
-        loading = true; manageMessage = null
-        repository.submitActiveBusinessUpdate(ProviderDraft.toJson()) { result ->
+        loading = true; manageMessage = "Submitting business details for review…"
+        repository.submitActiveBusinessUpdate(ProviderDraft.toJson(), onProgress = { manageMessage = it }) { result ->
             loading = false
             if (result.success) { manageMessage = result.message ?: "Changes submitted for Zomeal approval."; onDone() }
             else {
@@ -169,6 +171,7 @@ private fun ProviderApp() {
         onStatus = { saveStatus = it }
     )
     BackHandler(enabled = screen != Screen.Login) {
+        if (managingActiveProvider && loading) return@BackHandler
         screen = when(screen) {
             Screen.Otp -> Screen.Login
             Screen.Registration -> if(repository.isAuthenticated) Screen.Dashboard else Screen.Login
@@ -179,15 +182,16 @@ private fun ProviderApp() {
             Screen.Operations -> if(managingActiveProvider) Screen.ManageBusiness else Screen.Menu
             Screen.Review -> Screen.Operations
             Screen.SubmissionDetails -> Screen.Submitted
-            Screen.ManageBusiness, Screen.ChangesSubmitted, Screen.DailyOrders, Screen.Earnings, Screen.Profile, Screen.Notifications -> Screen.Dashboard
-            Screen.UploadedData -> Screen.Profile
+            Screen.ManageBusiness, Screen.ChangesSubmitted, Screen.DailyOrders, Screen.Earnings, Screen.KitchenCosts, Screen.Profile, Screen.Notifications -> Screen.Dashboard
+            Screen.UploadedData -> if (managingActiveProvider) Screen.ManageBusiness else Screen.Profile
             Screen.PayoutDetails -> Screen.Profile
             Screen.Submitted -> Screen.Submitted
             Screen.Dashboard -> Screen.Dashboard
             Screen.Login -> Screen.Login
         }
     }
-    when (screen) {
+    Box(Modifier.fillMaxSize()) {
+    key(bikiRefresh) { when (screen) {
         Screen.Login -> LoginScreen(phone, { phone = it.filter(Char::isDigit).take(10); error = null }, loading, error) {
             loading = true; error = null
             repository.beginAuthentication(phone) { result ->
@@ -228,7 +232,7 @@ private fun ProviderApp() {
         )
         Screen.Menu -> WeeklyMenuScreen(
             onBack = { screen = if (managingActiveProvider) Screen.ManageBusiness else Screen.Packages },
-            onNext = { if (managingActiveProvider) saveActiveDraft("Seven-day menu changes") else screen = Screen.Operations },
+            onNext = { if (managingActiveProvider) submitActiveChanges { screen = Screen.ChangesSubmitted } else screen = Screen.Operations },
             activeEdit = managingActiveProvider,
             submittingUpdate = loading,
             onSaveDay = { _, callback -> repository.saveDraft(ProviderDraft.toJson(), callback) }
@@ -266,8 +270,10 @@ private fun ProviderApp() {
             onBack = { screen = Screen.Submitted },
             onEdit = { screen = Screen.Registration }
         )
-        Screen.Dashboard -> ProviderDashboardScreen(repository, bannerMessage = dashboardMessage, onDismissBanner = { dashboardMessage = null }, onOrders = { screen = Screen.DailyOrders }, onEarnings = { screen = Screen.Earnings }, onProfile = { screen = Screen.Profile }, onManageBusiness = { openActiveEditor(Screen.ManageBusiness) }, onNotifications = { screen = Screen.Notifications }) { repository.signOut(); screen = Screen.Login }
+        Screen.Dashboard -> ProviderDashboardScreen(repository, onOrdersForSession = { slot -> ordersInitialSlot = slot; screen = Screen.DailyOrders }, bannerMessage = dashboardMessage, onDismissBanner = { dashboardMessage = null }, onOrders = { screen = Screen.DailyOrders }, onEarnings = { screen = Screen.Earnings }, onProfile = { screen = Screen.Profile }, onManageBusiness = { openActiveEditor(Screen.ManageBusiness) }, onNotifications = { screen = Screen.Notifications }, onCosts = { screen = Screen.KitchenCosts }) { repository.signOut(); screen = Screen.Login }
         Screen.ManageBusiness -> ManageBusinessScreen(
+            repository = repository,
+            onViewApproved = { screen = Screen.UploadedData },
             message = manageMessage,
             loading = loading,
             onBack = { managingActiveProvider = false; screen = Screen.Dashboard },
@@ -285,10 +291,14 @@ private fun ProviderApp() {
             dashboardMessage = "All changes were submitted together for Zomeal review. Your approved listing remains live until a decision is made."
             screen = Screen.Dashboard
         }
-        Screen.DailyOrders -> ProviderDailyOrdersScreen(repository, onDashboard = { screen = Screen.Dashboard }, onProfile = { screen = Screen.Profile })
-        Screen.Earnings -> ProviderEarningsScreen(repository, onDashboard = { screen = Screen.Dashboard }, onOrders = { screen = Screen.DailyOrders }, onProfile = { screen = Screen.Profile })
-        Screen.Profile -> ProviderProfileScreen(repository, onBack = { screen = Screen.Dashboard }, onUploadedData = { screen = Screen.UploadedData }, onManageBusiness = { openActiveEditor(Screen.ManageBusiness) }, onEarnings = { screen = Screen.Earnings }, onPayoutDetails = { screen = Screen.PayoutDetails }) { repository.signOut(); screen = Screen.Login }
-        Screen.UploadedData -> ProviderUploadedDataScreen(repository, onBack = { screen = Screen.Profile })
+        Screen.DailyOrders -> {
+            DisposableEffect(Unit) { onDispose { ordersInitialSlot = "AUTO" } }
+            ProviderDailyOrdersScreen(repository, initialSlot = ordersInitialSlot, onEarnings = { screen = Screen.Earnings }, onDashboard = { screen = Screen.Dashboard }, onProfile = { screen = Screen.Profile }, onCosts = { screen = Screen.KitchenCosts })
+        }
+        Screen.Earnings -> ProviderEarningsScreen(repository, onDashboard = { screen = Screen.Dashboard }, onOrders = { screen = Screen.DailyOrders }, onProfile = { screen = Screen.Profile }, onCosts = { screen = Screen.KitchenCosts })
+        Screen.KitchenCosts -> KitchenCostsScreen(repository, onDashboard = { screen = Screen.Dashboard }, onOrders = { screen = Screen.DailyOrders }, onEarnings = { screen = Screen.Earnings }, onProfile = { screen = Screen.Profile })
+        Screen.Profile -> ProviderProfileScreen(repository, onOrders = { screen = Screen.DailyOrders }, onBack = { screen = Screen.Dashboard }, onUploadedData = { screen = Screen.UploadedData }, onManageBusiness = { openActiveEditor(Screen.ManageBusiness) }, onEarnings = { screen = Screen.Earnings }, onPayoutDetails = { screen = Screen.PayoutDetails }, onCosts = { screen = Screen.KitchenCosts }) { repository.signOut(); screen = Screen.Login }
+        Screen.UploadedData -> ProviderUploadedDataScreen(repository, onBack = { screen = if (managingActiveProvider) Screen.ManageBusiness else Screen.Profile })
         Screen.PayoutDetails -> ProviderPayoutDetailsScreen(repository, onBack = { screen = Screen.Profile })
         Screen.Notifications -> ProviderNotificationsScreen(repository, onBack = { screen = Screen.Dashboard }) { destination ->
             when(destination) {
@@ -300,6 +310,11 @@ private fun ProviderApp() {
                 else -> screen = Screen.Dashboard
             }
         }
+    }
+    }
+    if (repository.isAuthenticated && screen in setOf(Screen.Dashboard, Screen.DailyOrders, Screen.Earnings, Screen.KitchenCosts, Screen.Profile)) {
+        BikiAssistant(repository, onSaved = { bikiRefresh++ })
+    }
     }
 }
 

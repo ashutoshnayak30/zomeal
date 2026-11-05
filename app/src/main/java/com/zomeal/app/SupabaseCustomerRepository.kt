@@ -36,7 +36,7 @@ internal data class RazorpayCheckoutOrder(
 internal data class PersistedDailyMeal(
     val id:String,val serviceDate:String,val mealSlot:String,val status:String,
     val itemId:String,val itemName:String,val dietaryType:String,val description:String,
-    val photoPath:String=""
+    val photoPath:String="",val sideText:String?=null
 )
 
 internal data class CustomerMealExperience(
@@ -44,7 +44,7 @@ internal data class CustomerMealExperience(
     val serviceDate:String,val mealSlot:String,val status:String,val itemId:String,val itemName:String,
     val description:String,val deliveryPersonName:String,val deliveryPersonPhone:String,
     val rating:Int?,val categoryRatings:JSONObject,val tags:List<String>,val reviewText:String,
-    val anonymous:Boolean,val reviewedAt:String
+    val anonymous:Boolean,val reviewedAt:String,val pricePaise:Long=0,val photoPath:String=""
 )
 
 internal data class PersistedSubscription(
@@ -305,7 +305,8 @@ internal class SupabaseCustomerRepository(context:Context) {
                     add(PersistedDailyMeal(
                         row.optString("id"),row.optString("service_date"),row.optString("meal_slot"),row.optString("status"),
                         row.optString("item_id"),row.optString("item_name"),row.optString("dietary_type"),row.optString("description"),
-                        row.optString("photo_path").trim().takeUnless{it.equals("null",true)||it.equals("undefined",true)}.orEmpty()
+                        row.optString("photo_path").trim().takeUnless{it.equals("null",true)||it.equals("undefined",true)}.orEmpty(),
+                        if(row.has("side_text")&&!row.isNull("side_text")) row.optString("side_text") else null
                     ))
                 }}
                 PersistedSubscription(
@@ -369,6 +370,38 @@ internal class SupabaseCustomerRepository(context:Context) {
     }
     fun referralProgram(callback:(JSONObject?,String?)->Unit){rpc("customer_referral_program",JSONObject(),callback)}
     fun referralDashboard(callback:(JSONObject?,String?)->Unit){rpc("customer_referral_dashboard",JSONObject(),callback)}
+
+    // Paginate the customer's own ledger; dashboard activity is only a recent preview.
+    fun walletHistory(callback:(JSONArray?,String?)->Unit) {
+        val userId = prefs.getString("user_id", "").orEmpty()
+        if (!userId.matches(Regex("[a-fA-F0-9-]{36}"))) { callback(null,"Please sign in again to load wallet history."); return }
+        Thread {
+            try {
+                val entries = JSONArray()
+                var offset = 0
+                while (true) {
+                    fun request():Pair<Int,String> {
+                        val connection = (URL("$baseUrl/rest/v1/customer_wallet_entries?customer_id=eq.$userId&select=id,entry_type,amount_paise,description,created_at&order=created_at.desc,id.desc&limit=500&offset=$offset").openConnection() as HttpURLConnection).apply {
+                            connectTimeout=12000; readTimeout=20000
+                            setRequestProperty("apikey",anonKey); setRequestProperty("Authorization","Bearer ${bearer()}")
+                        }
+                        try {
+                            val code=connection.responseCode
+                            return code to (if(code in 200..299) connection.inputStream else connection.errorStream).bufferedReader().use{it.readText()}
+                        } finally { connection.disconnect() }
+                    }
+                    var response=request()
+                    if(response.first==401 && refreshSessionBlocking()) response=request()
+                    if(response.first !in 200..299) throw IllegalStateException("Could not load complete wallet history. Please retry.")
+                    val page=JSONArray(response.second)
+                    for(index in 0 until page.length()) entries.put(page.getJSONObject(index).apply{put("type",optString("entry_type"))})
+                    offset+=page.length()
+                    if(page.length()<500) break
+                }
+                main.post{callback(entries,null)}
+            } catch(error:Exception) { main.post{callback(null,error.message?:"Wallet history unavailable")} }
+        }.start()
+    }
     fun notificationFeed(callback:(JSONArray?,String?)->Unit){
         rpc("customer_notification_feed",JSONObject().put("target_limit",50)){json,error->
             if(error!=null){callback(null,error);return@rpc}
@@ -385,9 +418,14 @@ internal class SupabaseCustomerRepository(context:Context) {
     }
     fun changeDailyMeal(mealId:String,itemId:String,callback:(JSONObject?,String?)->Unit){rpc("customer_select_daily_meal",JSONObject().put("target_meal_id",mealId).put("target_item_id",itemId),callback)}
     fun pauseMeals(subscriptionId:String,dates:List<String>,slot:String,callback:(JSONObject?,String?)->Unit){rpc("customer_pause_subscription_meals",JSONObject().put("target_subscription",subscriptionId).put("target_dates",JSONArray(dates)).put("target_slot",slot.uppercase()),callback)}
+    fun guestMenu(subscriptionId:String,callback:(JSONObject?,String?)->Unit){rpc("customer_guest_menu",JSONObject().put("target_subscription",subscriptionId),callback)}
+    fun saveGuestMeals(subscriptionId:String,selections:JSONArray,callback:(JSONObject?,String?)->Unit){rpc("customer_save_guest_meals",JSONObject().put("target_subscription",subscriptionId).put("selections",selections),callback)}
+    fun pauseMealGroup(subscriptionId:String,dates:List<String>,slot:String,group:String,callback:(JSONObject?,String?)->Unit){rpc("customer_pause_meal_group",JSONObject().put("target_subscription",subscriptionId).put("target_dates",JSONArray(dates)).put("target_slot",slot.uppercase()).put("target_group",group),callback)}
 
-    fun mealExperiences(callback:(List<CustomerMealExperience>,String?)->Unit){
-        rpc("customer_meal_experience_feed",JSONObject().put("target_limit",60)){json,error->
+    fun deliveredMonths(callback:(JSONObject?,String?)->Unit){rpc("customer_delivered_months",JSONObject(),callback)}
+    fun menuUpdateHistory(callback:(JSONObject?,String?)->Unit){rpc("customer_menu_update_history",JSONObject(),callback)}
+    fun mealExperiences(month:String?=null,callback:(List<CustomerMealExperience>,String?)->Unit){
+        rpc(if(month==null)"customer_meal_experience_feed" else "customer_delivered_month",if(month==null)JSONObject().put("target_limit",60) else JSONObject().put("target_month",month)){json,error->
             if(error!=null||json==null){callback(emptyList(),error);return@rpc}
             runCatching{
                 val rows=json.optJSONArray("items")?:JSONArray()
@@ -400,13 +438,38 @@ internal class SupabaseCustomerRepository(context:Context) {
                         row.optString("service_date"),row.optString("meal_slot"),row.optString("status"),row.optString("item_id"),row.optString("item_name"),
                         row.optString("description"),row.optString("delivery_person_name"),row.optString("delivery_person_phone"),
                         if(row.isNull("rating"))null else row.optInt("rating"),row.optJSONObject("category_ratings")?:JSONObject(),tags,
-                        row.optString("review_text"),row.optBoolean("is_anonymous"),row.optString("reviewed_at")
+                        row.optString("review_text"),row.optBoolean("is_anonymous"),row.optString("reviewed_at"),
+                        row.optLong("price_paise"),row.optString("photo_path").takeUnless{it=="null"}.orEmpty()
                     ))
                 }}
             }.fold(onSuccess={callback(it,null)},onFailure={callback(emptyList(),it.message?:"Could not read meal history")})
         }
     }
 
+    fun mealComplaint(mealId:String,issue:String?=null,details:String="",photos:List<String> = emptyList(),callback:(JSONObject?,String?)->Unit){
+        rpc("customer_meal_complaint",JSONObject().put("target_meal",mealId).put("target_issue",issue?:JSONObject.NULL).put("target_details",details).put("target_photos",JSONArray(photos)),callback)
+    }
+    fun uploadComplaintPhoto(mealId:String,file:File,callback:(String?,String?)->Unit){
+        Thread {
+            try {
+                val options=BitmapFactory.Options().apply{inJustDecodeBounds=true}
+                BitmapFactory.decodeFile(file.path,options)
+                var sample=1;while(options.outWidth/sample>1600||options.outHeight/sample>1600)sample*=2
+                val bitmap=BitmapFactory.decodeFile(file.path,BitmapFactory.Options().apply{inSampleSize=sample})?:error("Could not read camera photo")
+                val bytes=java.io.ByteArrayOutputStream().use{bitmap.compress(Bitmap.CompressFormat.JPEG,85,it);it.toByteArray()}
+                bitmap.recycle()
+                require(bytes.size<=2097152){"Photo is too large. Please retake it."}
+                val user=prefs.getString("user_id",null)?:error("Please sign in again")
+                val path="$user/$mealId/${java.util.UUID.randomUUID()}.jpg"
+                val connection=(URL("$baseUrl/storage/v1/object/complaint-evidence/$path").openConnection() as HttpURLConnection).apply{
+                    requestMethod="POST";doOutput=true;connectTimeout=12000;readTimeout=30000
+                    setRequestProperty("apikey",anonKey);setRequestProperty("Authorization","Bearer ${bearer()}");setRequestProperty("Content-Type","image/jpeg")
+                }
+                try{connection.outputStream.use{it.write(bytes)};check(connection.responseCode in 200..299){"Photo upload failed; please retry"}}finally{connection.disconnect()}
+                main.post{callback(path,null)}
+            }catch(e:Exception){main.post{callback(null,e.message?:"Photo upload failed")}}
+        }.start()
+    }
     fun submitMealReview(mealId:String,rating:Int,categoryRatings:JSONObject,tags:List<String>,reviewText:String,anonymous:Boolean,callback:(JSONObject?,String?)->Unit){
         rpc("customer_submit_meal_review",JSONObject().apply{
             put("target_meal_id",mealId);put("target_rating",rating);put("target_category_ratings",categoryRatings)
@@ -555,7 +618,13 @@ internal class SupabaseCustomerRepository(context:Context) {
                 }
                 var response=execute();if(response.first==401&&refreshSessionBlocking())response=execute();val(code,text)=response
                 if(code !in 200..299)throw IllegalStateException(runCatching{JSONObject(text).optString("message")}.getOrNull().orEmpty().ifBlank{if(code==401)"Your session expired. Please log in again." else "Request failed ($code)"})
-                main.post{callback(if(text.isBlank())JSONObject() else JSONObject(text),null)}
+                // Parse before posting to the UI: mark-read returns an integer, not an object.
+                // Parsing inside main.post escaped this try/catch and crashed notification taps.
+                val result = if (text.isBlank()) JSONObject() else {
+                    val value = org.json.JSONTokener(text).nextValue()
+                    if (value is JSONObject) value else JSONObject().put("result", value)
+                }
+                main.post{callback(result,null)}
             }catch(error:Exception){main.post{callback(null,error.message?:"Customer data is unavailable")}}
         }.start()
     }

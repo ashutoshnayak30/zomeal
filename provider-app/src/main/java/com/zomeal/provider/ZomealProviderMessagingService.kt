@@ -49,7 +49,7 @@ internal object ProviderPushNotifications {
     fun createChannel(context: Context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             context.getSystemService(NotificationManager::class.java).createNotificationChannel(
-                NotificationChannel("zomeal_provider_updates", "Zomeal Provider updates", NotificationManager.IMPORTANCE_HIGH).apply {
+                NotificationChannel("zomeal_provider_updates", "Zomeal Partner updates", NotificationManager.IMPORTANCE_HIGH).apply {
                     description = "Orders, approvals, payouts and operational updates"
                 }
             )
@@ -65,14 +65,14 @@ class ZomealProviderMessagingService : FirebaseMessagingService() {
 
     override fun onMessageReceived(message: RemoteMessage) {
         ProviderPushNotifications.createChannel(this)
-        val title = message.notification?.title ?: message.data["title"] ?: "Zomeal Provider"
+        val title = message.notification?.title ?: message.data["title"] ?: "Zomeal Partner"
         val body = message.notification?.body ?: message.data["body"] ?: return
         val destination = message.data["destination"] ?: "dashboard"
         val intent = Intent(this, MainActivity::class.java).putExtra("notification_destination", destination)
             .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
         val pending = PendingIntent.getActivity(this, destination.hashCode(), intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val notification = NotificationCompat.Builder(this, "zomeal_provider_updates")
-            .setSmallIcon(android.R.drawable.ic_dialog_info).setContentTitle(title).setContentText(body)
+            .setSmallIcon(R.drawable.ic_stat_zomeal).setContentTitle(title).setContentText(body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(body)).setPriority(NotificationCompat.PRIORITY_HIGH)
             .setAutoCancel(true).setContentIntent(pending).build()
         (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).notify((System.currentTimeMillis() and 0x7fffffff).toInt(), notification)
