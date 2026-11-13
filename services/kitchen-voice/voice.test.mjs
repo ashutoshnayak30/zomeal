@@ -27,7 +27,10 @@ function fake(options = {}) {
     else if (url.endsWith('/provider_voice_reserve')) body = options.gate ?? { allowed: true, request_id: 'server-id', remaining_requests: 19 };
     else if (url.includes('metadata.google.internal')) body = { access_token: 'metadata-token' };
     else if (url.includes('speech.googleapis.com')) { status = options.speechStatus || 200; body = { results: [{ alternatives: [{ transcript: options.transcript ?? 'पांच किलो चावल तीन सौ रुपये' }] }] }; }
-    else if (url.includes('aiplatform.googleapis.com')) body = { candidates: [{ finishReason: options.finishReason || 'STOP', content: { parts: [{ text: JSON.stringify(options.draft ?? { items: [row] }) }] } }] };
+    else if (url.includes('aiplatform.googleapis.com')) {
+      const translation=JSON.parse(init.body).generationConfig.responseSchema.properties.names;
+      body = { candidates: [{ finishReason: options.finishReason || 'STOP', content: { parts: [{ text: JSON.stringify(translation ? (options.translation ?? {transcript:'ପାଞ୍ଚ କିଲୋ ଚାଉଳ ତିନି ଶହ ଟଙ୍କା',names:['ଚାଉଳ']}) : (options.draft ?? { items: [row] })) }] } }] };
+    }
     else throw new Error('Unexpected network target');
     if (url.includes('aiplatform.googleapis.com')) status = options.vertexStatuses?.[vertexCalls++] ?? options.vertexStatus ?? 200;
     return new Response(JSON.stringify(body), { status, headers: options.retryAfter ? { 'Retry-After': options.retryAfter } : {} });
@@ -53,6 +56,30 @@ test('explicit Indian language choices are preserved in speech requests', async 
 });
 test('rejects unsupported language, mode, malformed base64 and oversized audio', () => {
   for (const change of [{ language: 'xx' }, { mode: 'REFUND' }, { audio: '!!!!' }, { audio: Buffer.alloc(1920002).toString('base64') }]) assert.throws(() => validateAudio({ ...audio, ...change }));
+});
+
+test('Odia choice translates Bengali recognition without changing quantities or costs', async () => {
+  const f=fake({transcript:'দুই কিলো চিকেন'});
+  const result=await createVoiceService(env,f.fetcher)(request({...audio,language:'or-IN'}));
+  assert.equal(result.body.items[0].item,'ଚାଉଳ');
+  assert.equal(result.body.items[0].quantity,5);
+  assert.equal(result.body.items[0].amount_paise,30000);
+  assert.equal(result.body.translated_to,'or-IN');
+  assert.equal(result.body.saved,false);
+  assert.equal(f.calls.filter(c=>c.url.includes('speech.googleapis.com')).length,1);
+  assert.equal(f.calls.filter(c=>c.url.includes('aiplatform.googleapis.com')).length,2);
+  assert.ok(f.calls.filter(c=>c.url.includes('aiplatform.googleapis.com')).every(c=>c.url.includes('asia-south1')));
+});
+test('Odia translation rejects Bengali output, missing names and malformed names',async()=>{
+ for(const translation of [{transcript:'বাংলা',names:['চাল']},{transcript:'ଚାଉଳ',names:[]},{transcript:'ଚାଉଳ',names:[null]}]){
+  const f=fake({translation});await assert.rejects(createVoiceService(env,f.fetcher)(request({...audio,language:'or-IN'})),{status:502});
+ }
+});
+test('Odia script and intentional Bengali choice remain supported', async () => {
+  for(const [language,transcript] of [['or-IN','ଦୁଇ କିଲୋ ଚାଉଳ'],['bn-IN','দুই কিলো চাল']]){
+    const f=fake({transcript}); const result=await createVoiceService(env,f.fetcher)(request({...audio,language}));
+    assert.equal(result.status,200);
+  }
 });
 test('computes quantity × price, but never marks a draft saved', () => {
   const result = validateDraft({ items: [row] }, 'PURCHASE');
@@ -175,7 +202,7 @@ test('long Retry-After skips retry and respects upstream cooldown', async () => 
 test('exhausted extraction time budget prevents retry', async () => {
   const f = fake({ vertexStatus: 429 });
   let ticks = 0;
-  await assert.rejects(createVoiceService(env, f.fetcher, { now: () => ticks++ === 0 ? 0 : 44500, sleep: async () => assert.fail('unexpected retry') })(request()), { status: 503 });
+  await assert.rejects(createVoiceService(env, f.fetcher, { now: () => ticks++ < 2 ? 0 : 44500, sleep: async () => assert.fail('unexpected retry') })(request()), { status: 503 });
   assert.equal(f.calls.length, 5);
 });
 test('speech failure and empty recording do not call extraction', async () => {

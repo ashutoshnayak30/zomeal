@@ -43,6 +43,8 @@ import kotlin.math.roundToInt
     var practice by remember { mutableStateOf(false) }
     var recipe by remember { mutableStateOf(false) }
     var shopping by remember { mutableStateOf(false) }
+    var dailyStock by remember { mutableStateOf(false) }
+    var dailyAction by remember { mutableStateOf("") }
     var stockStep by remember { mutableStateOf<Int?>(null) }
     var book by remember { mutableStateOf<JSONObject?>(null) }
     var loading by remember { mutableStateOf(false) }
@@ -73,20 +75,15 @@ import kotlin.math.roundToInt
             Text("BIKI", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp)
         }
     }
-    if (menu) AlertDialog(
-        onDismissRequest = { if (!loading) menu = false },
-        icon = { Icon(Icons.Outlined.SmartToy, null, tint = Color(0xFF087F43)) },
-        title = { Text("Hi, I'm BIKI", fontSize = 20.sp) },
-        text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Your kitchen voice assistant · Your language", fontSize = 12.sp)
-            Text("Tap to record, speak, then stop and review. I don't listen in the background or learn automatically.", fontSize = 12.sp)
+    if (menu) BikiTaskChooser(onClose={if(!loading)menu=false},onTask={task->
+        if(!loading){menu=false;when(task){"OPEN","CLOSE"->{dailyAction=task;dailyStock=true};"PURCHASE"->expense=true;"RECIPE"->recipe=true}}
+    }) {
             if (!repository.voiceConfigured) Text("Preview build: microphone testing works, but AI submission is not connected yet.", color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
             message?.let { Text(it, fontSize = 12.sp) }
             if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
-            Button(onClick = { menu = false; expense = true }, enabled = !loading, modifier = Modifier.fillMaxWidth()) { Text("Record expenses") }
-            OutlinedButton(onClick = { menu=false;recipe=true }, modifier=Modifier.fillMaxWidth()) { Text("Teach BIKI · My recipes") }
-            OutlinedButton(onClick = { menu=false;shopping=true }, modifier=Modifier.fillMaxWidth()) { Text("Ingredients & shopping planner") }
-            OutlinedButton(onClick = { menu = false; inventory = true }, enabled = !loading, modifier = Modifier.fillMaxWidth()) { Text("Inventory · 7 / 15-day review") }
+            OutlinedButton(onClick = { menu=false;shopping=true }, modifier=Modifier.fillMaxWidth()) { Text("Today's kitchen plan · What to buy") }
+            OutlinedButton(onClick = { menu=false;dailyAction="";dailyStock=true }, modifier=Modifier.fillMaxWidth()) { Text("Daily stock history") }
+            OutlinedButton(onClick = { menu = false; inventory = true }, enabled = !loading, modifier = Modifier.fillMaxWidth()) { Text("Meal-slot inventory · Compare reports") }
             OutlinedButton(onClick = { menu = false; practice = true }, enabled = !loading, modifier = Modifier.fillMaxWidth()) { Text("Practice kitchen · 100–500 customers") }
             listOf(0 to "Opening stock · start of month", 1 to "Remaining stock · this month").forEach { (step, label) ->
                 OutlinedButton(onClick = {
@@ -100,10 +97,7 @@ import kotlin.math.roundToInt
                     }
                 }, enabled = !loading, modifier = Modifier.fillMaxWidth()) { Text(label, fontSize = 12.sp) }
             }
-            Text("Example: Hi BIKI, 2 kg tomato total ₹40, aur 5 kg chawal total ₹100. Always confirm which price belongs to which item.", fontSize = 11.sp)
-        } },
-        confirmButton = { TextButton(onClick = { menu = false }, enabled = !loading) { Text("Close") } }
-    )
+    }
     if (expense) KitchenCostSheet(day("yyyy-MM-dd"), repository = repository, startWithVoice = true,
         onDismiss = { expense = false }, onSave = { rows, done ->
             repository.saveKitchenSheet(rows) { _, problem ->
@@ -112,8 +106,9 @@ import kotlin.math.roundToInt
         })
     if (inventory) KitchenInventoryDialog(repository,onDismiss={inventory=false},onSaved=onSaved)
     if (practice) BikiPracticeDialog(onClose={practice=false})
-    if (recipe) BikiRecipeSheet(repository,onClose={recipe=false})
+    if (recipe) BikiRecipeSheet(repository,onClose={recipe=false},startWithVoice=true)
     if (shopping) BikiShoppingSheet(repository,onClose={shopping=false})
+    if (dailyStock) BikiDailyStockSheet(repository,onClose={dailyStock=false},onSaved=onSaved,initialAction=dailyAction)
     if (stockStep != null && book != null) KitchenReviewDialog(book!!, repository = repository, initialVoiceStep = stockStep,
         onDismiss = { stockStep = null; book = null }, onSave = { payload, done ->
             repository.saveKitchenReview(payload) { _, problem ->

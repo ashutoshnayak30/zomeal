@@ -14,14 +14,26 @@ val localAdminConfig = rootProject.file("admin/config.js").takeIf { it.exists() 
 fun adminConfigValue(name: String): String = Regex("$name\\s*:\\s*['\"]([^'\"]+)['\"]").find(localAdminConfig)?.groupValues?.get(1).orEmpty()
 val supabaseUrl = localProperties.getProperty("SUPABASE_URL")?.takeIf(String::isNotBlank) ?: adminConfigValue("supabaseUrl")
 val supabaseAnonKey = localProperties.getProperty("SUPABASE_ANON_KEY")?.takeIf(String::isNotBlank) ?: adminConfigValue("supabaseAnonKey")
+val uploadProperties = Properties().apply {
+    val path = System.getenv("ZOMEAL_SIGNING_PROPERTIES")
+    if (!path.isNullOrBlank()) file(path).inputStream().use(::load)
+}
 android {
+    signingConfigs {
+        if (uploadProperties.isNotEmpty()) create("upload") {
+            storeFile = file(uploadProperties.getProperty("customer.storeFile"))
+            storePassword = uploadProperties.getProperty("customer.storePassword")
+            keyAlias = uploadProperties.getProperty("customer.keyAlias")
+            keyPassword = uploadProperties.getProperty("customer.keyPassword")
+        }
+    }
     namespace = "com.zomeal.app"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.zomeal.app"
         minSdk = 24
-        targetSdk = 35
+        targetSdk = 36
         versionCode = 6
         versionName = "1.0.6"
         buildConfigField("String", "SUPABASE_URL", "\"$supabaseUrl\"")
@@ -31,7 +43,10 @@ android {
 
     buildTypes {
         debug { buildConfigField("boolean", "DEVELOPMENT_AUTH", "true") }
-        release { buildConfigField("boolean", "DEVELOPMENT_AUTH", "false") }
+        release {
+            buildConfigField("boolean", "DEVELOPMENT_AUTH", "false")
+            if (uploadProperties.isNotEmpty()) signingConfig = signingConfigs.getByName("upload")
+        }
     }
 
     buildFeatures { compose = true; buildConfig = true }

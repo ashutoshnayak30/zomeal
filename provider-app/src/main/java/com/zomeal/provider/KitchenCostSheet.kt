@@ -75,7 +75,7 @@ internal fun KitchenCostSheet(
     var draft by rememberSaveable { mutableStateOf(seedCostRows()) }
     var date by rememberSaveable { mutableStateOf(initialDate) }
     var monthly by rememberSaveable { mutableStateOf(startMonthly) }
-    var quantityColumn by rememberSaveable { mutableStateOf(false) }
+    var quantityColumn by rememberSaveable { mutableStateOf(true) }
     var notesColumn by rememberSaveable { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
@@ -102,17 +102,17 @@ internal fun KitchenCostSheet(
     if (voice && repository != null) KitchenVoiceDialog(repository, "PURCHASE", date, onDismiss = { voice = false }, onApply = { incoming ->
         if (filled.size + incoming.length() > 50) { error = "Save at most 50 filled rows at a time."; voice = false }
         else {
-            val next = JSONArray(draft)
+            val next = if(startWithVoice&&filled.isEmpty())JSONArray() else JSONArray(draft)
             for (i in 0 until incoming.length()) {
                 val r = incoming.getJSONObject(i)
                 next.put(newCostRow(r.getString("category"), monthly)
                     .put("item", r.getString("item")).put("quantity", r.getString("quantity"))
                     .put("unit", r.getString("unit")).put("amount", r.getString("amount"))
-                    .put("note", "Voice draft reviewed by provider"))
+                    .put("note", "Voice draft; review before saving").put("voice_draft",true))
             }
             draft = next.toString(); quantityColumn = true; voice = false
         }
-    })
+    },directDraft=startWithVoice)
 
     // Only one native dialog at a time: the sheet must not cover the recorder.
     if (!(voice && repository != null)) Dialog(onDismissRequest = ::close, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
@@ -144,6 +144,7 @@ internal fun KitchenCostSheet(
                             enabled = !busy && filled.isNotEmpty() && !invalid,
                             modifier = Modifier.fillMaxWidth(),
                             onClick = {
+                                if(rows.any{it.optBoolean("voice_draft")&&it.optString("amount").isBlank()}){error="Some recorded items have no price. Enter their total cost or remove them before saving; BIKI will not silently skip them.";return@Button}
                                 if (filled.any { it.optString("item").isBlank() }) { error = "Add an item name for every filled row."; return@Button }
                                 if (filled.any { it.optString("quantity").isNotBlank() && it.optString("quantity").toBigDecimalOrNull()?.signum() != 1 }) { error = "Quantity must be a positive number, or left blank."; return@Button }
                                 val payload = pending?.let(::JSONArray) ?: JSONArray().apply {
@@ -204,8 +205,9 @@ internal fun KitchenCostSheet(
                 Surface(shape = RoundedCornerShape(12.dp), color = Color.White) {
                     Column(Modifier.horizontalScroll(rememberScrollState())) {
                         Row(Modifier.background(SheetGreen), verticalAlignment = Alignment.CenterVertically) {
-                            SheetHeader("Item / goods", 160.dp); SheetHeader("Amount ₹", 112.dp); SheetHeader("Category", 150.dp)
+                            SheetHeader("Item / goods", 160.dp); SheetHeader("Amount ₹", 112.dp)
                             if (quantityColumn) { SheetHeader("Quantity", 100.dp); SheetHeader("Unit", 90.dp) }
+                            SheetHeader("Category", 150.dp)
                             if (notesColumn) SheetHeader("Notes / unit", 180.dp)
                             SheetHeader("Paid", 60.dp); SheetHeader("", 48.dp)
                         }
@@ -214,16 +216,16 @@ internal fun KitchenCostSheet(
                             Row(Modifier.background(if (i % 2 == 0) Color.White else Color(0xFFF2F8F4)), verticalAlignment = Alignment.CenterVertically) {
                                 SheetInput(r.optString("item"), "Item", 160.dp, !locked) { if (it.length <= 100) update(id, "item", it) }
                                 SheetInput(r.optString("amount"), "0.00", 112.dp, !locked, true) { update(id, "amount", it) }
+                                if (quantityColumn) {
+                                    SheetInput(r.optString("quantity"), "Optional", 100.dp, !locked, true) { update(id, "quantity", it) }
+                                    SheetInput(r.optString("unit"), "kg, litre…", 90.dp, !locked) { if (it.length <= 20) update(id, "unit", it) }
+                                }
                                 var categoryOpen by remember { mutableStateOf(false) }
                                 Box(Modifier.width(150.dp)) {
                                     TextButton(onClick = { categoryOpen = true }, enabled = !locked) { Text(SheetCategories[r.getString("category")] ?: r.getString("category"), fontSize = 12.sp, maxLines = 2) }
                                     DropdownMenu(categoryOpen, { categoryOpen = false }, modifier = Modifier.heightIn(max = 320.dp)) {
                                         SheetCategories.forEach { (value, label) -> DropdownMenuItem(text = { Text(label, fontSize = 12.sp) }, onClick = { update(id, "category", value); categoryOpen = false }) }
                                     }
-                                }
-                                if (quantityColumn) {
-                                    SheetInput(r.optString("quantity"), "Optional", 100.dp, !locked, true) { update(id, "quantity", it) }
-                                    SheetInput(r.optString("unit"), "kg, litre…", 90.dp, !locked) { if (it.length <= 20) update(id, "unit", it) }
                                 }
                                 if (notesColumn) SheetInput(r.optString("note"), "kg, litre, notes…", 180.dp, !locked) { if (it.length <= 500) update(id, "note", it) }
                                 Box(Modifier.width(60.dp), contentAlignment = Alignment.Center) { Checkbox(r.optBoolean("paid"), { update(id, "paid", it) }, enabled = !locked) }

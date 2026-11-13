@@ -31,3 +31,8 @@
 /.v2p/
 /work/
 /biki-*.zip
+*.jks
+*.keystore
+*.p12
+*.aab
+signing.properties

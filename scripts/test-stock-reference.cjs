@@ -1,0 +1,57 @@
+const fs=require('node:fs'),assert=require('node:assert/strict'),{randomUUID}=require('node:crypto');
+const {PGlite}=require('@electric-sql/pglite');
+(async()=>{
+ const db=new PGlite(),a=randomUUID(),b=randomUUID();
+ await db.exec(`create role anon;create role authenticated;create schema auth;
+ create function auth.uid() returns uuid language sql as $$select '${a}'::uuid$$;
+ create table providers(id uuid primary key);insert into providers values('${a}'),('${b}');
+ create table audit_logs(actor_id uuid,action text,entity_type text,entity_id text,after_data jsonb);
+ create function kitchen_book_provider() returns uuid language plpgsql as $$begin
+ if current_setting('test.owner',true) is null or current_setting('test.owner',true) not in('${a}','${b}') then raise exception 'Owner required';end if;
+ return current_setting('test.owner')::uuid;end$$;
+ create table provider_kitchen_entries(id uuid default gen_random_uuid(),provider_id uuid,entry_date date,kind text default 'EXPENSE',category text default 'Grains',item text default 'Rice',quantity numeric default 1,unit text default 'kg',amount_paise bigint default 4000,voided_at timestamptz,source_template uuid,recurring boolean default false);`);
+ await db.exec(fs.readFileSync('supabase/migrations/202611100002_flexible_stock_cycles.sql','utf8'));
+ await db.exec(fs.readFileSync('supabase/migrations/202611120001_stock_carry_forward.sql','utf8'));
+ await db.exec(fs.readFileSync('supabase/migrations/202611120002_daily_stock_comparison.sql','utf8'));
+ const ref=async()=>(await db.query('select provider_stock_reference() result')).rows[0].result;
+ await db.exec(`set role authenticated;select set_config('test.owner','${a}',false)`);
+ assert.equal((await ref()).rows.length,0);
+ const id=randomUUID();
+ const compare=async()=>(await db.query('select provider_stock_cycle_compare($1::uuid) result',[id])).rows[0].result;
+ const save=async p=>db.query('select provider_stock_cycle_save($1::jsonb)',[JSON.stringify(p)]);
+ await save({id,request_id:randomUUID(),action:'OPEN',counted_at:'2026-01-01T09:00',rows:[{item:'Rice',quantity:5,unit:'kg',amount:200},{item:'Salt',quantity:1,unit:'kg'}]});
+ assert.equal((await ref()).kind,'OPEN');
+ await assert.rejects(compare);
+ await save({id,request_id:randomUUID(),action:'CLOSE',revision:1,counted_at:'2026-01-02T20:00',rows:[{item:'Rice',quantity:2,unit:'kg'}]});
+ await db.exec(`reset role;
+ insert into provider_kitchen_entries(provider_id,entry_date) values('${a}','2026-01-02'),('${a}','2026-01-03'),('${a}','2026-01-01'),('${b}','2026-01-03'),('${a}','2099-01-01');
+ insert into provider_kitchen_entries(provider_id,entry_date,voided_at) values('${a}','2026-01-03',now());
+ insert into provider_kitchen_entries(provider_id,entry_date,recurring) values('${a}','2026-01-03',true);
+ insert into provider_kitchen_entries(provider_id,entry_date,category) values('${a}','2026-01-03','Rent');
+ set role authenticated;`);
+ const result=await ref();assert.equal(result.kind,'CLOSE');assert.equal(result.rows.length,1);assert.equal(result.rows[0].quantity,2);
+ assert.equal(result.purchases.length,2);assert.equal(result.purchases[0].amount,40);
+ assert.equal((await ref()).purchases.length,2); // Reading never consumes or duplicates records.
+ const comparison=await compare();assert.equal(comparison.items[0].opening,5);assert.equal(comparison.items[0].closing,2);
+ assert.equal(comparison.items[0].purchase_review_count,2);assert.equal(comparison.items[0].known_purchases,0);
+ assert.deepEqual(comparison.unreported,['Salt']);
+ // A longer cycle: only interior-day compatible receipts are suggested.
+ const second=randomUUID();
+ await save({id:second,request_id:randomUUID(),action:'OPEN',counted_at:'2026-01-02T21:00',rows:[{item:'Rice',quantity:1000,unit:'g',amount:40}]});
+ await save({id:second,request_id:randomUUID(),action:'CLOSE',revision:1,counted_at:'2026-01-04T21:00',rows:[{item:'Rice',quantity:0.5,unit:'kg'},{item:'Oil',quantity:1,unit:'litre'}]});
+ const longer=(await db.query('select provider_stock_cycle_compare($1::uuid) result',[second])).rows[0].result;
+ assert.equal(longer.items[0].opening,1);assert.equal(longer.items[0].known_purchases,1);assert.equal(longer.items[0].purchase_review_count,1);
+ assert.equal(longer.items[1].opening,null);
+ await db.exec(`reset role;
+ insert into provider_kitchen_entries(provider_id,entry_date,unit) values('${a}','2026-01-03','litre');
+ insert into provider_kitchen_entries(provider_id,entry_date,quantity) values('${a}','2026-01-03',null);
+ set role authenticated;`);
+ const reviewed=(await db.query('select provider_stock_cycle_compare($1::uuid) result',[second])).rows[0].result;
+ assert.equal(reviewed.items[0].known_purchases,1);assert.equal(reviewed.items[0].purchase_review_count,3);
+ await db.exec(`select set_config('test.owner','${b}',false)`);assert.equal((await ref()).rows.length,0);assert.equal((await ref()).purchases.length,0);
+ await assert.rejects(compare);
+ await db.exec("select set_config('test.owner','customer',false)");await assert.rejects(ref);
+ await db.exec('reset role;set role anon');await assert.rejects(ref);
+ await assert.rejects(compare);
+ console.log('Stock reference: latest count, partial counts, date boundaries, voids, recurring costs, tenant isolation and anonymous denial passed.');await db.close();
+})().catch(e=>{console.error(e);process.exitCode=1});

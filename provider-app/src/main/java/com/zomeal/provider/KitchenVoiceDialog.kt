@@ -13,6 +13,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Mic
+import androidx.compose.material.icons.outlined.Stop
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -47,9 +51,24 @@ private fun Context.voiceActivity(): ComponentActivity? = when (this) {
 
 @Composable internal fun KitchenVoiceDialog(
     repository: SupabaseProviderRepository, mode: String, dateLabel: String,
-    onDismiss: () -> Unit, onApply: (JSONArray) -> Unit, quantityOnly: Boolean = false
+    onDismiss: () -> Unit, onApply: (JSONArray) -> Unit, quantityOnly: Boolean = false,
+    openingStockRows: String = "[]", directDraft: Boolean = false
 ) {
     val stock = mode != "PURCHASE"
+    val reuseOpeningPrices=mode=="CLOSING_STOCK"&&!quantityOnly
+    val openingPrices=remember(openingStockRows){
+        val saved=runCatching{JSONArray(openingStockRows)}.getOrDefault(JSONArray())
+        (0 until saved.length()).mapNotNull { i->runCatching{
+            val r=saved.getJSONObject(i)
+            OpeningStockPrice(r.getString("item"),r.getString("quantity").toBigDecimal(),r.getString("unit"),r.getString("amount").toBigDecimal())
+        }.getOrNull() }
+    }
+    fun applyOpeningPrice(row:JSONObject) {
+        if(!reuseOpeningPrices)return
+        val value=row.optString("quantity").toBigDecimalOrNull()?.let{closingStockValue(row.optString("item"),it,row.optString("unit"),openingPrices)}
+        if(value!=null){row.put("amount",value.toPlainString());row.put("opening_price_applied",true)}
+        else if(row.optBoolean("opening_price_applied")){row.put("amount","");row.put("opening_price_applied",false)}
+    }
     val context = LocalContext.current
     val activity = remember(context) { context.voiceActivity() }
     val privacyPrefs = remember(context) { context.getSharedPreferences("biki_privacy", Context.MODE_PRIVATE) }
@@ -64,6 +83,7 @@ private fun Context.voiceActivity(): ComponentActivity? = when (this) {
     val consentKey = "singapore_audio_india_text_v1_$account"
     var consent by remember(consentKey) { mutableStateOf(account.isNotBlank() && privacyPrefs.getBoolean(consentKey, false)) }
     var privacyOpen by remember { mutableStateOf(false) }
+    var showTranscript by remember { mutableStateOf(false) }
     fun acceptConsent(value: Boolean) {
         consent = value
         if (account.isNotBlank() && repository.voiceConfigured) privacyPrefs.edit().putBoolean(consentKey, value).apply()
@@ -90,7 +110,9 @@ private fun Context.voiceActivity(): ComponentActivity? = when (this) {
     }
     val total = (0 until rows.length()).sumOf { kitchenPaise(rows.getJSONObject(it).optString("amount")) ?: 0L }
     fun update(index: Int, field: String, value: String) {
-        val next = JSONArray(draft); next.getJSONObject(index).put(field, value); draft = next.toString(); checked = false
+        val next = JSONArray(draft); val changed=next.getJSONObject(index);changed.put(field, value)
+        if(field in listOf("item","quantity","unit"))applyOpeningPrice(changed)
+        draft = next.toString(); checked = false
     }
     fun close() { if (recording || busy || audio != null || rows.length() > 0) discard = true else onDismiss() }
     fun start() {
@@ -132,13 +154,13 @@ private fun Context.voiceActivity(): ComponentActivity? = when (this) {
             modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.union(WindowInsets.ime)).padding(bottom = 56.dp),
             containerColor = Color(0xFFF5F9F6),
             contentWindowInsets = WindowInsets(0, 0, 0, 0),
-            topBar = { Surface(color = Color(0xFF087D45), contentColor = Color.White) { Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) { Text("BIKI", fontSize = 22.sp, fontWeight = FontWeight.Bold); Text("Your kitchen voice assistant", fontSize = 12.sp); Text("${if (!stock) "Purchases" else if (mode == "OPENING_STOCK") "Opening stock" else "Remaining stock"} · $dateLabel", fontSize = 11.sp) }
-                TextButton(onClick = ::close) { Text("Close", color = Color.White) }
+            topBar = { Surface(color = Color.White, contentColor = Color(0xFF087D45)) { Row(Modifier.fillMaxWidth().padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) { Text("BIKI", fontSize = 26.sp, fontWeight = FontWeight.Bold); Text("${if (!stock) "Purchases" else if(mode=="RECIPE")"Recipe ingredients" else if (mode == "OPENING_STOCK") "Opening stock" else "Closing stock"} · $dateLabel", fontSize = 12.sp) }
+                TextButton(onClick = ::close) { Text("Close") }
             } } },
-            bottomBar = { Surface(shadowElevation = 4.dp, color = Color.White) { Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
+            bottomBar = { if(rows.length()>0)Surface(shadowElevation = 4.dp, color = Color.White) { Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text(if(mode=="RECIPE") "${rows.length()} recipe ingredients" else if(quantityOnly) "${rows.length()} stock quantities" else "${rows.length()} items · review total", fontSize = 12.sp)
+                    Text(if(mode=="RECIPE") "${rows.length()} recipe ingredients" else if(quantityOnly) "${rows.length()} stock quantities" else if(reuseOpeningPrices&&!valid)"${rows.length()} items · incomplete subtotal" else "${rows.length()} items · review total", fontSize = 12.sp)
                     if(!quantityOnly) Text("₹${BigDecimal(total).movePointLeft(2)}", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color(0xFF087D45))
                 }
                 Button(onClick = { onApply(JSONArray(draft)) }, enabled = valid && checked && total <= 100000000 && !busy && !recording, modifier = Modifier.fillMaxWidth()) {
@@ -148,10 +170,11 @@ private fun Context.voiceActivity(): ComponentActivity? = when (this) {
             } } }
         ) { padding -> Column(Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             if (!repository.voiceConfigured) Text("BIKI recording preview: AI is not connected. You can test the microphone, but cannot submit this recording. Nothing will be uploaded or saved.", color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
-            Text(if(mode=="RECIPE") "Say raw ingredients and quantities for ONE batch. Confirm how many people it feeds in the recipe sheet. This does not record purchases or remaining stock." else if(quantityOnly) "Say ingredient and remaining quantity. Prices are optional. Omitted items stay unchanged. Exclude gas and fuel." else if (stock) "Say each ingredient, remaining quantity and its purchase price. Missing prices must be supplied before using the total. Include ALL ingredients for this stock check." else "Say item, quantity and price. Say 'per kg' for a unit price, or 'total' for the full amount.", fontSize = 12.sp)
+            Text(if(mode=="RECIPE") "Say ingredients and raw quantities for one batch." else if(quantityOnly||reuseOpeningPrices) "Say each item and how much is left. No prices needed for matching opening items." else if(stock) "Say each item, quantity and its total purchase cost." else "Say what you bought, how much, and the total cost. Say ‘per kg’ for a unit price.",fontSize=15.sp,color=Color(0xFF63746A))
+            if(reuseOpeningPrices&&openingPrices.isEmpty())Text("No item-level opening prices available. Older reports saved only a total. Record opening items once and save the stock check to remember their prices.",fontSize=12.sp,color=Color(0xFF865C00))
             Surface(shape = RoundedCornerShape(22.dp), color = Color(0xFFE4F3E9)) {
                 Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(if (recording) "Listening to you…" else if (busy) "Preparing your draft…" else if (rows.length() > 0) "Ready for your review" else "Speak. Review. Save.", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color(0xFF075B35))
+                    Text(if (recording) "Listening to you…" else if (busy) "Preparing your sheet…" else if (rows.length() > 0) "Check your items" else "Ready when you are", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Color(0xFF075B35))
                     Text(if (language.isBlank()) "Choose your voice language once before recording." else "Voice language: ${VoiceLanguages[language]}", fontSize = 12.sp)
                     Text(if (recording) "${seconds}s / 60s · Stop to prepare your sheet" else "Record → automatic processing → review sheet", fontSize = 12.sp, color = Color(0xFF087D45))
                     if (recording) LinearProgressIndicator(progress = { seconds / 60f }, modifier = Modifier.fillMaxWidth(), color = Color(0xFF087D45))
@@ -166,11 +189,21 @@ private fun Context.voiceActivity(): ComponentActivity? = when (this) {
             } else TextButton(onClick = { privacyOpen = true }, enabled = !recording && !busy) { Text("Privacy & voice settings", fontSize = 12.sp) }
             error?.let { Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.errorContainer) { Text(it, modifier = Modifier.padding(14.dp), color = MaterialTheme.colorScheme.onErrorContainer, fontSize = 12.sp) } }
             if (rows.length() == 0) {
+                Column(Modifier.fillMaxWidth().padding(vertical=22.dp),horizontalAlignment=Alignment.CenterHorizontally){
+                 FilledIconButton(onClick={
+                    if(recording)recorder?.stop() else if(context.checkSelfPermission(Manifest.permission.RECORD_AUDIO)==PackageManager.PERMISSION_GRANTED)start() else permission.launch(Manifest.permission.RECORD_AUDIO)
+                 },enabled=consent&&!busy,modifier=Modifier.size(120.dp),shape=CircleShape,colors=IconButtonDefaults.filledIconButtonColors(containerColor=Color(0xFF087D45),contentColor=Color.White)){
+                    Icon(if(recording)Icons.Outlined.Stop else Icons.Outlined.Mic,if(recording)"Stop and prepare sheet" else "Start recording",Modifier.size(44.dp))
+                 }
+                 Spacer(Modifier.height(18.dp));Text("%02d:%02d".format(seconds/60,seconds%60),fontSize=32.sp,color=Color(0xFF183D2C))
+                 Text(if(busy)"Processing · nothing saved yet" else if(recording)"Tap stop when finished" else "Tap the microphone to begin",fontSize=13.sp)
+                }
                 Button(onClick = {
                     if (recording) recorder?.stop()
                     else if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) start()
                     else permission.launch(Manifest.permission.RECORD_AUDIO)
-                }, enabled = consent && !busy, modifier = Modifier.fillMaxWidth()) { Text(if (recording) "Stop recording · ${seconds}s / 60s" else if (audio != null) "Record again" else "Start recording") }
+                }, enabled = consent && !busy, modifier = Modifier.fillMaxWidth()) { Text(if (recording) "Stop & prepare sheet" else if (audio != null) "Record again" else "Start recording") }
+                TextButton(onClick={if(directDraft)onDismiss() else {draft=JSONArray().put(JSONObject().put("item","").put("category",categories.first()).put("quantity","").put("unit","kg").put("amount","")).toString()}},enabled=!busy&&!recording,modifier=Modifier.fillMaxWidth()){Text("Type instead")}
                 if (audio != null && !recording && !repository.voiceConfigured) Text("Microphone test captured ${audio!!.size / 32000.0} seconds. AI submission needs the deployed backend.",fontSize=12.sp)
                 // Run once for each completed recording, never on a recomposition
                 // or for a microphone-only preview. Saving still requires review.
@@ -184,6 +217,10 @@ private fun Context.voiceActivity(): ComponentActivity? = when (this) {
                         if (live.get() && serial == generation) {
                             busy = false; audio = null; error = problem
                             if (result != null) {
+                                if(language=="or-IN"&&result.optString("transcript").any{it in '\u0980'..'\u09ff'}){
+                                    error="Odia was selected, but recognition returned Bengali script. Nothing was saved. Record a shorter sentence or use Type instead."
+                                    return@voiceDraft
+                                }
                                 transcript = result.optString("transcript")
                                 val incoming = result.getJSONArray("items"); val next = JSONArray()
                                 for (i in 0 until incoming.length()) {
@@ -193,33 +230,41 @@ private fun Context.voiceActivity(): ComponentActivity? = when (this) {
                                         .put("amount", if (r.isNull("amount_paise")) "" else BigDecimal(r.getLong("amount_paise")).movePointLeft(2).toPlainString())
                                         .put("issues", r.optJSONArray("issues") ?: JSONArray()))
                                 }
+                                for(i in 0 until next.length())applyOpeningPrice(next.getJSONObject(i))
                                 draft = next.toString(); checked = false
                                 if (next.length() == 0) error = "No kitchen items found. Please record again."
+                                else if(directDraft)onApply(next)
                             }
                         }
                     }
                 }
             }
             if (busy) { LinearProgressIndicator(Modifier.fillMaxWidth()); Text("Understanding your recording… Nothing is saved yet.", fontSize = 12.sp) }
-            if (transcript.isNotBlank()) Text("Heard: $transcript", fontSize = 12.sp)
-            if (rows.length() > 0) Text(if(quantityOnly) "Review quantities · prices are not required for this inventory observation." else "Review sheet · swipe sideways for all columns. Enter full item costs, not unit prices.", fontSize = 12.sp)
+            if (transcript.isNotBlank()) { TextButton(onClick={showTranscript=!showTranscript}){Text("What BIKI heard ${if(showTranscript)"↑" else "↓"}")};if(showTranscript)Text(transcript,fontSize=13.sp) }
+            if (rows.length() > 0) Text(if(quantityOnly) "Review quantities · prices are not required for this inventory observation." else if(reuseOpeningPrices)"Opening-stock rates are reused automatically, including kg/g and litre/ml conversion. Match a different spoken spelling to a saved item below; only genuinely new items need a full remaining-stock cost." else "Review sheet · swipe sideways for all columns. Enter full item costs, not unit prices.", fontSize = 12.sp)
             Column(Modifier.horizontalScroll(rememberScrollState())) {
             if (rows.length() > 0) Row(Modifier.background(Color(0xFF087D45)).padding(8.dp)) {
-                listOf("Item" to 180, "Category" to 180, "Quantity" to 100, "Unit" to 140, "Total ₹" to 150, "Action" to 110).forEach { (label, width) -> Text(label, Modifier.width(width.dp), color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold) }
+                (listOf("Item" to 140, "Quantity" to 80, "Unit" to 100)+(if(quantityOnly)emptyList() else listOf("Total ₹" to 150))+listOf("Category" to 180,"Action" to 110)).forEach { (label, width) -> Text(label, Modifier.width(width.dp), color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold) }
             }
             for (i in 0 until rows.length()) {
                 val r = rows.getJSONObject(i)
                 Surface(color = if (i % 2 == 0) Color.White else Color(0xFFEAF5EE)) { Column(Modifier.width(876.dp).padding(8.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.width(180.dp).padding(end=6.dp)) { VoiceField("Item ${i+1}", r.optString("item"), false) { update(i, "item", it) } }
+                        Box(Modifier.width(140.dp).padding(end=6.dp)) { VoiceField("Item ${i+1}", r.optString("item"), false) { update(i, "item", it) } }
+                        Box(Modifier.width(80.dp).padding(end=6.dp)) { VoiceField("Qty", r.optString("quantity"), true) { update(i, "quantity", it) } }
+                        Box(Modifier.width(100.dp)) { VoiceChoice("", r.optString("unit"), VoiceUnits) { update(i, "unit", it) } }
+                        if(!quantityOnly)Box(Modifier.width(150.dp).padding(end=6.dp)) {
+                            if(r.optBoolean("opening_price_applied"))Text("₹${r.optString("amount")}\nOpening-stock rate",fontSize=12.sp,color=Color(0xFF087D45))
+                            else VoiceField(if(reuseOpeningPrices)"Missing price · total ₹" else "Total ₹", r.optString("amount"), true) { update(i, "amount", it) }
+                        }
                         Box(Modifier.width(180.dp)) { VoiceChoice("Category", r.optString("category"), categories) { update(i, "category", it) } }
-                        Box(Modifier.width(100.dp).padding(end=6.dp)) { VoiceField("Quantity", r.optString("quantity"), true) { update(i, "quantity", it) } }
-                        Box(Modifier.width(140.dp)) { VoiceChoice("Unit", r.optString("unit"), VoiceUnits) { update(i, "unit", it) } }
-                        Box(Modifier.width(150.dp).padding(end=6.dp)) { VoiceField("Total ₹", r.optString("amount"), true) { update(i, "amount", it) } }
                         TextButton(onClick = { val next = JSONArray(draft); next.remove(i); draft = next.toString(); checked = false }, modifier=Modifier.width(110.dp)) { Text("Remove") }
                     }
                     val issues = r.optJSONArray("issues")
-                    val visibleIssues = if(issues==null) emptyList() else (0 until issues.length()).map{issues.optString(it)}.filterNot{quantityOnly && it=="purchase-cost valuation"}
+                    if(reuseOpeningPrices&&!r.optBoolean("opening_price_applied")&&openingPrices.isNotEmpty()) {
+                        VoiceChoice("Match opening item", "", openingPrices.map{it.item}.distinct()) { update(i,"item",it) }
+                    }
+                    val visibleIssues = if(issues==null) emptyList() else (0 until issues.length()).map{issues.optString(it)}.filterNot{(quantityOnly||r.optBoolean("opening_price_applied")) && it=="purchase-cost valuation"}
                     if (visibleIssues.isNotEmpty()) Text("Please check: " + visibleIssues.joinToString(), fontSize = 11.sp, color = MaterialTheme.colorScheme.error)
                 } }
             }

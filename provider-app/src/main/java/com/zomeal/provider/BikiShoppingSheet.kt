@@ -19,7 +19,8 @@ import java.time.ZoneId
 /** Read-only plan: no inventory, expense, delivery or wallet mutations. */
 @Composable internal fun BikiShoppingSheet(repository:SupabaseProviderRepository,onClose:()->Unit) {
     val today=remember{LocalDate.now(ZoneId.of("Asia/Kolkata"))}
-    var date by remember{mutableStateOf(today.plusDays(1).toString())}
+    var date by remember{mutableStateOf(today.toString())}
+    var buying by remember{mutableStateOf(false)}
     var slot by remember{mutableStateOf("BOTH")}
     var book by remember{mutableStateOf<JSONObject?>(null)}
     var stock by remember{mutableStateOf<JSONObject?>(null)}
@@ -48,7 +49,11 @@ import java.time.ZoneId
     if(!inventory&&!recipesOpen) Dialog(onDismissRequest=onClose,properties=DialogProperties(usePlatformDefaultWidth=false,decorFitsSystemWindows=false)) {
         Surface(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.union(WindowInsets.ime)),color=Color(0xFFF5FAF6)) {
             Column(Modifier.verticalScroll(rememberScrollState()).padding(16.dp).padding(bottom=56.dp),verticalArrangement=Arrangement.spacedBy(10.dp)) {
-                Text("BIKI · Shopping planner",fontSize=21.sp,color=Color(0xFF087F43))
+                Text("BIKI · Kitchen plan",fontSize=21.sp,color=Color(0xFF087F43))
+                Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                    FilterChip(!buying,{buying=false},label={Text("1 · Prepare")})
+                    FilterChip(buying,{buying=true},label={Text("2 · What to buy")})
+                }
                 Text("Recipe needs → check available stock → buy the shortage",fontSize=12.sp)
                 Text("Main courses and every included menu side: rice, roti, dal and more. Missing recipes are listed below. Staff meals and waste need separate allowance.",fontSize=12.sp,color=Color(0xFF865C00))
                 Row{OutlinedButton({refresh()},enabled=!loading){Text("Refresh")};TextButton(onClose){Text("Close")}}
@@ -81,7 +86,9 @@ import java.time.ZoneId
                             val row=ingredients.getJSONObject(i)
                             val q=recipeScale(row.getString("quantity"),r.getInt("batch"),p.getInt("portions"))
                             require(q>BigDecimal.ZERO&&recipeFamily(row.getString("unit"))!="unknown")
-                            raw.add(ShoppingNeed(row.getString("item"),row.getString("unit"),q))
+                            val batchCost=runCatching{recipeBatchCost(row.getString("quantity"),row.getString("unit"),row.optString("entered_price"),row.optString("price_basis"),row.optString("pack_quantity"),row.optString("pack_unit"))}.getOrNull()
+                            val cost=batchCost?.let{recipeScale(it.toPlainString(),r.getInt("batch"),p.getInt("portions"))}
+                            raw.add(ShoppingNeed(row.getString("item"),row.getString("unit"),q,cost))
                         }.onFailure{invalid++}
                     }
                 }
@@ -100,8 +107,47 @@ import java.time.ZoneId
                 if(!loading&&plans.isEmpty())Text(if(preview)"Select a saved recipe and a valid portion count." else "No upcoming linked meals for this selection. Save and link recipes first; paused, cancelled and already delivered meals are excluded.",fontSize=12.sp)
                 if(invalid>0)Text("$invalid ingredient rows need recipe correction. Shopping totals below are incomplete.",color=MaterialTheme.colorScheme.error)
                 val needs=shoppingAggregate(raw)
+                fun money(value:BigDecimal)="₹"+value.setScale(2,java.math.RoundingMode.HALF_UP).toPlainString()
+                val missingPrices=needs.count{it.estimatedCost==null}
+                val knownCost=needs.fold(BigDecimal.ZERO){sum,n->sum+(n.estimatedCost?:BigDecimal.ZERO)}
+                Surface(color=Color(0xFFE3F3E9),shape=MaterialTheme.shapes.medium) {
+                    Column(Modifier.fillMaxWidth().padding(14.dp)) {
+                        Text(if(preview)"Practice ingredient estimate" else "Selected meals · ingredient estimate",color=Color(0xFF087F43))
+                        Text(money(knownCost),fontSize=24.sp)
+                        Text("${needs.size} ingredients · $missingPrices missing prices"+(if(missingPrices>0||invalid>0||missingDishes.isNotEmpty())" · PARTIAL TOTAL" else ""),fontSize=12.sp)
+                        Text("Recipe prices only. Excludes gas, wages, rent and waste. No costs or stock are posted.",fontSize=11.sp)
+                    }
+                }
+                if(!buying) {
+                    Row(Modifier.fillMaxWidth().background(Color(0xFF087F43)).padding(10.dp)) {
+                        Text("Ingredient",Modifier.weight(1f),color=Color.White,fontSize=12.sp)
+                        Text("Required",Modifier.weight(1f),color=Color.White,fontSize=12.sp)
+                        Text("Est. cost",Modifier.weight(0.7f),color=Color.White,fontSize=12.sp)
+                    }
+                    needs.forEachIndexed { index,n ->
+                        Row(Modifier.fillMaxWidth().background(if(index%2==0)Color.White else Color(0xFFEAF5EE)).padding(10.dp)) {
+                            Text(n.item,Modifier.weight(1f),fontSize=13.sp)
+                            Text(recipeQuantity(n.quantity,n.unit),Modifier.weight(1f),fontSize=13.sp)
+                            Text(n.estimatedCost?.let{money(it)}?:"Add price",Modifier.weight(0.7f),fontSize=12.sp)
+                        }
+                    }
+                    Button({buying=true},enabled=!loading&&needs.isNotEmpty(),modifier=Modifier.fillMaxWidth()){Text("Check stock & see what to buy")}
+                }
                 val snapshots=stock?.optJSONArray("items")?:JSONArray()
                 val stocks=(0 until snapshots.length()).map{snapshots.getJSONObject(it)}
+                if(buying) {
+                key(date,slot,preview,previewRecipe,generation) {
+                    BikiStockReference(repository){draft->
+                        amounts.clear();confirmed.clear()
+                        for(i in 0 until draft.length()){
+                            val r=draft.getJSONObject(i)
+                            needs.filter{shoppingKey(it.item)==shoppingKey(r.optString("item"))&&recipeFamily(it.unit)==recipeFamily(r.optString("unit"))}.forEach{n->
+                                val q=r.optString("quantity").toBigDecimalOrNull()
+                                if(q!=null)amounts[shoppingKey(n.item)+"|"+n.unit]=(q*recipeBase(r.optString("unit"))).stripTrailingZeros().toPlainString()
+                            }
+                        }
+                    }
+                }
                 Text("Check what is available for this meal. Old stock reports are reference only—not today's stock. Reserve enough for earlier meals before confirming. Selecting BOTH combines lunch + dinner so stock is subtracted only once.",fontSize=12.sp)
                 needs.forEach{need->
                     val key=shoppingKey(need.item)+"|"+need.unit
@@ -129,7 +175,19 @@ import java.time.ZoneId
                 Text(if(missingDishes.isNotEmpty()||invalid>0)"Partial shopping list · missing recipes remain" else "Shopping list · reviewed shortages",fontSize=17.sp)
                 val unknown=needs.count{confirmed[shoppingKey(it.item)+"|"+it.unit]!=true}
                 Text("$unknown ingredients still need a stock check. Prices and packet sizes vary; no purchase or expense is saved here.",fontSize=12.sp)
-                needs.forEach{n->val k=shoppingKey(n.item)+"|"+n.unit;val gap=shoppingShortfall(n.quantity,if(confirmed[k]==true)amounts[k]?.toBigDecimalOrNull() else null,n.unit);if(gap!=null&&gap>BigDecimal.ZERO)Text("• ${n.item}: ${recipeQuantity(gap,n.unit)}",fontSize=14.sp)}
+                var purchaseTotal=BigDecimal.ZERO;var unpriced=0
+                needs.forEach{n->
+                    val k=shoppingKey(n.item)+"|"+n.unit
+                    val gap=shoppingShortfall(n.quantity,if(confirmed[k]==true)amounts[k]?.toBigDecimalOrNull() else null,n.unit)
+                    val estimate=shoppingPurchaseEstimate(n,gap)
+                    if(gap!=null&&gap>BigDecimal.ZERO){
+                        if(estimate==null)unpriced++ else purchaseTotal+=estimate
+                        Text("• ${n.item}: ${recipeQuantity(gap,n.unit)} · ${estimate?.let{money(it)}?:"price needed"}",fontSize=14.sp)
+                    }
+                }
+                Text("${if(unknown>0||unpriced>0||invalid>0||missingDishes.isNotEmpty())"Known purchase subtotal" else "Estimated purchases"}: ${money(purchaseTotal)}",color=Color(0xFF087F43))
+                Text("$unpriced shortages need prices. Uses blended saved recipe prices; actual supplier prices and whole packets may cost more. Confirm a purchase separately in Add expenses.",fontSize=11.sp)
+                }
                 OutlinedButton({inventory=true},enabled=!loading,modifier=Modifier.fillMaxWidth()){Text("Record a physical stock check")}
                 OutlinedButton({recipesOpen=true},enabled=!loading,modifier=Modifier.fillMaxWidth()){Text("Manage recipes")}
                 Text("Plan confirmations are temporary and clear on refresh, date/meal changes or closing. Saved stock reports and accounts remain unchanged.",fontSize=11.sp)

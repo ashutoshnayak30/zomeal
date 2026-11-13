@@ -483,6 +483,16 @@ class SupabaseProviderRepository(context: Context) {
 
     fun kitchenBook(month: String, callback: (JSONObject?, String?) -> Unit) = kitchenRpc("provider_kitchen_statement", JSONObject().put("target_month",month), callback)
     fun inventoryReview(days:Int,callback:(JSONObject?,String?)->Unit)=kitchenRpc("provider_inventory_review",JSONObject().put("review_days",days),callback)
+    fun stockCycles(callback:(JSONObject?,String?)->Unit)=kitchenRpc("provider_stock_cycles_book",JSONObject(),callback)
+    fun stockReference(callback:(JSONObject?,String?)->Unit)=kitchenRpc("provider_stock_reference",JSONObject(),callback)
+    fun compareStockCycle(id:String,callback:(JSONObject?,String?)->Unit)=kitchenRpc("provider_stock_cycle_compare",JSONObject().put("cycle_id",id),callback)
+    fun saveStockCycle(payload:JSONObject,callback:(JSONObject?,String?,Boolean)->Unit)=requestAsync("/rest/v1/rpc/provider_stock_cycle_save",JSONObject().put("payload",payload),true){code,json->
+        // P0001 is an explicit PostgreSQL exception: this transaction rolled back.
+        // Timeouts and unknown outcomes must retain the identical retry payload.
+        val rejected=code==400&&json?.optString("code")=="P0001"
+        if(code in 200..299)callback(json,null,false) else callback(null,errorMessage(json,"Stock count could not be saved"),rejected)
+    }
+    fun reconcileInventory(payload:JSONObject,callback:(JSONObject?,String?)->Unit)=kitchenRpc("provider_inventory_reconcile",JSONObject().put("payload",payload),callback)
     fun recipeBook(callback:(JSONObject?,String?)->Unit)=kitchenRpc("provider_recipe_book",JSONObject(),callback)
     fun saveRecipe(payload:JSONObject,callback:(JSONObject?,String?)->Unit)=kitchenRpc("provider_recipe_save",JSONObject().put("payload",payload),callback)
     fun saveInventory(payload:JSONObject,callback:(JSONObject?,String?)->Unit)=kitchenRpc("provider_inventory_save",JSONObject().put("payload",payload),callback)

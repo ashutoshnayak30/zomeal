@@ -94,6 +94,7 @@ private val ReviewChecks=linkedMapOf("ingredients" to "Ingredient purchases comp
  val s=book.getJSONObject("statement");val review=s.optJSONObject("review")
  var opening by rememberSaveable { mutableStateOf(review?.optLong("opening_stock_paise")?.let(::moneyInput).orEmpty()) }
  var closing by rememberSaveable { mutableStateOf(review?.optLong("closing_stock_paise")?.let(::moneyInput).orEmpty()) }
+ var openingRows by rememberSaveable { mutableStateOf(review?.optJSONArray("opening_rows")?.toString()?:"[]") }
  var checks by rememberSaveable { mutableStateOf(review?.optJSONObject("checks")?.toString()?:"{}") }
  var step by rememberSaveable { mutableIntStateOf(initialVoiceStep?:0) };var showChecks by rememberSaveable { mutableStateOf(false) }
  var busy by remember { mutableStateOf(false) };var error by remember{mutableStateOf<String?>(null)};var discard by remember{mutableStateOf(false)}
@@ -101,9 +102,9 @@ private val ReviewChecks=linkedMapOf("ingredients" to "Ingredient purchases comp
  voiceStep?.let { selected ->
   if(repository!=null)KitchenVoiceDialog(repository,if(selected==0)"OPENING_STOCK" else "CLOSING_STOCK",monthName(book),onDismiss={voiceStep=null},onApply={rows->
    val total=(0 until rows.length()).sumOf{kitchenPaise(rows.getJSONObject(it).optString("amount"))?:0L}
-   if(selected==0)opening=moneyInput(total) else closing=moneyInput(total)
+   if(selected==0){opening=moneyInput(total);openingRows=rows.toString()} else closing=moneyInput(total)
    voiceStep=null;error=null
-  })
+  },openingStockRows=openingRows)
  }
  val checked=JSONObject(checks);val op=kitchenPaise(opening);val cl=kitchenPaise(closing)
  val valid=op!=null&&cl!=null&&cl<=op+s.optLong("food_purchases_paise")
@@ -111,7 +112,7 @@ private val ReviewChecks=linkedMapOf("ingredients" to "Ingredient purchases comp
  fun save(finalize:Boolean){
   if(!valid){error="Enter both values (0 is allowed). Remaining stock cannot exceed opening stock plus purchases.";return}
   busy=true;error=null
-  onSave(JSONObject().put("month",book.getString("month")).put("opening_stock_paise",op).put("closing_stock_paise",cl).put("checks",checked).put("revision",review?.optInt("revision")?:0).put("source_signature",s.getString("source_signature")).put("close",finalize)){problem->busy=false;error=problem}
+  onSave(JSONObject().put("month",book.getString("month")).put("opening_stock_paise",op).put("closing_stock_paise",cl).put("opening_rows",org.json.JSONArray(openingRows)).put("checks",checked).put("revision",review?.optInt("revision")?:0).put("source_signature",s.getString("source_signature")).put("close",finalize)){problem->busy=false;error=problem}
  }
  // Do not open a second native window over the voice recorder.
  if(voiceStep==null || repository==null)Dialog(onDismissRequest=::close,properties=DialogProperties(usePlatformDefaultWidth=false,decorFitsSystemWindows=false)){
@@ -126,13 +127,14 @@ private val ReviewChecks=linkedMapOf("ingredients" to "Ingredient purchases comp
     ReviewCard(if(start)"What did you already have?" else if(s.optBoolean("can_close"))"What was left on the last day?" else "What is left right now?"){
      Text(if(start)"Count ingredients you already owned on the 1st. Do not include purchases made later this month." else "Count unused ingredients—not food already cooked or sold.",fontSize=12.sp)
      Text("Include rice, atta, dal, vegetables, oil, spices, meat and dairy. Leave out rent, gas and equipment.",fontSize=11.sp,color=Color.Gray)
-     OutlinedTextField(if(start)opening else closing,{if(start)opening=it else closing=it},enabled=!busy,label={Text(if(start)"Total starting stock value ₹" else "Total remaining stock value ₹",fontSize=12.sp)},singleLine=true,modifier=Modifier.fillMaxWidth(),shape=RoundedCornerShape(12.dp),keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Decimal))
+     OutlinedTextField(if(start)opening else closing,{if(start){opening=it;openingRows="[]"} else closing=it},enabled=!busy,label={Text(if(start)"Total starting stock value ₹" else "Total remaining stock value ₹",fontSize=12.sp)},singleLine=true,modifier=Modifier.fillMaxWidth(),shape=RoundedCornerShape(12.dp),keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Decimal))
+     Text("${org.json.JSONArray(openingRows).length()} opening items with reusable prices. Save the stock check to keep them across devices. Editing the opening total manually clears item-price details.",fontSize=11.sp,color=ReviewGreen)
      Text("Use the price you paid, not your meal selling price.",fontSize=11.sp,color=ReviewGreen)
      if(repository?.voiceConfigured==true)OutlinedButton(onClick={voiceStep=step},enabled=!busy,modifier=Modifier.fillMaxWidth()){Icon(Icons.Outlined.Mic,null,Modifier.size(18.dp));Spacer(Modifier.width(8.dp));Text(if(start)"Speak opening stock" else "Speak remaining stock",fontSize=12.sp)}
-     OutlinedButton(enabled=!busy,onClick={if(start)opening="0" else closing="0"},modifier=Modifier.fillMaxWidth(),shape=RoundedCornerShape(10.dp)){Text(if(start)"No starting stock · use ₹0" else "No stock remaining · use ₹0",fontSize=12.sp)}
-     if(start&&!s.isNull("suggested_opening_paise"))OutlinedButton(onClick={opening=moneyInput(s.optLong("suggested_opening_paise"))},enabled=!busy){Text("Use last month: ${reviewMoney(s.optLong("suggested_opening_paise"))}",fontSize=11.sp)}
+     OutlinedButton(enabled=!busy,onClick={if(start){opening="0";openingRows="[]"} else closing="0"},modifier=Modifier.fillMaxWidth(),shape=RoundedCornerShape(10.dp)){Text(if(start)"No starting stock · use ₹0" else "No stock remaining · use ₹0",fontSize=12.sp)}
+     if(start&&!s.isNull("suggested_opening_paise"))OutlinedButton(onClick={opening=moneyInput(s.optLong("suggested_opening_paise"));openingRows="[]"},enabled=!busy){Text("Use last month: ${reviewMoney(s.optLong("suggested_opening_paise"))}",fontSize=11.sp)}
     }
-    key(step){StockValueHelper(enabled=!busy,onAdd={amount->val current=kitchenPaise(if(start)opening else closing)?:0;if(current+amount<=100000000){if(start)opening=moneyInput(current+amount) else closing=moneyInput(current+amount);error=null;true}else{error="Stock total is too large.";false}})}
+    key(step){StockValueHelper(enabled=!busy,onAdd={amount->val current=kitchenPaise(if(start)opening else closing)?:0;if(current+amount<=100000000){if(start){opening=moneyInput(current+amount);openingRows="[]"} else closing=moneyInput(current+amount);error=null;true}else{error="Stock total is too large.";false}})}
     Surface(color=ReviewTint,shape=RoundedCornerShape(12.dp)){Text("Example: 5 kg rice at ₹50/kg = ₹250 of stock. Add each ingredient's value to find your total.",Modifier.padding(12.dp),fontSize=12.sp,color=ReviewGreen)}
    }else{
     ReviewCard("Your ingredient cost"){

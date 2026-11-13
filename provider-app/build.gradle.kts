@@ -22,13 +22,25 @@ val supabaseUrl = localProperties.getProperty("SUPABASE_URL")?.takeIf { it.isNot
 val supabaseAnonKey = localProperties.getProperty("SUPABASE_ANON_KEY")?.takeIf { it.isNotBlank() }
     ?: adminConfigValue("supabaseAnonKey")
 
+val uploadProperties = Properties().apply {
+    val path = System.getenv("ZOMEAL_SIGNING_PROPERTIES")
+    if (!path.isNullOrBlank()) file(path).inputStream().use(::load)
+}
 android {
+    signingConfigs {
+        if (uploadProperties.isNotEmpty()) create("upload") {
+            storeFile = file(uploadProperties.getProperty("provider.storeFile"))
+            storePassword = uploadProperties.getProperty("provider.storePassword")
+            keyAlias = uploadProperties.getProperty("provider.keyAlias")
+            keyPassword = uploadProperties.getProperty("provider.keyPassword")
+        }
+    }
     namespace = "com.zomeal.provider"
-    compileSdk = 35
+    compileSdk = 36
     defaultConfig {
         applicationId = "com.zomeal.provider"
         minSdk = 24
-        targetSdk = 35
+        targetSdk = 36
         versionCode = 1
         versionName = "0.1.0"
         buildConfigField("String", "SUPABASE_URL", "\"$supabaseUrl\"")
@@ -39,7 +51,10 @@ android {
     }
     buildTypes {
         debug { buildConfigField("boolean", "DEVELOPMENT_AUTH", "true") }
-        release { buildConfigField("boolean", "DEVELOPMENT_AUTH", "false") }
+        release {
+            buildConfigField("boolean", "DEVELOPMENT_AUTH", "false")
+            if (uploadProperties.isNotEmpty()) signingConfig = signingConfigs.getByName("upload")
+        }
     }
     buildFeatures { compose = true; buildConfig = true }
     compileOptions {

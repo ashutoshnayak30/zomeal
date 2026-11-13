@@ -26,7 +26,7 @@ import java.math.RoundingMode
 }
 
 /** Account-scoped device recipe notebook. Never writes purchases or stock. */
-@Composable internal fun BikiRecipeSheet(repository: SupabaseProviderRepository, onClose: () -> Unit) {
+@Composable internal fun BikiRecipeSheet(repository: SupabaseProviderRepository, onClose: () -> Unit, startWithVoice:Boolean=false) {
     val context=LocalContext.current
     val account=context.getSharedPreferences("zomeal_provider_session",Context.MODE_PRIVATE).getString("user_id","").orEmpty()
     val prefs=remember { context.getSharedPreferences("biki_recipes",Context.MODE_PRIVATE) }
@@ -42,7 +42,8 @@ import java.math.RoundingMode
     var revision by remember { mutableStateOf(0) }
     var menuId by remember { mutableStateOf("") }
     var menuSearch by remember { mutableStateOf("") }
-    var choosingMenu by remember { mutableStateOf(false) }
+    var choosingMenu by remember { mutableStateOf(startWithVoice) }
+    var voiceLaunchPending by remember { mutableStateOf(startWithVoice) }
     var cloud by remember { mutableStateOf<JSONObject?>(null) }
     var busy by remember { mutableStateOf(false) }
     val alive=remember { java.util.concurrent.atomic.AtomicBoolean(true) }
@@ -69,7 +70,7 @@ import java.math.RoundingMode
         val next=JSONArray(draft)
         for(i in 0 until a.length()) if(next.length()<30) { val r=a.getJSONObject(i);val u=r.optString("unit");next.put(JSONObject().put("item",r.optString("item")).put("quantity",r.optString("quantity")).put("unit",u).put("price","").put("entered_price","").put("price_basis",when(u){"g","kg"->"kg";"ml","litre"->"litre";else->"piece"})) }
         draft=next.toString();voice=false
-    },quantityOnly=true)
+    },quantityOnly=true,directDraft=startWithVoice)
     if(!voice) Dialog(onDismissRequest=onClose,properties=DialogProperties(usePlatformDefaultWidth=false,decorFitsSystemWindows=false)) {
         Surface(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.union(WindowInsets.ime)),color=Color(0xFFF5FAF6)) {
             Column(Modifier.verticalScroll(rememberScrollState()).padding(16.dp).padding(bottom=56.dp),verticalArrangement=Arrangement.spacedBy(10.dp)) {
@@ -92,6 +93,7 @@ import java.math.RoundingMode
                             val existing=(0 until recipes.length()).map{recipes.getJSONObject(it)}.find{it.optString("menu_item_id")==m.getString("id")}
                             if(existing!=null) load(existing) else {menuId=m.getString("id");name=m.getString("name")}
                             choosingMenu=false;menuSearch=""
+                            if(voiceLaunchPending){voiceLaunchPending=false;voice=true}
                         },modifier=Modifier.fillMaxWidth()){Text(m.getString("name"))} }
                     }
                 }

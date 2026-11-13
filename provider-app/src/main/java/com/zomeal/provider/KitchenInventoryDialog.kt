@@ -37,6 +37,7 @@ import java.util.UUID
  var voice by remember { mutableStateOf(false) }
  var expenses by remember { mutableStateOf(false) }
  var discard by remember { mutableStateOf(false) }
+ var comparison by remember { mutableStateOf<String?>(null) }
  val live=remember { java.util.concurrent.atomic.AtomicBoolean(true) }
  var serial by remember { mutableIntStateOf(0) }
  DisposableEffect(Unit) { live.set(true); onDispose { live.set(false) } }
@@ -52,7 +53,8 @@ import java.util.UUID
   };draft=a.toString();voice=false
  },quantityOnly=true)
  if(expenses) KitchenCostSheet(date,repository=repository,onDismiss={expenses=false},onSave={rows,done->repository.saveKitchenSheet(rows){_,problem->if(live.get()){done(problem);if(problem==null){expenses=false;load();onSaved()}}}})
- if(!voice&&!expenses) Dialog(onDismissRequest=::close,properties=DialogProperties(usePlatformDefaultWidth=false,decorFitsSystemWindows=false)) {
+ comparison?.let { BikiStockReconciliation(repository,it){comparison=null} }
+ if(!voice&&!expenses&&comparison==null) Dialog(onDismissRequest=::close,properties=DialogProperties(usePlatformDefaultWidth=false,decorFitsSystemWindows=false)) {
   Scaffold(modifier=Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.union(WindowInsets.ime)).padding(bottom=56.dp),containerColor=Color(0xFFF5F9F6),contentWindowInsets=WindowInsets(0,0,0,0),
    topBar={Row(Modifier.fillMaxWidth().padding(16.dp)){Text("BIKI · Inventory review",Modifier.weight(1f),fontSize=18.sp);TextButton(onClick=::close,enabled=!busy){Text("Close")}}},
    bottomBar={Surface { Button(modifier=Modifier.fillMaxWidth().padding(12.dp),enabled=!busy&&JSONArray(draft).length()>0,onClick={
@@ -66,6 +68,11 @@ import java.util.UUID
    Text(if(report?.isNull("last_report")!=false)"No confirmed inventory report yet. Add your remaining ingredients below." else "Last report: ${report!!.optString("last_report")} · ${report!!.optInt("days_since")} days ago",fontSize=14.sp)
    Text("Each ingredient has its own last-check date. Missing items are not zero. Gas/fuel needs purchase entries only, not daily stock counts.",fontSize=12.sp)
    val days=report?.optJSONArray("days")?:JSONArray()
+   val unreported=(0 until days.length()).count{!days.getJSONObject(it).optBoolean("reported")}
+   Surface(color=Color(0xFFE2F1E7),shape=MaterialTheme.shapes.medium){Column(Modifier.fillMaxWidth().padding(12.dp)){
+    Text("$unreported days without a stock report",color=Color(0xFF087F43),fontSize=17.sp)
+    Text("In this $period-day window. A report can cover only some ingredients; each item's date below still matters. Missing reports are not zero stock.",fontSize=12.sp)
+   }}
    Column(Modifier.horizontalScroll(rememberScrollState())) {
     Row(Modifier.background(Color(0xFFE2F1E7)).padding(8.dp)){Text("Date",Modifier.width(120.dp));Text("Delivered",Modifier.width(90.dp));Text("Stock report",Modifier.width(120.dp))}
     for(i in 0 until days.length()){val d=days.getJSONObject(i);Row(Modifier.padding(8.dp)){Text(d.optString("date"),Modifier.width(120.dp),fontSize=12.sp);Text(d.optString("delivered"),Modifier.width(90.dp));Text(if(d.optBoolean("reported"))"Recorded" else "Not reported",Modifier.width(120.dp),fontSize=12.sp)}}
@@ -90,6 +97,7 @@ import java.util.UUID
     for(i in 0 until rows.length()){val r=rows.getJSONObject(i);Row{listOf("item","quantity","unit","per_meal").forEach{f->OutlinedTextField(r.optString(f),{edit(i,f,it)},modifier=Modifier.width(160.dp).padding(4.dp),singleLine=true,enabled=pending==null&&!busy,keyboardOptions=KeyboardOptions(keyboardType=if(f in listOf("quantity","per_meal"))KeyboardType.Decimal else KeyboardType.Text))};TextButton(enabled=pending==null&&!busy,onClick={val a=JSONArray(draft);a.remove(i);draft=a.toString()}){Text("Remove")}}}
    }
    TextButton(enabled=pending==null&&!busy,onClick={val a=JSONArray(draft);a.put(JSONObject().put("item","").put("quantity","").put("unit","kg").put("per_meal",""));draft=a.toString()}){Text("+ Add ingredient row")}
+   OutlinedButton(enabled=pending==null&&!busy&&rows.length()>0,onClick={comparison=JSONObject().put("date",date).put("slot",slot).put("rows",JSONArray(draft)).toString()},modifier=Modifier.fillMaxWidth()){Text("Compare with earlier stock · review only")}
    if(pending!=null) TextButton(enabled=!busy,onClick={pending=null;key=UUID.randomUUID().toString();load();error="Check existing reports before resubmitting; the previous request may have succeeded."}){Text("Unlock editing · check saved report first")}
    OutlinedButton(onClick={expenses=true},enabled=!busy&&pending==null){Text("Add missed purchases · voice or manual")}
    Text("Choose the original purchase date above. Add purchases for one date at a time. Check existing Entries first to avoid duplicates. Stock reports do not change the financial statement.",fontSize=12.sp)

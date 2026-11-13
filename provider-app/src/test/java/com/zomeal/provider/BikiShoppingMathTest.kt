@@ -3,6 +3,11 @@ import org.junit.Assert.*
 import org.junit.Test
 import java.math.BigDecimal
 class BikiShoppingMathTest {
+ @Test fun costCombinesWithUnitConversion(){val n=shoppingAggregate(listOf(ShoppingNeed("Rice","kg",BigDecimal.ONE,BigDecimal("40")),ShoppingNeed("rice","g",BigDecimal("500"),BigDecimal("20")))).single();assertEquals(0,shoppingPurchaseEstimate(n,BigDecimal("750"))!!.compareTo(BigDecimal("30")))}
+ @Test fun missingPriceDoesNotBecomeZero(){val n=shoppingAggregate(listOf(ShoppingNeed("Rice","kg",BigDecimal.ONE,BigDecimal("40")),ShoppingNeed("rice","g",BigDecimal("500")))).single();assertNull(n.estimatedCost);assertNull(shoppingPurchaseEstimate(n,BigDecimal.ONE))}
+ @Test fun unknownStockHasNoPurchaseEstimate(){assertNull(shoppingPurchaseEstimate(ShoppingNeed("Rice","g",BigDecimal.TEN,BigDecimal.ONE),null))}
+ @Test fun sufficientStockCostsNothingToBuy(){assertEquals(BigDecimal.ZERO,shoppingPurchaseEstimate(ShoppingNeed("Rice","g",BigDecimal.TEN),BigDecimal.ZERO))}
+ @Test fun wholeEggPurchaseIsPricedAfterRounding(){val n=ShoppingNeed("Egg","piece",BigDecimal("5.5"),BigDecimal("27.5"));assertEquals(0,shoppingPurchaseEstimate(n,shoppingShortfall(n.quantity,BigDecimal("3"),"piece"))!!.compareTo(BigDecimal("15")))}
  @Test fun combinesAcrossRecipesAndUnits(){val r=shoppingAggregate(listOf(ShoppingNeed(" Onion ","kg",BigDecimal("1")),ShoppingNeed("onion","g",BigDecimal("250"))));assertEquals(1,r.size);assertEquals(0,r[0].quantity.compareTo(BigDecimal("1250")))}
  @Test fun noDensityGuess(){assertEquals(2,shoppingAggregate(listOf(ShoppingNeed("Oil","g",BigDecimal.ONE),ShoppingNeed("Oil","ml",BigDecimal.ONE))).size)}
  @Test fun unknownNotZero(){assertNull(shoppingShortfall(BigDecimal.TEN,null,"g"))}
